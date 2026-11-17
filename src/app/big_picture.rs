@@ -1788,6 +1788,9 @@ impl Waku {
                     cx.entity().downgrade(),
                 )
             }
+            TranscriptRowKind::CounselRecommendation(id) => {
+                self.render_counsel_recommendation_row(session_id, id, &theme, window, cx)
+            }
             // Folded out of `card_kinds` entirely; the fallback renders nothing.
             TranscriptRowKind::ResponseFooter(..) | TranscriptRowKind::ChangedFiles(_) => {
                 div().into_any_element()

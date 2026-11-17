@@ -617,7 +617,9 @@ enum BossDeliverablesFilter {
 
 pub(super) struct BossUi {
     pub states: HashMap<DaemonKey, BossState>,
-    pub(super) counsel_visible: HashMap<DaemonKey, Vec<waku_protocol::counsel::CounselRecommendation>>,
+    /// Recommendation ids whose "Message to Boss" disclosure is expanded —
+    /// view state only, the cards live inline in transcript rows.
+    pub(super) counsel_message_expanded: HashSet<Uuid>,
     pin_rows: HashMap<(DaemonKey, Uuid), waku_protocol::instruction_pins::InstructionPin>,
     pin_scope_labels: HashMap<(DaemonKey, Uuid), String>,
     pin_history: HashSet<DaemonKey>,
@@ -857,7 +859,7 @@ impl Default for BossUi {
     fn default() -> Self {
         Self {
             states: HashMap::new(),
-            counsel_visible: HashMap::new(),
+            counsel_message_expanded: HashSet::new(),
             pin_rows: HashMap::new(),
             pin_scope_labels: HashMap::new(),
             pin_history: HashSet::new(),
@@ -1844,7 +1846,6 @@ impl Waku {
             }
             self.sidebar_intents.observe_boss(key, &mut state);
             self.boss_ui.states.insert(key, state);
-            self.refresh_counsel_recommendations(key);
             if let Some((from, to)) = rotated_session {
                 self.migrate_boss_annotations(key, from, to, cx);
                 self.migrate_voice_scratchpad(from, to);
@@ -2780,7 +2781,6 @@ impl Waku {
                                 {
                                     boss.counsel = state;
                                 }
-                                this.refresh_counsel_recommendations(key);
                                 if reply == BossReply::CounselDecision {
                                     if let Some(id) = session_id {
                                         this.ensure_session_loaded(id, cx);
@@ -4441,6 +4441,11 @@ impl Waku {
             if state.session_id == Some(session_id) {
                 return Some((*key, state.identity.clone(), tr!("boss.group")));
             }
+            if state.counsel.session_id == Some(session_id)
+                && let Some(identity) = &state.counsel.identity
+            {
+                return Some((*key, identity.clone(), tr!("counsel.title")));
+            }
             state
                 .employees
                 .iter()
@@ -4551,7 +4556,16 @@ impl Waku {
         if identity.name == name {
             return;
         }
-        let operation = if self.managed_session_is_boss(key, session_id) {
+        let is_counsel = self
+            .boss_ui
+            .states
+            .get(&key)
+            .is_some_and(|state| state.counsel.session_id == Some(session_id));
+        let operation = if is_counsel {
+            BossOperation::Counsel {
+                action: waku_protocol::counsel::CounselOperation::Rename { name },
+            }
+        } else if self.managed_session_is_boss(key, session_id) {
             BossOperation::Rename { name }
         } else {
             BossOperation::RenameEmployee { session_id, name }
@@ -4566,15 +4580,22 @@ impl Waku {
         let Some((key, ..)) = self.managed_session_meta(session_id) else {
             return;
         };
-        let employee = (!self.managed_session_is_boss(key, session_id)).then_some(session_id);
-        self.boss_request(
-            key,
+        let is_counsel = self
+            .boss_ui
+            .states
+            .get(&key)
+            .is_some_and(|state| state.counsel.session_id == Some(session_id));
+        let operation = if is_counsel {
+            BossOperation::Counsel {
+                action: waku_protocol::counsel::CounselOperation::RegenerateAvatar,
+            }
+        } else {
             BossOperation::RegenerateAvatar {
-                session_id: employee,
-            },
-            BossReply::List,
-            cx,
-        );
+                session_id: (!self.managed_session_is_boss(key, session_id))
+                    .then_some(session_id),
+            }
+        };
+        self.boss_request(key, operation, BossReply::List, cx);
     }
 
     /// The generator style is a global Boss setting shared by the boss and

@@ -2745,6 +2745,16 @@ impl Waku {
             TranscriptRowKind::BossTrigger(anchor) => {
                 self.render_boss_trigger_row(anchor, &theme, cx)
             }
+            TranscriptRowKind::CounselRecommendation(id) => {
+                let session_id = self.transcript_display_session().map(|session| session.id);
+                session_id
+                    .map(|session_id| {
+                        self.render_counsel_recommendation_row(
+                            session_id, id, &theme, window, cx,
+                        )
+                    })
+                    .unwrap_or_else(|| div().into_any_element())
+            }
         };
         let new_content_dot = self
             .transcript_new_content_dot

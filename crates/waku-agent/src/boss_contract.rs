@@ -13,7 +13,7 @@ pub(super) fn inputs() -> Value {
 pub(super) fn availability(path: &str) -> Value {
     match path {
         path if path.starts_with("boss counsel ") => {
-            json!({"roles":["counsel","human"],"conditions":["Boss experiment enabled","Counsel drafts and records reported completion; only the human client can send, defer, or dismiss recommendations"]})
+            json!({"roles":["counsel","human"],"conditions":["Boss experiment enabled","Counsel drafts, delivers human-approved instructions, and records reported completion; only the human client can approve, defer, or dismiss recommendations","send is Counsel-only and carries the record's stored instruction at the approved revision — never a freshly worded message"]})
         }
         path if path.starts_with("boss instructions ") => {
             json!({"roles":["boss","human"],"conditions":["Only the live Boss chat can use scoped credentials","Employee and planning credentials cannot read or modify user obligations","Boss-created pins must cite a visible original human message"]})
@@ -175,6 +175,7 @@ pub(super) fn aggregate() -> Value {
             "counsel" => &[
                 "boss counsel view",
                 "boss counsel propose",
+                "boss counsel send",
                 "boss counsel complete",
             ],
             "instructionPin" => &[

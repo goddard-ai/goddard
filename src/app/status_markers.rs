@@ -70,8 +70,9 @@ impl MarkerTone {
 /// flags rather than endings — a turn can report done while sitting on
 /// unrecovered errors, so they must not compete for this probability mass.
 /// `complete` and `nothing-to-do` only render when the model is sure.
-const ENDING_QUESTION: &str = "ending";
-const ENDING_OTHER_OPTION: &str = "other";
+const ENDING_QUESTION: &str = waku_protocol::eval::TURN_ENDING_QUESTION;
+#[cfg(test)]
+const ENDING_OTHER_OPTION: &str = waku_protocol::eval::TURN_ENDING_OTHER;
 const INPUT_QUESTION: &str = "awaiting-input-kind";
 const INPUT_OTHER_OPTION: &str = "other";
 const PARTIAL_QUESTION: &str = "partial-kind";
@@ -87,24 +88,15 @@ const ENDING_MARKERS: &[StatusMarker] = &[
         // but the decision log shows 0.65 suppressing clear winners that
         // beat their runner-up by 2x; 0.60 matches `answered`.
         threshold: 0.60,
-        instructions: "The prompt asked for a change or action, the work was carried \
-            out end to end, and the final response reports it done — judge the ask \
-            as the `prompt` plus any `priorPrompts` still in play. An ask satisfied \
-            entirely by information is `answered`; a reported 'no work needed' is \
-            `nothing-to-do`; a declined or redirected ask is `pushed-back`.",
+        instructions: waku_protocol::eval::ENDING_COMPLETE,
     },
     StatusMarker {
         id: "answered",
         label_key: "status_markers.answered",
         icon: "icons/message-square.svg",
         tone: MarkerTone::Info,
-        threshold: 0.60,
-        instructions: "The prompt asked for information — a question, an explanation, \
-            or an investigation — and the response delivers that answer, findings, \
-            or analysis without making changes. If the prompt also requested work \
-            that was carried out, choose `complete` instead; if the response mainly \
-            restates the request and waits for confirmation to do the work, choose \
-            `aligned`.",
+        threshold: waku_protocol::eval::TURN_ENDING_ANSWERED_THRESHOLD,
+        instructions: waku_protocol::eval::ENDING_ANSWERED,
     },
     StatusMarker {
         id: "nothing-to-do",
@@ -112,9 +104,7 @@ const ENDING_MARKERS: &[StatusMarker] = &[
         icon: "icons/minus.svg",
         tone: MarkerTone::Info,
         threshold: 0.65,
-        instructions: "The prompt asked for work, but the assistant investigated and \
-            reported that none was needed — the request was already satisfied, the \
-            problem does not reproduce, or there is nothing to change.",
+        instructions: waku_protocol::eval::ENDING_NOTHING_TO_DO,
     },
     StatusMarker {
         id: "pushed-back",
@@ -122,10 +112,7 @@ const ENDING_MARKERS: &[StatusMarker] = &[
         icon: "icons/hand.svg",
         tone: MarkerTone::Warning,
         threshold: 0.55,
-        instructions: "The assistant declined the request as asked or redirected it — \
-            refused, disputed the premise, or recommended a different approach — \
-            without asking the user anything. If it asked for approval, a decision, \
-            or details first, choose `awaiting-input`.",
+        instructions: waku_protocol::eval::ENDING_PUSHED_BACK,
     },
     StatusMarker {
         id: "awaiting-input",
@@ -133,11 +120,7 @@ const ENDING_MARKERS: &[StatusMarker] = &[
         icon: "icons/chat.svg",
         tone: MarkerTone::Info,
         threshold: 0.55,
-        instructions: "The requested work remains unfinished because the assistant \
-            asks the user for a go-ahead, a decision, missing details, or an action \
-            only the user can take before continuing. A rhetorical question after \
-            completed work does not count. A reply whose substance is replaying \
-            the request to confirm shared understanding is `aligned` instead.",
+        instructions: waku_protocol::eval::ENDING_AWAITING_INPUT,
     },
     StatusMarker {
         id: "aligned",
@@ -145,13 +128,7 @@ const ENDING_MARKERS: &[StatusMarker] = &[
         icon: "icons/chat.svg",
         tone: MarkerTone::Info,
         threshold: 0.55,
-        instructions: "The assistant's reply restates the user's request — it played \
-            back its understanding or recapped what it intends to do — and stops \
-            there, waiting for a green light to carry out the work; the only pending \
-            input is confirmation. A question needing more than a yes — a decision, \
-            missing details, or approval of a specific proposed action — is \
-            `awaiting-input`; a reply that delivers the requested information is \
-            `answered`.",
+        instructions: waku_protocol::eval::ENDING_ALIGNED,
     },
     StatusMarker {
         id: "partial",
@@ -159,9 +136,7 @@ const ENDING_MARKERS: &[StatusMarker] = &[
         icon: "icons/hourglass.svg",
         tone: MarkerTone::Warning,
         threshold: 0.50,
-        instructions: "The turn stopped before the work was finished — cut off by a \
-            context or step limit (`contextUsage` near its `window` is direct \
-            evidence), truncated output, or an explicit promise to continue later.",
+        instructions: waku_protocol::eval::ENDING_PARTIAL,
     },
 ];
 
@@ -578,20 +553,7 @@ const STATUS_MARKER_MEASURE_SPAN: usize = 64;
 fn status_marker_questions() -> BTreeMap<String, EvalQuestion> {
     let mut questions = BTreeMap::from([(
         ENDING_QUESTION.to_owned(),
-        EvalQuestion::Choice {
-            instructions: "Which best describes how this turn ended? Judge the closing \
-                `response` against the `prompt` and any `priorPrompts` still in play; \
-                `toolSequence`, `toolErrors`, and `filesChanged` carry what the turn \
-                actually did. `answered` is only for asks satisfied entirely by \
-                information — a prompt that requested work ends `complete` or \
-                `partial` even when the response also explains."
-                .to_owned(),
-            criteria: ENDING_MARKERS
-                .iter()
-                .map(|marker| (marker.id.to_owned(), Some(marker.instructions.to_owned())))
-                .chain([(ENDING_OTHER_OPTION.to_owned(), None)])
-                .collect(),
-        },
+        waku_protocol::eval::turn_ending_question(),
     )]);
     questions.insert(
         INPUT_QUESTION.to_owned(),

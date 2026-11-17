@@ -135,22 +135,42 @@ impl Waku {
                         | (view.loading_after as u64) << 3,
                 )
             });
+        // Counsel card rows live in `boss_ui` too: a proposal landing or a
+        // record arriving through a state push must refold the transcript.
+        let counsel = self
+            .counsel_chat_key()
+            .and_then(|key| self.boss_ui.states.get(&key))
+            .map_or(0, |state| {
+                state
+                    .counsel
+                    .recommendations
+                    .iter()
+                    .fold(state.counsel.revision, |hash, record| {
+                        mix_uuid(
+                            mix(hash, record.anchor.is_some() as u64),
+                            record.id,
+                        )
+                    })
+            });
         mix(
             mix(
                 mix(
-                    self.selected_session()
-                        .map_or(EMPTY_TRANSCRIPT_FINGERPRINT, |session| {
-                            transcript_rows_fingerprint(
-                                session,
-                                &self.expanded_turns,
-                                self.blocked_checkpoint_turn(session.id),
-                            )
-                        }),
-                    revision,
+                    mix(
+                        self.selected_session()
+                            .map_or(EMPTY_TRANSCRIPT_FINGERPRINT, |session| {
+                                transcript_rows_fingerprint(
+                                    session,
+                                    &self.expanded_turns,
+                                    self.blocked_checkpoint_turn(session.id),
+                                )
+                            }),
+                        revision,
+                    ),
+                    queued_card,
                 ),
-                queued_card,
+                windowed,
             ),
-            windowed,
+            counsel,
         )
     }
 
@@ -264,6 +284,13 @@ impl Waku {
             return rows;
         }
         let mut rows = folded_transcript_row_kinds(session, &self.expanded_turns, pending);
+        // Counsel's recommendations splice into the folded flow at their
+        // originating positions — content and status stay live reads.
+        if let Some(key) = self.counsel_chat_key()
+            && let Some(state) = self.boss_ui.states.get(&key)
+        {
+            splice_counsel_rows(&mut rows, session, &state.counsel.recommendations);
+        }
         if windowed {
             rows.insert(0, TranscriptRowKind::HistoryBoundary);
         }
@@ -960,6 +987,48 @@ pub(super) enum TranscriptRowKind {
     /// It reads `boss_ui`, not the session, so it is never history content
     /// and never journals.
     QueuedEmployee,
+    /// A Counsel recommendation card pinned at its originating position —
+    /// after the Counsel message it was proposed from. The id is the
+    /// recommendation record's; content and status read live from
+    /// `boss_ui.states`, so revisions and resolutions update in place while
+    /// the row keeps its seat in history.
+    CounselRecommendation(Uuid),
+}
+
+/// Counsel recommendation cards live at their originating position: each
+/// record renders right after the Counsel message it was proposed from.
+/// Records from before anchoring — or whose anchor has been compacted out
+/// of the window — tail the transcript in record order, and superseded or
+/// resolved records keep their seats so the advice trail stays reviewable.
+pub(super) fn splice_counsel_rows(
+    rows: &mut Vec<TranscriptRowKind>,
+    session: &AgentSession,
+    recommendations: &[waku_protocol::counsel::CounselRecommendation],
+) {
+    let mut unanchored = Vec::new();
+    // Reverse iteration keeps same-anchor records chronological: each
+    // insert pushes the previously placed card below the anchor.
+    for record in recommendations.iter().rev() {
+        let position = record.anchor.and_then(|anchor| {
+            rows.iter().position(|kind| {
+                matches!(kind, TranscriptRowKind::Message(index)
+                    if session.messages.get(*index).is_some_and(|m| m.id == anchor))
+            })
+        });
+        match position {
+            Some(index) => rows.insert(
+                index + 1,
+                TranscriptRowKind::CounselRecommendation(record.id),
+            ),
+            None => unanchored.push(record.id),
+        }
+    }
+    rows.extend(
+        unanchored
+            .into_iter()
+            .rev()
+            .map(TranscriptRowKind::CounselRecommendation),
+    );
 }
 
 /// Translate a visible anchor when a retained window refreshes into full detail.
@@ -1026,7 +1095,8 @@ impl BossHistoryRow {
             | TranscriptRowKind::BossHistoryBoundary(_)
             | TranscriptRowKind::HistoryBoundary
             | TranscriptRowKind::FutureBoundary
-            | TranscriptRowKind::QueuedEmployee => {
+            | TranscriptRowKind::QueuedEmployee
+            | TranscriptRowKind::CounselRecommendation(_) => {
                 return None;
             }
         })
@@ -1495,7 +1565,8 @@ pub(super) fn assistant_response_footer(
                 | TranscriptRowKind::BossHistoryBoundary(_)
                 | TranscriptRowKind::HistoryBoundary
                 | TranscriptRowKind::FutureBoundary
-                | TranscriptRowKind::QueuedEmployee => None,
+                | TranscriptRowKind::QueuedEmployee
+                | TranscriptRowKind::CounselRecommendation(_) => None,
             })
             .filter(|part| !part.content.trim().is_empty())
             .map(|part| part.content.as_str())
@@ -2106,7 +2177,8 @@ fn response_footer_message_index_from_rows(
         | TranscriptRowKind::BossHistoryBoundary(_)
         | TranscriptRowKind::HistoryBoundary
         | TranscriptRowKind::FutureBoundary
-        | TranscriptRowKind::QueuedEmployee => None,
+        | TranscriptRowKind::QueuedEmployee
+        | TranscriptRowKind::CounselRecommendation(_) => None,
     })?;
     let message = session.messages.get(message_index)?;
     if message.streaming {
@@ -2126,7 +2198,8 @@ fn response_footer_message_index_from_rows(
             | TranscriptRowKind::BossHistoryBoundary(_)
             | TranscriptRowKind::HistoryBoundary
             | TranscriptRowKind::FutureBoundary
-            | TranscriptRowKind::QueuedEmployee => None,
+            | TranscriptRowKind::QueuedEmployee
+            | TranscriptRowKind::CounselRecommendation(_) => None,
         })
         .any(|message| !message.content.trim().is_empty())
         .then_some(message_index)
@@ -2155,7 +2228,8 @@ fn turn_answer_start(session: &AgentSession, turn_rows: &[TranscriptRowKind]) ->
         | TranscriptRowKind::BossHistoryBoundary(_)
         | TranscriptRowKind::HistoryBoundary
         | TranscriptRowKind::FutureBoundary
-        | TranscriptRowKind::QueuedEmployee => false,
+        | TranscriptRowKind::QueuedEmployee
+        | TranscriptRowKind::CounselRecommendation(_) => false,
     };
     let Some(last_text) = turn_rows.iter().rposition(is_answer_text) else {
         return turn_rows.len();
@@ -2199,7 +2273,8 @@ pub(super) fn row_turn_id(session: &AgentSession, row: TranscriptRowKind) -> Opt
         | TranscriptRowKind::BossHistoryBoundary(_)
         | TranscriptRowKind::HistoryBoundary
         | TranscriptRowKind::FutureBoundary
-        | TranscriptRowKind::QueuedEmployee => None,
+        | TranscriptRowKind::QueuedEmployee
+        | TranscriptRowKind::CounselRecommendation(_) => None,
     }
 }
 
@@ -2220,7 +2295,8 @@ pub(super) fn response_row_turn_id(session: &AgentSession, row: TranscriptRowKin
         | TranscriptRowKind::BossHistoryBoundary(_)
         | TranscriptRowKind::HistoryBoundary
         | TranscriptRowKind::FutureBoundary
-        | TranscriptRowKind::QueuedEmployee => None,
+        | TranscriptRowKind::QueuedEmployee
+        | TranscriptRowKind::CounselRecommendation(_) => None,
         // The marker precedes the response it woke — like the prompt it
         // stands in for, it is not part of the response's hover group.
         TranscriptRowKind::BossTrigger(_) => None,
@@ -2741,5 +2817,64 @@ mod history_row_target_tests {
             TranscriptRowKind::BossHistory(session, BossHistoryRow::TurnFold(turn)),
             TranscriptRowKind::TurnFold(Uuid::new_v4()),
         ));
+    }
+}
+
+#[cfg(test)]
+mod counsel_row_splice_tests {
+    use super::*;
+    use waku_protocol::counsel::{CounselRecommendation, CounselStatus};
+
+    fn record(id: u128, anchor: Option<Uuid>, status: CounselStatus) -> CounselRecommendation {
+        CounselRecommendation {
+            id: Uuid::from_u128(id),
+            revision: 1,
+            title: "t".into(),
+            reason: "r".into(),
+            instruction: "i".into(),
+            sources: Vec::new(),
+            status,
+            created_at: 0,
+            updated_at: 0,
+            boss_session_id: None,
+            completion_evidence: None,
+            anchor,
+            delivery_error: None,
+            approved_revision: None,
+        }
+    }
+
+    #[test]
+    fn counsel_cards_seat_after_their_anchor_and_keep_order() {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.push_message(MessageRole::User, "what next");
+        let answer = session.messages.last().unwrap().id;
+        session.push_message(MessageRole::Assistant, "check the audit");
+        let anchor_message = session.messages.last().unwrap().id;
+        let mut rows = vec![
+            TranscriptRowKind::Message(0),
+            TranscriptRowKind::Message(1),
+        ];
+        let recommendations = vec![
+            record(1, Some(anchor_message), CounselStatus::Proposed),
+            record(2, Some(anchor_message), CounselStatus::Dismissed),
+            record(3, Some(answer), CounselStatus::Sent),
+            // A record whose anchor fell out of the window tails the list.
+            record(4, Some(Uuid::new_v4()), CounselStatus::Completed),
+            record(5, None, CounselStatus::Proposed),
+        ];
+        splice_counsel_rows(&mut rows, &session, &recommendations);
+        assert_eq!(
+            rows,
+            vec![
+                TranscriptRowKind::Message(0),
+                TranscriptRowKind::CounselRecommendation(Uuid::from_u128(3)),
+                TranscriptRowKind::Message(1),
+                TranscriptRowKind::CounselRecommendation(Uuid::from_u128(1)),
+                TranscriptRowKind::CounselRecommendation(Uuid::from_u128(2)),
+                TranscriptRowKind::CounselRecommendation(Uuid::from_u128(4)),
+                TranscriptRowKind::CounselRecommendation(Uuid::from_u128(5)),
+            ]
+        );
     }
 }

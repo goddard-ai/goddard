@@ -250,7 +250,7 @@ impl WakuBackend {
                         | BossOperation::HistorySearch { .. }
                         | BossOperation::Projects { .. }
                 ),
-                "Counsel can advise and propose; only the human can send instructions to Boss"
+                "Counsel can advise, propose, and deliver human-approved recommendations; other Boss instructions are the human's alone"
             );
         }
         if !was_active {

@@ -7755,14 +7755,23 @@ counsel.saved_later:
 counsel.dismissed:
   en: "Dismissed"
 
+counsel.approved:
+  en: "Approved · Counsel is delivering"
+
+counsel.delivery_pending:
+  en: "Sending to Boss"
+
+counsel.delivery_failed:
+  en: "Send failed"
+
 counsel.sent:
   en: "Sent to Boss · queued or in progress"
 
 counsel.completed:
   en: "Completed · reported evidence"
 
-counsel.send:
-  en: "Send to Boss"
+counsel.approve:
+  en: "Approve"
 
 counsel.later:
   en: "Later"

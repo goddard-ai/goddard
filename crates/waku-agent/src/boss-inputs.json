@@ -3341,6 +3341,57 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "send"
+            },
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "expectedRevision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "expectedRevision"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "rename"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "regenerateAvatar"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "complete"
             },
             "id": {
@@ -3369,7 +3420,7 @@
     "CounselDecision": {
       "anyOf": [
         {
-          "const": "send"
+          "const": "approve"
         },
         {
           "const": "later"

@@ -1,0 +1,1 @@
+- Counsel shows each recommendation as a card at the point in the chat where it was proposed, with the exact Boss message behind a collapsed "Message to Boss" section. After Counsel finishes answering, it may add a fresh recommendation on its own, and an approved instruction is delivered to Boss by Counsel with visible pending/failed/sent status that can be retried.

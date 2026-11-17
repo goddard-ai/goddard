@@ -6332,16 +6332,6 @@ impl Waku {
             .filter(|session| session.quarantined && session.detail_loaded)
             .map(|session| session.id);
         let field = self.render_composer_field(window, cx);
-        let field = if let Some(recommendations) = self.render_counsel_recommendations(cx) {
-            div()
-                .flex_none()
-                .flex()
-                .flex_col()
-                .child(recommendations)
-                .child(field)
-        } else {
-            field
-        };
         let Some(session_id) = quarantined else {
             return field;
         };

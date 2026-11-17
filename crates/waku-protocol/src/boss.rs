@@ -38,7 +38,7 @@ pub(crate) fn legacy_avatar_style() -> AvatarStyle {
     AvatarStyle::DiceBear
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct BossIdentity {
     pub id: Uuid,

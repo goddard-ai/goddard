@@ -20,6 +20,21 @@ pub(super) fn run(mut args: Vec<String>) -> anyhow::Result<()> {
             value["type"] = json!("propose");
             serde_json::from_value(value).context("invalid Counsel proposal")?
         }
+        "send" => {
+            let (pos, opts) = flags(args, &["revision"], true)?;
+            anyhow::ensure!(
+                pos.len() == 1,
+                "usage: boss counsel send ID --revision N"
+            );
+            CounselOperation::Send {
+                id: pos[0].parse().context("invalid recommendation ID")?,
+                expected_revision: opts
+                    .get("revision")
+                    .ok_or_else(|| anyhow!("--revision is required"))?
+                    .parse()
+                    .context("invalid revision")?,
+            }
+        }
         "complete" => {
             let (pos, opts) = flags(args, &["revision", "evidence"], true)?;
             anyhow::ensure!(

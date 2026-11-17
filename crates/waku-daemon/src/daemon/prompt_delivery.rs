@@ -781,6 +781,7 @@ pub(super) fn record_agent_steer(
     sent_by_task: Uuid,
     hidden: bool,
     report_trigger: Option<crate::model::ReportTrigger>,
+    preferred_message_id: Option<Uuid>,
 ) {
     let mut state = task_state.lock();
     let Some(session) = state
@@ -806,6 +807,11 @@ pub(super) fn record_agent_steer(
     {
         return;
     }
+    // Same fold when the delivery's durable id already landed — a Counsel
+    // instruction steered once and retried must not double-write.
+    if preferred_message_id.is_some_and(|id| session.messages.iter().any(|stored| stored.id == id)) {
+        return;
+    }
     let message_id = session.push_user_message_with_presentation(
         message,
         None,
@@ -813,6 +819,14 @@ pub(super) fn record_agent_steer(
         Vec::new(),
         Some(sent_by_task),
     );
+    if let Some(preferred) = preferred_message_id
+        && let Some(stored) = session
+            .messages
+            .iter_mut()
+            .find(|stored| stored.id == message_id)
+    {
+        stored.id = preferred;
+    }
     if (hidden || report_trigger.is_some())
         && let Some(stored) = session
             .messages

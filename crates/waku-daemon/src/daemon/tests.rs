@@ -7004,6 +7004,7 @@ fn a_blocker_steer_marks_its_accepted_boundary() {
         employee_id,
         true,
         Some(trigger),
+        steer.queued_id,
     );
 
     let state = backend.task_state.lock();
@@ -7515,6 +7516,7 @@ fn a_steered_report_delivers_once_through_mirror_and_restart() {
         employee,
         true,
         steer.report_trigger.clone(),
+        steer.queued_id,
     );
     // Restart between the echo's transcript write and the chip's unmirror:
     // the parked entry survives while the in-memory steer bookkeeping dies.
@@ -16985,6 +16987,7 @@ fn finalize_plan_steers_an_open_boss_turn() {
         pending.sender.unwrap(),
         pending.hidden,
         pending.report_trigger,
+        pending.queued_id,
     );
     assert!(
         unmirror_agent_queued_prompt(&backend.task_state, &backend.task_store, boss, queued_id)

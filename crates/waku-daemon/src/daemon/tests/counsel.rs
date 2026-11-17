@@ -140,18 +140,44 @@ fn counsel_owns_history_and_approved_instruction_reaches_boss_once() {
         !captures.lock().contains_key(&boss),
         "proposing must not launch or prompt Boss"
     );
-    let decision = || Action::Decide {
+    let approve = || Action::Decide {
         id: record.id,
         expected_revision: record.revision,
-        decision: CounselDecision::Send,
+        decision: CounselDecision::Approve,
     };
-    invoke(&backend, None, decision()).unwrap();
+    let send = || Action::Send {
+        id: record.id,
+        expected_revision: record.revision,
+    };
+    // The human's button approves only: Counsel resumes to deliver, and a
+    // second approval cannot bind a record that already moved on.
+    invoke(&backend, None, approve()).unwrap();
+    assert_eq!(
+        backend.boss.document().counsel.recommendations[0].status,
+        CounselStatus::Approved
+    );
+    assert_eq!(
+        backend.boss.document().counsel.recommendations[0].approved_revision,
+        Some(record.revision)
+    );
+    assert!(
+        captures.lock()[&counsel]
+            .prompts
+            .lock()
+            .last()
+            .is_some_and(|prompt| prompt.contains("counsel send")),
+        "approval resumes Counsel with the send instruction"
+    );
+    assert!(invoke(&backend, None, approve()).is_err());
+    // Counsel carries the approval through its one authorized operation.
+    invoke(&backend, Some(counsel), send()).unwrap();
     let delivered = captures.lock()[&boss].prompts.lock().clone();
     assert_eq!(delivered.len(), 1);
     assert!(delivered[0].contains(&record.instruction));
     assert!(delivered[0].contains("Human-approved Counsel recommendation"));
     assert!(delivered[0].contains(&format!("goddard://task/{counsel}")));
-    assert!(invoke(&backend, None, decision()).is_err());
+    // A replayed send folds onto the delivered record — no second prompt.
+    invoke(&backend, Some(counsel), send()).unwrap();
     assert_eq!(captures.lock()[&boss].prompts.lock().len(), 1);
     let state = backend.boss.document().counsel;
     assert_eq!(state.recommendations[0].status, CounselStatus::Sent);
@@ -217,12 +243,39 @@ fn counsel_authority_cannot_approve_or_bypass_the_handoff() {
                 Action::Decide {
                     id: record.id,
                     expected_revision: 1,
-                    decision: CounselDecision::Send
+                    decision: CounselDecision::Approve
                 }
             )
             .is_err()
         );
     }
+    // Delivery is Counsel's alone — the human's own client and ordinary
+    // tasks cannot invoke it, and Counsel cannot send what was never
+    // approved or a revision that no longer matches the approval.
+    for caller in [None, Some(task)] {
+        assert!(
+            invoke(
+                &backend,
+                caller,
+                Action::Send {
+                    id: record.id,
+                    expected_revision: 1
+                }
+            )
+            .is_err()
+        );
+    }
+    assert!(
+        invoke(
+            &backend,
+            Some(counsel),
+            Action::Send {
+                id: record.id,
+                expected_revision: 1
+            }
+        )
+        .is_err()
+    );
     assert!(invoke(&backend, Some(task), Action::View).is_err());
     assert!(
         backend
@@ -262,7 +315,7 @@ fn counsel_authority_cannot_approve_or_bypass_the_handoff() {
             Action::Decide {
                 id: record.id,
                 expected_revision: 0,
-                decision: CounselDecision::Send
+                decision: CounselDecision::Approve
             }
         )
         .is_err()
@@ -291,6 +344,8 @@ fn counsel_dismissal_survives_retries_until_source_evidence_changes() {
         },
     )
     .unwrap();
+    // A stale revision — captured before Later bumped the record — cannot
+    // approve what the displayed card no longer is.
     assert!(
         invoke(
             &backend,
@@ -298,7 +353,7 @@ fn counsel_dismissal_survives_retries_until_source_evidence_changes() {
             Action::Decide {
                 id: record.id,
                 expected_revision: 1,
-                decision: CounselDecision::Send
+                decision: CounselDecision::Approve
             }
         )
         .is_err()
@@ -358,7 +413,7 @@ fn counsel_failed_approval_commit_leaves_no_instruction_for_boss() {
     let decide = || Action::Decide {
         id: record.id,
         expected_revision: 1,
-        decision: CounselDecision::Send,
+        decision: CounselDecision::Approve,
     };
     assert!(invoke(&backend, None, decide()).is_err());
     assert_eq!(
@@ -390,6 +445,15 @@ fn counsel_failed_approval_commit_leaves_no_instruction_for_boss() {
         .execute_batch("DROP TRIGGER reject_counsel_approval;")
         .unwrap();
     invoke(&backend, None, decide()).unwrap();
+    invoke(
+        &backend,
+        Some(counsel),
+        Action::Send {
+            id: record.id,
+            expected_revision: 1,
+        },
+    )
+    .unwrap();
     assert_eq!(captures.lock()[&boss].prompts.lock().len(), 1);
     drop(database);
     drop(backend);
@@ -474,6 +538,212 @@ fn counsel_reopens_the_saved_review_after_a_provider_launch_failure() {
             .queued_messages
             .is_empty()
     );
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn settled_counsel_answer_claims_one_recommendation_turn() {
+    let root = std::env::temp_dir().join(format!("counsel-settle-{}", Uuid::new_v4()));
+    let (backend, _task, _captures) = fixture(&root);
+    let counsel = open(&backend);
+    // A human question's completed turn is the only eligible candidate —
+    // employee and generated turns never reach this point.
+    let source_turn = {
+        let mut state = backend.task_state.lock();
+        let session = state.session_mut(counsel).unwrap();
+        backend.task_store.hydrate(session).unwrap();
+        let turn = session.begin_turn("What should I look at next?");
+        session.push_message(MessageRole::Assistant, "Check the audit task.");
+        session.finish_active_turn(crate::model::TurnStatus::Completed);
+        backend.task_store.save(&mut state).unwrap();
+        turn
+    };
+    let (candidate, _) = backend.counsel_recommendation_candidate(counsel).unwrap();
+    assert_eq!(candidate, source_turn);
+    assert!(backend.claim_counsel_recommendation_turn(
+        counsel,
+        source_turn,
+        &EventSink::detached()
+    ));
+    // Same source turn can never claim twice — replayed settles and
+    // restarts see it recorded.
+    assert!(!backend.claim_counsel_recommendation_turn(
+        counsel,
+        source_turn,
+        &EventSink::detached()
+    ));
+    assert!(backend.counsel_recommendation_candidate(counsel).is_none());
+    assert_eq!(
+        backend.boss.document().counsel.recommendation_turns,
+        vec![source_turn]
+    );
+    // The generated recommendation turn itself is not human-authored — it
+    // can never recursively wake another recommendation turn.
+    let second_turn = {
+        let mut state = backend.task_state.lock();
+        let session = state.session_mut(counsel).unwrap();
+        let turn = session.begin_hidden_turn("recommend something");
+        session.push_message(MessageRole::Assistant, "Proposing a step.");
+        session.finish_active_turn(crate::model::TurnStatus::Completed);
+        backend.task_store.save(&mut state).unwrap();
+        turn
+    };
+    assert!(backend.counsel_recommendation_candidate(counsel).is_none());
+    // A newer human turn settles later: the stale verdict for the hidden
+    // turn cannot claim it, and the new turn claims once.
+    assert!(!backend.claim_counsel_recommendation_turn(
+        counsel,
+        second_turn,
+        &EventSink::detached()
+    ));
+    let third_turn = {
+        let mut state = backend.task_state.lock();
+        let session = state.session_mut(counsel).unwrap();
+        let turn = session.begin_turn("And after that?");
+        session.push_message(MessageRole::Assistant, "Then review the send.");
+        session.finish_active_turn(crate::model::TurnStatus::Completed);
+        backend.task_store.save(&mut state).unwrap();
+        turn
+    };
+    // Intervening input voided the second turn's window; the latest one is
+    // what a verdict may claim.
+    assert!(!backend.claim_counsel_recommendation_turn(
+        counsel,
+        second_turn,
+        &EventSink::detached()
+    ));
+    assert!(backend.claim_counsel_recommendation_turn(
+        counsel,
+        third_turn,
+        &EventSink::detached()
+    ));
+    // A user stop parks the turn's claim: a stopped Counsel is not woken.
+    let fourth = {
+        let mut state = backend.task_state.lock();
+        let session = state.session_mut(counsel).unwrap();
+        let turn = session.begin_turn("Anything else?");
+        session.push_message(MessageRole::Assistant, "No clear next step.");
+        session.finish_active_turn(crate::model::TurnStatus::Completed);
+        backend.task_store.save(&mut state).unwrap();
+        turn
+    };
+    backend.agent.note_user_stop(counsel);
+    assert!(backend.counsel_recommendation_candidate(counsel).is_none());
+    assert!(!backend.claim_counsel_recommendation_turn(counsel, fourth, &EventSink::detached()));
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn non_counsel_sessions_never_claim_recommendation_turns() {
+    let root = std::env::temp_dir().join(format!("counsel-scope-{}", Uuid::new_v4()));
+    let (backend, task, _captures) = fixture(&root);
+    let _counsel = open(&backend);
+    let source_turn = {
+        let mut state = backend.task_state.lock();
+        let session = state.session_mut(task).unwrap();
+        backend.task_store.hydrate(session).unwrap();
+        let turn = session.begin_turn("Finish the audit");
+        session.push_message(MessageRole::Assistant, "Done — all checks pass.");
+        session.finish_active_turn(crate::model::TurnStatus::Completed);
+        backend.task_store.save(&mut state).unwrap();
+        turn
+    };
+    // Another task's settled answer is not Counsel's to evaluate.
+    assert!(backend.counsel_recommendation_candidate(task).is_none());
+    assert!(!backend.claim_counsel_recommendation_turn(task, source_turn, &EventSink::detached()));
+    assert!(backend.boss.document().counsel.recommendation_turns.is_empty());
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn counsel_send_failure_is_reported_and_retriable() {
+    let root = std::env::temp_dir().join(format!("counsel-sendfail-{}", Uuid::new_v4()));
+    let (mut backend, task, _captures) = fixture(&root);
+    let boss = rotation_boss(&backend);
+    // First launch serves Counsel; the injected failure hits Boss's launch.
+    let start = backend.runtime_test_start.take().unwrap();
+    backend.runtime_test_start = Some(Arc::new(move |provider, options, sender| {
+        if options
+            .agent
+            .as_ref()
+            .is_some_and(|agent| agent.task_id == boss)
+        {
+            anyhow::bail!("injected Boss launch failure");
+        }
+        start(provider, options, sender)
+    }));
+    let counsel = open(&backend);
+    let record = propose(&backend, counsel, task);
+    invoke(
+        &backend,
+        None,
+        Action::Decide {
+            id: record.id,
+            expected_revision: 1,
+            decision: CounselDecision::Approve,
+        },
+    )
+    .unwrap();
+    assert!(
+        invoke(
+            &backend,
+            Some(counsel),
+            Action::Send {
+                id: record.id,
+                expected_revision: 1,
+            }
+        )
+        .is_err()
+    );
+    let record = &backend.boss.document().counsel.recommendations[0];
+    assert_eq!(record.status, CounselStatus::DeliveryFailed);
+    assert!(
+        record
+            .delivery_error
+            .as_deref()
+            .is_some_and(|error| error.contains("injected Boss launch failure")),
+        "the durable record names the real failure: {:?}",
+        record.delivery_error
+    );
+    // The parked mirror survives — a retry is a fresh attempt on the same
+    // approved revision, not a lost approval.
+    let state = backend.task_state.lock();
+    assert!(
+        state
+            .sessions
+            .iter()
+            .find(|session| session.id == boss)
+            .unwrap()
+            .queued_messages
+            .iter()
+            .any(|message| message.id == record.id)
+    );
+    drop(state);
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn counsel_propose_anchors_the_card_to_its_originating_message() {
+    let root = std::env::temp_dir().join(format!("counsel-anchor-{}", Uuid::new_v4()));
+    let (backend, task, _captures) = fixture(&root);
+    let counsel = open(&backend);
+    let anchor = {
+        let mut state = backend.task_state.lock();
+        let session = state.session_mut(counsel).unwrap();
+        backend.task_store.hydrate(session).unwrap();
+        session.begin_turn("what is next");
+        session.push_message(MessageRole::Assistant, "Here is my read.");
+        session.finish_active_turn(crate::model::TurnStatus::Completed);
+        let anchor = session.messages.last().unwrap().id;
+        backend.task_store.save(&mut state).unwrap();
+        anchor
+    };
+    let record = propose(&backend, counsel, task);
+    assert_eq!(record.anchor, Some(anchor));
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
 }

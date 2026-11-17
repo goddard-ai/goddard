@@ -6,4 +6,19 @@ export type CounselRecommendation = { id: string, revision: number, title: strin
 /**
  * Exact instruction the human reviews before sending.
  */
-instruction: string, sources: Array<CounselSource>, status: CounselStatus, createdAt: number, updatedAt: number, bossSessionId: string | null, completionEvidence: string | null, };
+instruction: string, sources: Array<CounselSource>, status: CounselStatus, createdAt: number, updatedAt: number, bossSessionId: string | null, completionEvidence: string | null,
+/**
+ * Counsel chat message the card renders after — its originating
+ * position in history. `None` on records written before anchoring;
+ * clients render those at the transcript's end.
+ */
+anchor: string | null,
+/**
+ * Why the last send attempt failed; cleared by each new attempt.
+ */
+deliveryError: string | null,
+/**
+ * The revision the human approved — the binding `Send` revalidates.
+ * Bookkeeping bumps after approval must not invalidate it.
+ */
+approvedRevision: number | null, };

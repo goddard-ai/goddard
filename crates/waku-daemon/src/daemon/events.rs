@@ -1007,6 +1007,15 @@ pub(super) fn forward_driver_events(
                     session_id,
                     &event,
                 );
+                // A settled Counsel answer is what wakes the separate
+                // recommendation turn — Jev judges `answered` inside the
+                // hook, off the event pump.
+                if matches!(&event, DriverEvent::TurnFinished { success: true, .. })
+                    && boss.is_counsel(session_id)
+                    && let Some(backend) = auto_prompts.backend()
+                {
+                    backend.capture_counsel_answer_settled(session_id, events.clone());
+                }
             }
         }
         // A chain attempt whose session stopped for input — a permission
@@ -1119,6 +1128,7 @@ pub(super) fn forward_driver_events(
                         sender,
                         hidden,
                         report_trigger.clone(),
+                        steer.as_ref().and_then(|steer| steer.queued_id),
                     );
                 }
                 // The agent-surface instruction composes into every context

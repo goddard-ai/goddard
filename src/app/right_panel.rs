@@ -8379,6 +8379,9 @@ impl Waku {
                     ))
                     .into_any_element()
             }
+            TranscriptRowKind::CounselRecommendation(id) => {
+                self.render_counsel_recommendation_row(session_id, id, &theme, window, cx)
+            }
         };
         let response_turn_id = super::transcript::response_row_turn_id(session, kind);
         div()

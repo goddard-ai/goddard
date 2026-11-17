@@ -81,7 +81,7 @@ fn group(path: &str) -> &str {
 fn authority(path: &str) -> &str {
     match path {
         p if p.starts_with("boss counsel ") => {
-            "Counsel chat or the human only; sending, deferring, and dismissing require the client’s human controls"
+            "Counsel chat or the human only; approving, deferring, and dismissing require the client’s human controls, and delivering an approval is Counsel’s alone"
         }
         p if p.starts_with("boss instructions ") => {
             "Only the live Boss chat or a human; employees and planning sessions cannot modify user obligations"
@@ -141,6 +141,9 @@ fn purpose(path: &str) -> &str {
         }
         "boss counsel propose" => {
             "Draft a source-backed next action for the human to review and send to Boss."
+        }
+        "boss counsel send" => {
+            "Deliver a human-approved recommendation to Boss; Counsel-only, bound to the approved revision."
         }
         "boss counsel complete" => {
             "Record concrete reported evidence that an approved instruction is complete."
