@@ -1,0 +1,1 @@
+- The file tree stays responsive while background provider checks keep the daemon busy.

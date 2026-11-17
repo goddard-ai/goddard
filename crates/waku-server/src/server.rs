@@ -56,8 +56,12 @@ const MAX_HANDSHAKE_MESSAGE_BYTES: usize = 64 * 1024;
 /// WebSocket handshake to reject.
 const MAX_REQUEST_LINE_BYTES: usize = 1024;
 const MAX_CONNECTIONS: usize = 64;
-const HEAVY_REQUEST_WORKERS: usize = 4;
-const HEAVY_REQUEST_QUEUE: usize = 32;
+// Reserve one of the four heavy workers for file-tree reads. Expanded trees
+// can be slow in their own right, so they do not share task-opening capacity.
+const HEAVY_REQUEST_WORKERS: usize = 3;
+const HEAVY_REQUEST_QUEUE: usize = 24;
+const FILE_TREE_REQUEST_WORKERS: usize = 1;
+const FILE_TREE_REQUEST_QUEUE: usize = 8;
 /// A request may wait this long for bounded pool capacity before receiving a
 /// busy response. While it waits, its connection keeps reading other requests.
 const POOL_SUBMIT_WAIT: Duration = Duration::from_secs(5);
@@ -391,6 +395,7 @@ enum RequestPoolKind {
     LongControl,
     Health,
     Navigation,
+    FileTree,
 }
 
 impl RequestPoolKind {
@@ -401,16 +406,18 @@ impl RequestPoolKind {
             Self::LongControl => &dispatcher.long_control_requests,
             Self::Health => &dispatcher.health_requests,
             Self::Navigation => &dispatcher.navigation_requests,
+            Self::FileTree => &dispatcher.file_tree_requests,
         }
     }
 
-    fn index(self) -> usize {
+    const fn index(self) -> usize {
         match self {
             Self::Heavy => 0,
             Self::Control => 1,
             Self::LongControl => 2,
             Self::Health => 3,
             Self::Navigation => 4,
+            Self::FileTree => 5,
         }
     }
 
@@ -548,7 +555,7 @@ impl ConnectionDispatchState {
         deliver_errors: bool,
     ) -> bool {
         let attempts = self.pending.len();
-        let mut blocked = [false; 5];
+        let mut blocked = [false; RequestPoolKind::FileTree.index() + 1];
         let mut can_continue = true;
 
         for _ in 0..attempts {
@@ -1415,6 +1422,7 @@ struct RequestDispatcher {
     long_control_requests: IndependentRequestPool,
     health_requests: IndependentRequestPool,
     navigation_requests: IndependentRequestPool,
+    file_tree_requests: IndependentRequestPool,
     /// The runtime-controlled non-loopback listener, installed by `serve`
     /// once this dispatcher is shared so an exposure request arriving on
     /// any listener can rebind it.
@@ -2100,6 +2108,11 @@ impl RequestDispatcher {
                 NAVIGATION_REQUEST_WORKERS,
                 NAVIGATION_REQUEST_QUEUE,
             ),
+            file_tree_requests: IndependentRequestPool::new(
+                "file-tree",
+                FILE_TREE_REQUEST_WORKERS,
+                FILE_TREE_REQUEST_QUEUE,
+            ),
             exposure: OnceLock::new(),
         }
     }
@@ -2368,6 +2381,15 @@ impl RequestDispatcher {
         let long_control = is_long_control_wait(&request.command);
         let (pool_kind, pool) = if navigation {
             (RequestPoolKind::Navigation, &self.navigation_requests)
+        } else if agent.is_none()
+            && matches!(
+                &request.command,
+                Command::Workspace {
+                    operation: WorkspaceOperation::ListTree { .. }
+                }
+            )
+        {
+            (RequestPoolKind::FileTree, &self.file_tree_requests)
         } else if long_control {
             (RequestPoolKind::LongControl, &self.long_control_requests)
         } else if heavy {
@@ -6090,7 +6112,7 @@ mod tests {
         );
     }
 
-    /// Opening a task or deliverable must not need a free bulk worker.
+    /// File browsing and task opening each keep capacity while bulk work waits.
     #[test]
     fn navigation_outruns_saturated_bulk_workers() {
         struct BulkBackend {
@@ -6107,6 +6129,11 @@ mod tests {
                 if matches!(
                     request.command,
                     Command::LoadTaskState | Command::ProbeProvider { .. }
+                ) || matches!(
+                    &request.command,
+                    Command::Workspace {
+                        operation: WorkspaceOperation::ListTree { root, .. }
+                    } if root.as_os_str() == "held-tree"
                 ) {
                     self.started.send(()).unwrap();
                     self.release.recv().unwrap();
@@ -6117,7 +6144,7 @@ mod tests {
         struct Release(Sender<()>);
         impl Drop for Release {
             fn drop(&mut self) {
-                for _ in 0..CONTROL_REQUEST_WORKERS + HEAVY_REQUEST_WORKERS {
+                for _ in 0..CONTROL_REQUEST_WORKERS + HEAVY_REQUEST_WORKERS + 1 {
                     let _ = self.0.send(());
                 }
             }
@@ -6162,6 +6189,35 @@ mod tests {
         for _ in 0..bulk_ids.len() {
             started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
         }
+        let tree_request = |root: &str| Request {
+            request_id: Uuid::new_v4(),
+            session_id: Uuid::nil(),
+            runtime_id: Uuid::nil(),
+            command: Command::Workspace {
+                operation: WorkspaceOperation::ListTree {
+                    root: PathBuf::from(root),
+                    expanded_paths: Vec::new(),
+                },
+            },
+        };
+        let tree = tree_request("visible-tree");
+        let tree_id = tree.request_id;
+        dispatcher.dispatch(tree, outgoing.clone(), 0, None);
+        assert!(
+            matches!(
+                responses.recv_timeout(Duration::from_millis(300)),
+                Ok(ServerMessage::Response { request_id, outcome: ResponseOutcome::Ok { .. } })
+                    if request_id == tree_id
+            ),
+            "file tree waited behind unrelated bulk work"
+        );
+
+        // A slow tree walk must not take capacity from task opening.
+        let held_tree = tree_request("held-tree");
+        bulk_ids.insert(held_tree.request_id);
+        dispatcher.dispatch(held_tree, outgoing.clone(), 0, None);
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+
         let commands = [
             Command::Workspace {
                 operation: WorkspaceOperation::LandingJob { id: Uuid::new_v4() },
@@ -6214,7 +6270,7 @@ mod tests {
             );
             let response = responses.recv_timeout(Duration::from_millis(300));
             eprintln!(
-                "{label} under 4 blocked control + 4 blocked heavy workers: {:?}",
+                "{label} under blocked control and heavy workers: {:?}",
                 start.elapsed()
             );
             assert!(
