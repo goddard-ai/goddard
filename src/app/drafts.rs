@@ -168,6 +168,14 @@ impl Waku {
         annotations.iter().map(Into::into).collect()
     }
 
+    fn rush_composer_draft_key(&self) -> Option<crate::persistence::ComposerDraftKey> {
+        let id = self.big_picture.rush_session_id()?;
+        let session = self
+            .transcript_session()
+            .filter(|session| session.id == id)?;
+        Some(self.rotated_draft_key(crate::persistence::ComposerDraftKey::for_session(session)))
+    }
+
     /// Build the live composer's draft for `key`. Annotations belong to the
     /// session on screen, so a foreign slot — a Big Picture card or the
     /// overlay's new-task draft — keeps whatever its draft already holds
@@ -177,13 +185,36 @@ impl Waku {
         key: Option<crate::persistence::ComposerDraftKey>,
         cx: &App,
     ) -> crate::persistence::ComposerDraft {
-        let annotations = if key == self.selected_composer_draft_key() {
-            self.composer_draft_annotations()
-        } else {
-            key.and_then(|key| self.composer_drafts.get(key))
-                .map(|draft| draft.annotations.clone())
-                .unwrap_or_default()
-        };
+        let annotations =
+            if let Some(key) = key.filter(|key| Some(*key) == self.rush_composer_draft_key()) {
+                // The covered workspace still owns its file editors. Keep the
+                // rushed task's file and plan notes in its draft while it is here.
+                self.composer_drafts
+                    .get(key)
+                    .into_iter()
+                    .flat_map(|draft| {
+                        draft
+                            .annotations
+                            .iter()
+                            .filter(|item| item.file.is_some())
+                            .cloned()
+                    })
+                    .chain(
+                        self.transcript_selection
+                            .annotations
+                            .borrow()
+                            .items
+                            .iter()
+                            .map(Into::into),
+                    )
+                    .collect()
+            } else if key == self.selected_composer_draft_key() {
+                self.composer_draft_annotations()
+            } else {
+                key.and_then(|key| self.composer_drafts.get(key))
+                    .map(|draft| draft.annotations.clone())
+                    .unwrap_or_default()
+            };
         let (text, inline_atoms) = super::composer::composer_draft_content(
             self.composer.read(cx).content(cx),
             &self.composer_inline_atoms,
@@ -505,7 +536,19 @@ impl Waku {
         // content — the atoms it edited are gone.
         self.pasted_text_editor = None;
         self.sync_inline_atoms(cx);
-        if key == self.selected_composer_draft_key() {
+        if key.is_some() && key == self.rush_composer_draft_key() {
+            let mut annotations = self.transcript_selection.annotations.borrow_mut();
+            for note in draft
+                .annotations
+                .into_iter()
+                .filter(|note| note.file.is_none())
+            {
+                self.annotation_next_id = self.annotation_next_id.max(note.id.saturating_add(1));
+                if !annotations.items.iter().any(|item| item.id == note.id) {
+                    annotations.items.push(TranscriptAnnotation::from(note));
+                }
+            }
+        } else if key == self.selected_composer_draft_key() {
             self.restore_draft_annotations(draft.annotations);
         }
         self.composer

@@ -3037,6 +3037,7 @@ impl Waku {
         }
         let reference = crate::model::ReferenceContext::decode_reference(sha);
         if reference.is_none()
+            && self.big_picture.rush_session_id().is_none()
             && let Some(entry) = self.git_panel.as_ref().and_then(|panel| {
                 panel
                     .commits
@@ -3049,7 +3050,7 @@ impl Waku {
                 sha.to_owned(),
                 TranscriptCommitDetail::Ready(
                     entry,
-                    self.selected_workspace_path()
+                    self.transcript_workspace_path()
                         .unwrap_or(std::path::Path::new(""))
                         .to_path_buf(),
                 ),
@@ -3061,13 +3062,13 @@ impl Waku {
             .as_ref()
             .map(|(context, _)| context.workspace().to_path_buf())
             .or_else(|| {
-                self.selected_workspace_path()
+                self.transcript_workspace_path()
                     .map(std::path::Path::to_path_buf)
             })
         else {
             return;
         };
-        let session_id = self.selected_session().map(|session| session.id);
+        let session_id = self.transcript_session_id();
         let key = sha.to_owned();
         let requested_sha = sha.to_owned();
         let request_sha = reference_sha(sha).to_owned();
@@ -3098,7 +3099,7 @@ impl Waku {
                 })
                 .await;
             let _ = waku.update(cx, move |waku, cx| {
-                if waku.selected_session().map(|session| session.id) != session_id {
+                if waku.transcript_session_id() != session_id {
                     return;
                 }
                 let detail = match result {
@@ -3210,6 +3211,14 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.big_picture.rush_session_id().is_some() {
+            if let Some(TranscriptCommitDetail::Ready(entry, workspace)) =
+                self.transcript_commit_details.get(sha)
+            {
+                self.open_commit_diff(workspace.clone(), &entry.clone(), cx);
+            }
+            return;
+        }
         // The Git panel cannot host a managed owner's commit view — the Boss
         // chat's SHA opens the commit in the right panel's Review tab instead,
         // experiment flag or not.

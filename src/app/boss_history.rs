@@ -352,10 +352,10 @@ impl Waku {
     }
 
     pub(super) fn transcript_session_for_turn(&self, turn_id: Uuid) -> Option<&AgentSession> {
-        self.selected_session()
+        self.transcript_session()
             .filter(|session| session.turns.iter().any(|turn| turn.id == turn_id))
             .or_else(|| {
-                let key = self.boss_chat_key()?;
+                let key = self.transcript_boss_chat_key()?;
                 self.boss_ui
                     .chat_history
                     .get(&key)?
@@ -371,14 +371,14 @@ impl Waku {
             .history_render_session
             .get()
             .and_then(|id| self.boss_history_session(id).map(|entry| &entry.session))
-            .or_else(|| self.selected_session())
+            .or_else(|| self.transcript_session())
     }
 
     pub(super) fn boss_history_chain(&self) -> (Vec<Uuid>, Option<Uuid>) {
-        let Some(key) = self.boss_chat_key() else {
+        let Some(key) = self.transcript_boss_chat_key() else {
             return (Vec::new(), None);
         };
-        let Some(live) = self.selected_session() else {
+        let Some(live) = self.transcript_session() else {
             return (Vec::new(), None);
         };
         self.boss_ui.chat_history.get(&key).map_or_else(
@@ -492,7 +492,7 @@ impl Waku {
         ) else {
             return;
         };
-        let Some(key) = self.boss_chat_key() else {
+        let Some(key) = self.transcript_boss_chat_key() else {
             return;
         };
         let loadable = self.boss_ui.chat_history.get(&key).is_none_or(|history| {
@@ -533,7 +533,7 @@ impl Waku {
             let _ = this.update(cx, |this, cx| {
                 // A request may finish after selection moved. Cache it for its
                 // owner, but never splice another chat's list or move its scroll.
-                let selected = this.boss_chat_key() == Some(key);
+                let selected = this.transcript_boss_chat_key() == Some(key);
                 let before = selected.then(|| {
                     let following = !this.transcript_is_scrolled.get();
                     if !following { this.pin_transcript_for_disclosure(); }

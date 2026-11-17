@@ -3487,14 +3487,16 @@ impl Waku {
     }
 
     pub(super) fn boss_chat_key(&self) -> Option<DaemonKey> {
+        self.boss_chat_key_for(self.selected_session()?)
+    }
+
+    pub(super) fn boss_chat_key_for(&self, session: &AgentSession) -> Option<DaemonKey> {
         if !self.state.boss_experiment_enabled {
             return None;
         }
-        let id = self.state.selected_session?;
-        let identity = self
-            .selected_session()
-            .filter(|session| session.boss_managed && session.planning.is_none())
-            .map(|session| session.project_id);
+        let id = session.id;
+        let identity =
+            (session.boss_managed && session.planning.is_none()).then_some(session.project_id);
         self.boss_ui.states.iter().find_map(|(key, state)| {
             // Keep the mounted predecessor a Boss chat while the catalog
             // and successor hydration catch up with the new pointer.
@@ -5371,7 +5373,7 @@ impl Waku {
     pub(super) fn selected_queued_employee(
         &self,
     ) -> Option<(DaemonKey, &waku_protocol::boss::BossEmployee)> {
-        let session_id = self.state.selected_session?;
+        let session_id = self.transcript_session_id()?;
         self.boss_ui.states.iter().find_map(|(key, state)| {
             state
                 .employees

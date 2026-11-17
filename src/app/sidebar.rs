@@ -8119,13 +8119,51 @@ impl Waku {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let content = self.render_task_header_content(screen, deliverable_header, None, window, cx);
+        self.render_header_frame(content, window, cx)
+    }
+
+    pub(super) fn render_rush_task_header(
+        &self,
+        session_id: Uuid,
+        controls: AnyElement,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        div()
+            .h(px(HEADER_HEIGHT))
+            .flex_none()
+            .px(px(14.0))
+            .child(self.render_task_header_content(
+                super::render::MainScreen::Session,
+                None,
+                Some((session_id, controls)),
+                window,
+                cx,
+            ))
+    }
+
+    fn render_task_header_content(
+        &self,
+        screen: super::render::MainScreen,
+        deliverable_header: Option<AnyElement>,
+        rush: Option<(Uuid, AnyElement)>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
         use super::render::MainScreen;
         let deliverable_page = deliverable_header.is_some();
         let session_surface = !deliverable_page
             && matches!(screen, MainScreen::Session | MainScreen::VoiceScratchpad);
-        let session = session_surface.then(|| self.selected_session()).flatten();
-        self.ensure_sidebar_pull_requests(cx);
+        let session = if let Some((id, _)) = &rush {
+            self.state.sessions.iter().find(|session| session.id == *id)
+        } else {
+            session_surface.then(|| self.selected_session()).flatten()
+        };
+        if rush.is_none() {
+            self.ensure_sidebar_pull_requests(cx);
+        }
         let title = match screen {
             MainScreen::Terminal(terminal_id) => self
                 .terminal_records
@@ -8192,163 +8230,161 @@ impl Waku {
         // roster record retires.
         let archived_chip = session_surface
             && session.is_some_and(|session| self.session_is_archived_employee(session));
-        let content = div()
+        let header = div()
             .w_full()
             .min_w_0()
             .h_full()
             .flex()
             .items_center()
+            .gap(px(7.0));
+        let title = div()
+            .id("header-title-drag-region")
+            .h_full()
+            .min_w_0()
+            .flex_shrink(1.0)
+            .flex()
+            .items_center()
             .gap(px(7.0))
-            .child(
-                self.window_drag_region(
+            .child(match (deliverable_header, &managed_identity) {
+                (Some(header), _) => header,
+                (None, Some((session_id, identity, job_title))) => {
+                    self.render_managed_session_identity(*session_id, identity, job_title, cx)
+                }
+                (None, None) => div()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(sp(13.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .child(SharedString::from(title.clone()))
+                    .into_any_element(),
+            })
+            .when(archived_chip, |element| {
+                element.child(
                     div()
-                        .id("header-title-drag-region")
-                        .h_full()
-                        .min_w_0()
-                        .flex_shrink(1.0)
+                        .id("session-archived-badge")
+                        .h(px(22.0))
+                        .px(px(6.0))
+                        .rounded(px(8.0))
+                        .flex_none()
                         .flex()
                         .items_center()
-                        .gap(px(7.0))
-                        .child(match (deliverable_header, &managed_identity) {
-                            (Some(header), _) => header,
-                            (None, Some((session_id, identity, job_title))) => self
-                                .render_managed_session_identity(
-                                    *session_id,
-                                    identity,
-                                    job_title,
-                                    cx,
-                                ),
-                            (None, None) => div()
-                                .min_w_0()
-                                .truncate()
-                                .text_size(sp(13.0))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text)
-                                .child(SharedString::from(title.clone()))
-                                .into_any_element(),
-                        })
-                        .when(archived_chip, |element| {
-                            element.child(
-                                div()
-                                    .id("session-archived-badge")
-                                    .h(px(22.0))
-                                    .px(px(6.0))
-                                    .rounded(px(8.0))
-                                    .flex_none()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(4.0))
-                                    .bg(theme.overlay)
-                                    .text_size(sp(12.5))
-                                    .text_color(theme.text_secondary)
-                                    .child(icon("icons/archive.svg", 11.0, theme.text_tertiary))
-                                    .child(tr_cow!("session.archived_chip")),
-                            )
-                        })
-                        .children(
-                            (managed_identity.is_none() && !deliverable_page)
-                                .then_some(employee_job_title)
-                                .flatten()
-                                .map(|job_title| {
-                                    div()
-                                        .h(px(22.0))
-                                        .max_w(px(180.0))
-                                        .px(px(6.0))
-                                        .rounded(px(8.0))
-                                        .flex_none()
-                                        .flex()
-                                        .items_center()
-                                        .gap(px(4.0))
-                                        .bg(theme.overlay)
-                                        .text_size(sp(12.5))
-                                        .text_color(theme.text_secondary)
-                                        .child(icon(
-                                            session
-                                                .and_then(|session| {
-                                                    self.boss_ui
-                                                        .employee_icons
-                                                        .get(&session.id)
-                                                        .copied()
-                                                        .flatten()
-                                                })
-                                                .map(crate::custom_commands::icon_path)
-                                                .unwrap_or_else(|| {
-                                                    super::boss::job_title_icon(job_title)
-                                                }),
-                                            11.0,
-                                            theme.text_tertiary,
-                                        ))
-                                        .child(div().min_w_0().truncate().child(job_title.clone()))
-                                }),
-                        )
-                        .children(agent_preset_label.map(|label| {
-                            div()
-                                .h(px(22.0))
-                                .max_w(px(180.0))
-                                .px(px(6.0))
-                                .rounded(px(8.0))
-                                .flex_none()
-                                .flex()
-                                .items_center()
-                                .gap(px(4.0))
-                                .bg(theme.overlay)
-                                .text_size(sp(12.5))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text_secondary)
-                                .child(icon("icons/bot.svg", 10.5, theme.text_tertiary))
-                                .child(div().min_w_0().truncate().child(SharedString::from(label)))
-                        }))
-                        // The environment's glyph only — the same icon the
-                        // access menu and its chip use, with the name on the
-                        // tooltip.
-                        .when(!environment.is_local(), |element| {
-                            let badge_label = match environment {
-                                SessionEnvironment::Sandbox => tr!("sandbox.badge"),
-                                SessionEnvironment::Cloud => tr!(
-                                    "sandbox.cloud_badge",
-                                    provider = session
-                                        .map(|session| session.provider.display_name())
-                                        .unwrap_or_default()
-                                ),
-                                SessionEnvironment::Local => unreachable!("filtered above"),
-                            };
-                            element.child(
-                                div()
-                                    .id("environment-badge")
-                                    .h(px(22.0))
-                                    .w(px(22.0))
-                                    .rounded(px(8.0))
-                                    .flex_none()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .bg(theme.overlay)
-                                    .child(icon(environment.icon(), 11.0, theme.text_secondary))
-                                    .tooltip(Tooltip::text(badge_label)),
-                            )
-                        })
-                        .when(
-                            session_surface && session.is_some_and(|session| session.incognito),
-                            |element| {
-                                element.child(
-                                    div()
-                                        .id("incognito-badge")
-                                        .h(px(22.0))
-                                        .w(px(22.0))
-                                        .rounded(px(8.0))
-                                        .flex_none()
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .bg(theme.overlay)
-                                        .child(icon("icons/ghost.svg", 11.0, theme.text_secondary))
-                                        .tooltip(Tooltip::text(tr!("session.incognito"))),
-                                )
-                            },
-                        ),
-                    cx,
-                ),
+                        .gap(px(4.0))
+                        .bg(theme.overlay)
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_secondary)
+                        .child(icon("icons/archive.svg", 11.0, theme.text_tertiary))
+                        .child(tr_cow!("session.archived_chip")),
+                )
+            })
+            .children(
+                (managed_identity.is_none() && !deliverable_page)
+                    .then_some(employee_job_title)
+                    .flatten()
+                    .map(|job_title| {
+                        div()
+                            .h(px(22.0))
+                            .max_w(px(180.0))
+                            .px(px(6.0))
+                            .rounded(px(8.0))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .gap(px(4.0))
+                            .bg(theme.overlay)
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_secondary)
+                            .child(icon(
+                                session
+                                    .and_then(|session| {
+                                        self.boss_ui
+                                            .employee_icons
+                                            .get(&session.id)
+                                            .copied()
+                                            .flatten()
+                                    })
+                                    .map(crate::custom_commands::icon_path)
+                                    .unwrap_or_else(|| super::boss::job_title_icon(job_title)),
+                                11.0,
+                                theme.text_tertiary,
+                            ))
+                            .child(div().min_w_0().truncate().child(job_title.clone()))
+                    }),
             )
+            .children(agent_preset_label.map(|label| {
+                div()
+                    .h(px(22.0))
+                    .max_w(px(180.0))
+                    .px(px(6.0))
+                    .rounded(px(8.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .bg(theme.overlay)
+                    .text_size(sp(12.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_secondary)
+                    .child(icon("icons/bot.svg", 10.5, theme.text_tertiary))
+                    .child(div().min_w_0().truncate().child(SharedString::from(label)))
+            }))
+            // The environment's glyph only — the same icon the
+            // access menu and its chip use, with the name on the
+            // tooltip.
+            .when(!environment.is_local(), |element| {
+                let badge_label = match environment {
+                    SessionEnvironment::Sandbox => tr!("sandbox.badge"),
+                    SessionEnvironment::Cloud => tr!(
+                        "sandbox.cloud_badge",
+                        provider = session
+                            .map(|session| session.provider.display_name())
+                            .unwrap_or_default()
+                    ),
+                    SessionEnvironment::Local => unreachable!("filtered above"),
+                };
+                element.child(
+                    div()
+                        .id("environment-badge")
+                        .h(px(22.0))
+                        .w(px(22.0))
+                        .rounded(px(8.0))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(theme.overlay)
+                        .child(icon(environment.icon(), 11.0, theme.text_secondary))
+                        .tooltip(Tooltip::text(badge_label)),
+                )
+            })
+            .when(
+                session_surface && session.is_some_and(|session| session.incognito),
+                |element| {
+                    element.child(
+                        div()
+                            .id("incognito-badge")
+                            .h(px(22.0))
+                            .w(px(22.0))
+                            .rounded(px(8.0))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .bg(theme.overlay)
+                            .child(icon("icons/ghost.svg", 11.0, theme.text_secondary))
+                            .tooltip(Tooltip::text(tr!("session.incognito"))),
+                    )
+                },
+            );
+        if let Some((_, controls)) = rush {
+            return header
+                .child(title)
+                .child(div().flex_1())
+                .child(controls)
+                .into_any_element();
+        }
+        header
+            .child(self.window_drag_region(title, cx))
             .child(
                 self.window_drag_region(
                     div().id("header-center-drag-region").h_full().flex_1(),
@@ -8364,8 +8400,7 @@ impl Waku {
                     })
                     .child(self.render_panel_toggles(cx))
             })
-            .into_any_element();
-        self.render_header_frame(content, window, cx)
+            .into_any_element()
     }
 
     // ── Empty states ───────────────────────────────────────────────────────

@@ -1808,6 +1808,12 @@ impl Waku {
     /// annotations still waiting on their editor, and the composer
     /// session's plan pins.
     pub(super) fn annotation_count(&self) -> usize {
+        if self.big_picture.rush_session_id().is_some() {
+            return self.transcript_selection.annotations.borrow().items.len()
+                + self
+                    .composer_plan_annotations()
+                    .map_or(0, |store| store.borrow().items.len());
+        }
         self.transcript_selection.annotations.borrow().items.len()
             + self
                 .right_panel_file_editors
@@ -1826,6 +1832,9 @@ impl Waku {
     }
 
     pub(super) fn has_annotations(&self) -> bool {
+        if self.big_picture.rush_session_id().is_some() {
+            return self.annotation_count() > 0;
+        }
         !self
             .transcript_selection
             .annotations
@@ -1860,27 +1869,27 @@ impl Waku {
             annotations.hovered = None;
             std::mem::take(&mut annotations.items)
         };
-        for editor in self.right_panel_file_editors.values() {
-            let mut annotations = editor.annotations.borrow_mut();
-            annotations.editing = None;
-            annotations.hovered = None;
-            items.extend(annotations.items.drain(..));
+        if self.big_picture.rush_session_id().is_none() {
+            for editor in self.right_panel_file_editors.values() {
+                let mut annotations = editor.annotations.borrow_mut();
+                annotations.editing = None;
+                annotations.hovered = None;
+                items.extend(annotations.items.drain(..));
+            }
+            items.extend(
+                std::mem::take(&mut self.pending_file_annotations)
+                    .into_values()
+                    .flatten(),
+            );
         }
-        items.extend(
-            std::mem::take(&mut self.pending_file_annotations)
-                .into_values()
-                .flatten(),
-        );
         // Only the composer session's plan ships with its message — another
         // session's staged plan annotations stay parked under their own id.
         let composer_plan = self.composer_session_id();
-        for (session_id, store) in &self.plan_annotations {
+        if let Some(store) = composer_plan.and_then(|id| self.plan_annotations.get(&id)) {
             let mut annotations = store.borrow_mut();
             annotations.editing = None;
             annotations.hovered = None;
-            if composer_plan == Some(*session_id) {
-                items.extend(annotations.items.drain(..));
-            }
+            items.append(&mut annotations.items);
         }
         items.sort_by_key(|annotation| annotation.id);
         items
@@ -1918,7 +1927,7 @@ impl Waku {
         let fingerprint = self.transcript_row_kinds_fingerprint.get();
         if self.annotation_ref_sets_fingerprint.get() != fingerprint {
             let mut resolved = HashMap::new();
-            if let Some(session) = self.selected_session()
+            if let Some(session) = self.transcript_session()
                 && let Some(sets) = self.sent_annotations.get(&session.id)
             {
                 let mut current = None;
@@ -1964,7 +1973,7 @@ impl Waku {
                 return;
             }
             let before = annotations.items.len();
-            match self.selected_session() {
+            match self.transcript_session() {
                 Some(session) => {
                     annotations.items.retain(|annotation| {
                         // A pin on an earlier boss chat quotes a snapshot,

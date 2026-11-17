@@ -4300,8 +4300,8 @@ impl Waku {
                             turn.status == TurnStatus::Running && !turn.provider_turn_started
                         })
                         .map(|turn| turn.id);
-                    let boss_rows = (self.boss_chat_key().is_some()
-                        && self.state.selected_session == Some(session_id))
+                    let boss_rows = (self.transcript_boss_chat_key().is_some()
+                        && self.transcript_session_id() == Some(session_id))
                     .then(|| self.transcript_row_kinds.borrow().clone());
                     let detail_arrived = !self.state.sessions[index].detail_loaded
                         && (prepared.hydrated_session.is_some()
@@ -4314,7 +4314,7 @@ impl Waku {
                     let selected_before_refresh = self.state.selected_session;
                     self.reconcile_boss_chat_refresh(cx);
                     let refreshed = selected_before_refresh != self.state.selected_session;
-                    if !refreshed && self.state.selected_session == Some(session_id) {
+                    if !refreshed && self.transcript_session_id() == Some(session_id) {
                         if let Some(previous) = boss_rows {
                             // Attaching the successor's runtime is data arrival,
                             // not a second landing after an in-place refresh.
@@ -4441,7 +4441,7 @@ impl Waku {
             self.pending_checkpoint_captures.push(checkpoint);
             self.start_pending_checkpoint_captures(cx);
         }
-        if self.state.selected_session == Some(session_id) {
+        if self.transcript_session_id() == Some(session_id) {
             self.reset_visible_state();
             self.reset_transcript_rows(self.transcript_row_count());
             self.reapply_transcript_landing(session_id, cx);
@@ -4558,7 +4558,7 @@ impl Waku {
         }
         self.state.mark_session_dirty(session_id);
         signal_event_pump(&self.event_wake_tx);
-        if self.state.selected_session == Some(session_id) {
+        if self.transcript_session_id() == Some(session_id) {
             self.reset_visible_state();
             self.reset_transcript_rows(self.transcript_row_count());
             self.reapply_transcript_landing(session_id, cx);
@@ -5385,7 +5385,7 @@ impl Waku {
     }
 
     pub(super) fn selected_transcript_blocks(&self) -> &[TranscriptBlock] {
-        self.selected_session()
+        self.transcript_session()
             .map(|session| session.transcript_blocks.as_slice())
             .unwrap_or(&[])
     }
@@ -8528,7 +8528,7 @@ impl Waku {
         // A fresh send supersedes whatever the sign-in gate parked — the
         // exit path must not resurrect the older prompt on top of this one.
         self.sandbox_pending_submissions.remove(&session_id);
-        let selected = self.state.selected_session == Some(session_id);
+        let selected = self.transcript_session_id() == Some(session_id);
         // Submitting to an offline remote is use: hold the submission, run
         // the interactive connect, and send when the daemon lands. A failed
         // or cancelled attempt restores the composer.
@@ -9072,7 +9072,7 @@ impl Waku {
             }
             return;
         }
-        let selected = self.state.selected_session == Some(session_id);
+        let selected = self.transcript_session_id() == Some(session_id);
         let prepared = match prepared {
             Ok(prepared) => prepared,
             Err(error) => {
@@ -9639,6 +9639,9 @@ impl Waku {
     }
 
     pub(super) fn task_detail_visible(&self, session_id: Uuid) -> bool {
+        if let Some(rushed) = self.big_picture.rush_session_id() {
+            return session_id == rushed;
+        }
         if self.big_picture_open() {
             return self.big_picture_card_visible(session_id);
         }

@@ -63,6 +63,24 @@ pub(super) fn working_indicator_label(
 }
 
 impl Waku {
+    /// The modal can host a task without changing workspace selection.
+    pub(super) fn transcript_session_id(&self) -> Option<Uuid> {
+        self.attention_session_id()
+    }
+
+    pub(super) fn transcript_session(&self) -> Option<&AgentSession> {
+        let id = self.transcript_session_id()?;
+        self.state.sessions.iter().find(|session| session.id == id)
+    }
+
+    pub(super) fn transcript_workspace_path(&self) -> Option<&Path> {
+        self.workspace_path_for_session(self.transcript_session()?)
+    }
+
+    pub(super) fn transcript_boss_chat_key(&self) -> Option<waku_client::DaemonKey> {
+        self.boss_chat_key_for(self.transcript_session()?)
+    }
+
     /// One list row per message plus each ordered non-message turn block.
     pub(super) fn transcript_row_count(&self) -> usize {
         self.refresh_transcript_row_kinds()
@@ -113,7 +131,7 @@ impl Waku {
 
     fn scan_transcript_rows_fingerprint(&self) -> u64 {
         let revision = self
-            .boss_chat_key()
+            .transcript_boss_chat_key()
             .and_then(|key| self.boss_ui.chat_history.get(&key))
             .map_or(0, |history| history.revision);
         // The queued card's presence lives in `boss_ui`, not the session —
@@ -123,8 +141,7 @@ impl Waku {
         // The window sentinel lives in `transcript_views` — paging state
         // moving refolds the top row.
         let windowed = self
-            .state
-            .selected_session
+            .transcript_session_id()
             .and_then(|id| self.transcript_views.get(&id))
             .map_or(0, |view| {
                 mix(
@@ -137,26 +154,22 @@ impl Waku {
             });
         // Counsel card rows live in `boss_ui` too: a proposal landing or a
         // record arriving through a state push must refold the transcript.
-        let counsel = self
-            .counsel_chat_key()
-            .and_then(|key| self.boss_ui.states.get(&key))
-            .map_or(0, |state| {
-                state
-                    .counsel
-                    .recommendations
-                    .iter()
-                    .fold(state.counsel.revision, |hash, record| {
-                        mix_uuid(
-                            mix(hash, record.anchor.is_some() as u64),
-                            record.id,
-                        )
-                    })
-            });
+        let counsel =
+            self.counsel_chat_key()
+                .and_then(|key| self.boss_ui.states.get(&key))
+                .map_or(0, |state| {
+                    state.counsel.recommendations.iter().fold(
+                        state.counsel.revision,
+                        |hash, record| {
+                            mix_uuid(mix(hash, record.anchor.is_some() as u64), record.id)
+                        },
+                    )
+                });
         mix(
             mix(
                 mix(
                     mix(
-                        self.selected_session()
+                        self.transcript_session()
                             .map_or(EMPTY_TRANSCRIPT_FINGERPRINT, |session| {
                                 transcript_rows_fingerprint(
                                     session,
@@ -177,7 +190,7 @@ impl Waku {
     fn fold_transcript_row_kinds_if_stale(&self, fingerprint: u64) -> usize {
         if self.transcript_row_kinds_fingerprint.get() != Some(fingerprint) {
             let mut next_kinds = self.selected_transcript_row_kinds();
-            let session = self.selected_session();
+            let session = self.transcript_session();
             let mut contexts = self.transcript_reference_contexts.borrow_mut();
             contexts.clear();
             let (history, _) = self.boss_history_chain();
@@ -192,7 +205,7 @@ impl Waku {
                 }
             }
             if let Some(session) = session {
-                let boss_chat = self.boss_chat_key().is_some();
+                let boss_chat = self.transcript_boss_chat_key().is_some();
                 let mut seen = HashSet::new();
                 for prompt in session
                     .messages
@@ -252,7 +265,7 @@ impl Waku {
     }
 
     pub(super) fn selected_transcript_row_kinds(&self) -> Vec<TranscriptRowKind> {
-        let Some(session) = self.selected_session() else {
+        let Some(session) = self.transcript_session() else {
             return Vec::new();
         };
         let pending = self.blocked_checkpoint_turn(session.id);
@@ -262,7 +275,7 @@ impl Waku {
             .transcript_views
             .get(&session.id)
             .is_some_and(|view| view.has_more_before);
-        if let Some(key) = self.boss_chat_key() {
+        if let Some(key) = self.transcript_boss_chat_key() {
             let mut rows = self.boss_ui.chat_history.get(&key).map_or_else(
                 || {
                     super::boss_history::BossChatHistory::default().transcript_rows(
@@ -340,7 +353,7 @@ impl Waku {
         if let Some(cached) = self.assistant_footer_cache.borrow().get(&message_index) {
             return cached.clone();
         }
-        let value = self.selected_session().map_or((None, None), |session| {
+        let value = self.transcript_session().map_or((None, None), |session| {
             (
                 assistant_response_footer(session, message_index).map(SharedString::from),
                 assistant_response_footer_time(session, message_index),
@@ -367,10 +380,10 @@ impl Waku {
         if self.transcript_navigation_turns_fingerprint.get() != fingerprint {
             let kinds = self.transcript_row_kinds.borrow();
             let turns =
-                self.selected_session()
+                self.transcript_session()
                     .map(|session| {
                         if let Some(history) = self
-                            .boss_chat_key()
+                            .transcript_boss_chat_key()
                             .and_then(|key| self.boss_ui.chat_history.get(&key))
                         {
                             let mut turns = history.navigation_turns(session, &kinds);
@@ -393,8 +406,7 @@ impl Waku {
                     })
                     .unwrap_or_default();
             let view = self
-                .state
-                .selected_session
+                .transcript_session_id()
                 .and_then(|id| self.transcript_views.get(&id));
             let base = view.map_or(0, |view| view.message_base as usize);
             let window_start = kinds
@@ -512,7 +524,7 @@ impl Waku {
         &self,
         session_id: Uuid,
     ) -> Option<Vec<TranscriptRowKind>> {
-        if self.state.selected_session != Some(session_id) {
+        if self.transcript_session_id() != Some(session_id) {
             return None;
         }
         self.sync_transcript_rows();
@@ -543,7 +555,7 @@ impl Waku {
 
     pub(super) fn selected_transcript_anchor_row(&self) -> Option<usize> {
         let anchor = self.transcript_anchor.get()?;
-        let selected = self.selected_session()?;
+        let selected = self.transcript_session()?;
         let historical = selected.id != anchor.session_id;
         let session = if historical {
             if !self.boss_history_chain().0.contains(&anchor.session_id) {
@@ -606,7 +618,7 @@ impl Waku {
     /// the list has not measured yet is past the rendered window, so it
     /// counts as below the viewport rather than on it.
     pub(super) fn transcript_watches_live_turn(&self) -> bool {
-        let Some(session) = self.selected_session() else {
+        let Some(session) = self.transcript_session() else {
             return false;
         };
         if !session.is_busy() {
@@ -633,7 +645,7 @@ impl Waku {
     /// The top visible row belongs to the latest turn. A glimpse of that turn
     /// below earlier content is not enough to override the reader's preference.
     pub(super) fn transcript_watches_latest_turn(&self) -> bool {
-        let Some(session) = self.selected_session() else {
+        let Some(session) = self.transcript_session() else {
             return false;
         };
         let Some(turn) = session.turns.last() else {
@@ -666,7 +678,7 @@ impl Waku {
     /// which is the only reason to override the position the reader left it
     /// at.
     pub(super) fn apply_transcript_landing(&mut self, attention: bool, cx: &mut Context<Self>) {
-        let Some(session_id) = self.state.selected_session else {
+        let Some(session_id) = self.transcript_session_id() else {
             return;
         };
         // A deep-linked search hit owns the landing: reveal the matched
@@ -698,10 +710,13 @@ impl Waku {
     /// Re-apply the landing activation chose after a late runtime attach or
     /// interrupt resets the rows a second time.
     pub(super) fn reapply_transcript_landing(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        let Some((landing_session, landing)) = self.transcript_landing.take() else {
-            return;
-        };
-        if landing_session == session_id {
+        if self.transcript_session_id() == Some(session_id)
+            && self
+                .transcript_landing
+                .as_ref()
+                .is_some_and(|(id, _)| *id == session_id)
+            && let Some((_, landing)) = self.transcript_landing.take()
+        {
             self.scroll_to_transcript_landing(landing, cx);
         }
     }
@@ -817,13 +832,8 @@ impl Waku {
         }
     }
 
-    pub(super) fn sync_transcript_layout_width(&self, window: &Window) -> bool {
-        let (sidebar_width, right_panel_width) = self.effective_panel_widths(window);
-        let sidebar_width = px(sidebar_width);
-        let right_panel_width = px(right_panel_width);
-        let content_width =
-            (window.viewport_size().width - sidebar_width - right_panel_width - px(40.0))
-                .clamp(px(1.0), px(CONTENT_MAX_WIDTH));
+    pub(super) fn sync_transcript_layout_width(&self, viewport_width: f32) -> bool {
+        let content_width = (px(viewport_width) - px(40.0)).clamp(px(1.0), px(CONTENT_MAX_WIDTH));
         let previous = self.transcript_layout_width.replace(content_width);
         if previous > Pixels::ZERO && (previous - content_width).abs() < px(1.0) {
             return false;
@@ -878,7 +888,7 @@ impl Waku {
 
     pub(super) fn remeasure_changed_files(&self, turn_id: Uuid) {
         self.sync_transcript_rows();
-        let target = self.selected_session()
+        let target = self.transcript_session()
             .and_then(|session| response_footer_message_index(session, turn_id))
             .map(|index| TranscriptRowKind::ResponseFooter(turn_id, index))
             .or_else(|| self.transcript_row_kinds.borrow().iter().find(|kind| {

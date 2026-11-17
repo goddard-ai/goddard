@@ -542,14 +542,19 @@ impl Waku {
     pub(super) fn render_session_composer_lane(
         &mut self,
         approval_visible: bool,
-        window: &mut Window,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> Div {
         let lane_height = self.composer_lane_height.clone();
+        let measure_main_lane = self.big_picture.rush_session_id().is_none();
         composer_lane(approval_visible, self.main_composer_press_to_talk_claimed())
             .child(
                 canvas(
-                    move |bounds, _, _| lane_height.set(f32::from(bounds.size.height)),
+                    move |bounds, _, _| {
+                        if measure_main_lane {
+                            lane_height.set(f32::from(bounds.size.height));
+                        }
+                    },
                     |_, _, _, _| (),
                 )
                 .absolute()
@@ -577,18 +582,31 @@ impl Waku {
         self.render_sidebar(width, window, cx).into_any_element()
     }
 
+    pub(super) fn render_task_transcript(&self) -> AnyElement {
+        self.transcript_pane
+            .clone()
+            .cached(StyleRefinement::default().flex_1().min_h(px(0.0)).w_full())
+            .into_any_element()
+    }
+
     /// [`WakuPane`] delegate for the transcript island.
     pub(super) fn transcript_pane_content(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let chat_viewport_width = self.chat_viewport_width(window);
+        let chat_viewport_width = if self.big_picture.rush_session_id().is_some() {
+            self.rush_task_width(window)
+        } else {
+            self.chat_viewport_width(window)
+        };
         // The transcript's own element sizes itself with `flex_1`, which only
         // stretches inside a flex parent. A cached pane lays its content out
         // as a root, so give it that parent here or its height collapses to
         // the zero flex basis.
         div()
+            .id("task-transcript")
+            .debug_selector(|| "task-transcript".into())
             .size_full()
             .flex()
             .flex_col()
@@ -1089,7 +1107,10 @@ impl Render for Waku {
                         MainScreen::Projects => self.render_projects_page(window, cx),
                         MainScreen::Inbox => self.render_inbox_page(window, cx),
                         MainScreen::Session => {
-                            if agy_surface {
+                            if self.big_picture.rush_session_id().is_some() && !agy_surface {
+                                // The shared transcript pane is mounted inside the modal.
+                                div().flex_1().min_h_0().into_any_element()
+                            } else if agy_surface {
                                 self.render_agy_surface(self.chat_viewport_width(window), cx)
                             } else if empty && self.boss_chat_key().is_some() {
                                 self.render_boss_chat_empty_state(cx).into_any_element()
@@ -1103,12 +1124,7 @@ impl Render for Waku {
                             {
                                 self.render_empty_state(cx).into_any_element()
                             } else {
-                                self.transcript_pane
-                                    .clone()
-                                    .cached(
-                                        StyleRefinement::default().flex_1().min_h(px(0.0)).w_full(),
-                                    )
-                                    .into_any_element()
+                                self.render_task_transcript()
                             }
                         }
                     })

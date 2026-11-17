@@ -574,7 +574,7 @@ impl Waku {
     /// touch the filesystem directly.
     pub(super) fn refresh_composer_sources(&mut self, cx: &mut Context<Self>) {
         let Some(files_key) = self
-            .selected_session()
+            .transcript_session()
             .and_then(|session| self.mention_files_key(session))
         else {
             self.slash_command_index = Rc::new(Vec::new());
@@ -587,11 +587,11 @@ impl Waku {
         };
         let project_path = files_key.0.clone();
         let provider = self
-            .selected_session()
+            .transcript_session()
             .map(|session| session.provider)
             .unwrap_or(self.state.last_provider);
         let reported = self
-            .selected_session()
+            .transcript_session()
             .map(|session| session.available_commands.clone())
             .unwrap_or_default();
         let binary_override = self.state.provider_binary_overrides.get(&provider).cloned();
@@ -605,7 +605,8 @@ impl Waku {
                 }
                 // Counsel is a separate conversation on the same daemon.
                 if self.state.boss_experiment_enabled
-                    && (self.boss_chat_key().is_some() || self.counsel_chat_key().is_some())
+                    && (self.transcript_boss_chat_key().is_some()
+                        || self.counsel_chat_key().is_some())
                 {
                     merged.retain(|command| command.name != "counsel");
                     merged.push(SlashCommand {
@@ -619,7 +620,7 @@ impl Waku {
                 // `/clear` is the Boss chat's own reset — offered only on
                 // that surface and shadowing any provider entry so the
                 // shown row matches what Enter actually runs.
-                if self.boss_chat_key().is_some() {
+                if self.transcript_boss_chat_key().is_some() {
                     merged.retain(|command| command.name != "clear");
                     merged.push(SlashCommand {
                         name: "clear".to_owned(),

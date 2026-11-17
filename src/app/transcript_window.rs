@@ -705,7 +705,7 @@ impl Waku {
     /// A rail target outside the slice is an entry reveal, never a reason to
     /// hydrate every intervening transcript page. Only the latest click wins.
     pub(super) fn load_navigation_turn(&mut self, message_id: Uuid, cx: &mut Context<Self>) {
-        let Some(session_id) = self.state.selected_session else {
+        let Some(session_id) = self.transcript_session_id() else {
             return;
         };
         let Some(daemon) = self.daemon_for_session(session_id) else {
@@ -738,6 +738,7 @@ impl Waku {
                 })
                 .await;
             let _ = waku.update(cx, |waku, cx| {
+                let visible = waku.transcript_session_id() == Some(session_id);
                 let Some(view) = waku.transcript_views.get_mut(&session_id) else {
                     return;
                 };
@@ -745,7 +746,7 @@ impl Waku {
                     return;
                 }
                 view.navigation_request = None;
-                if waku.state.selected_session != Some(session_id) {
+                if !visible {
                     return;
                 }
                 let window = match result {
@@ -784,14 +785,14 @@ impl Waku {
     }
 
     fn snapshot_history_page_rows(&self, session_id: Uuid) -> Option<Vec<HistoryPageRow>> {
-        if self.state.selected_session != Some(session_id) {
+        if self.transcript_session_id() != Some(session_id) {
             return None;
         }
         self.sync_transcript_rows();
         if self.transcript_is_scrolled.get() {
             self.pin_transcript_for_disclosure();
         }
-        let session = self.selected_session()?;
+        let session = self.transcript_session()?;
         let view = self.transcript_views.get(&session_id)?;
         Some(history_page_rows(
             session,
@@ -802,7 +803,7 @@ impl Waku {
 
     fn splice_history_page(&self, previous: &[HistoryPageRow]) {
         self.refresh_transcript_row_kinds();
-        let Some(session) = self.selected_session() else {
+        let Some(session) = self.transcript_session() else {
             return;
         };
         let Some(view) = self.transcript_views.get(&session.id) else {
@@ -828,7 +829,7 @@ impl Waku {
     /// Prefetch from measured layout, including on a tail-pinned fresh open.
     /// Failed reads wait for an explicit retry instead of looping every frame.
     pub(super) fn load_transcript_history_at_top(&mut self, cx: &mut Context<Self>) {
-        let Some(session_id) = self.state.selected_session else {
+        let Some(session_id) = self.transcript_session_id() else {
             return;
         };
         self.load_transcript_history_at_bottom(session_id, cx);

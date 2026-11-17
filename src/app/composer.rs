@@ -5611,11 +5611,13 @@ impl Waku {
         // The queue never shares the lane with a deliverable's page or a
         // visible VoicePad — the pad's card underlaps the lane the queue
         // would paint into.
-        if self.live_deliverable_page().is_some() || self.voice_scratchpad_visible() {
+        if self.big_picture.rush_session_id().is_none()
+            && (self.live_deliverable_page().is_some() || self.voice_scratchpad_visible())
+        {
             queue_bounds.set(None);
             return None;
         }
-        let Some(session) = self.selected_session() else {
+        let Some(session) = self.transcript_session() else {
             queue_bounds.set(None);
             return None;
         };
@@ -5643,10 +5645,12 @@ impl Waku {
     }
 
     pub(super) fn queued_messages_visible(&self) -> bool {
-        if self.live_deliverable_page().is_some() || self.voice_scratchpad_visible() {
+        if self.big_picture.rush_session_id().is_none()
+            && (self.live_deliverable_page().is_some() || self.voice_scratchpad_visible())
+        {
             return false;
         }
-        self.selected_session()
+        self.transcript_session()
             .is_some_and(|session| self.has_visible_queued_messages(session))
     }
 
@@ -6378,11 +6382,12 @@ impl Waku {
         // Accessory chips borrow the transcript's airspace without changing
         // its viewport. Anchor their bottom above the parked queue so wrapped
         // rows grow upward; only the queue reserves height in the lane.
-        let queue_height = if self.big_picture.is_open() {
-            0.0
-        } else {
-            self.composer_autocomplete.queue_card_height()
-        };
+        let queue_height =
+            if self.big_picture.is_open() && self.big_picture.rush_session_id().is_none() {
+                0.0
+            } else {
+                self.composer_autocomplete.queue_card_height()
+            };
         div()
             .w_full()
             .flex_none()

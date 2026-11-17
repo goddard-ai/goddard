@@ -920,7 +920,7 @@ impl Waku {
                             });
                         if applied {
                             waku.state.mark_session_dirty(session_id);
-                            if waku.state.selected_session == Some(session_id) {
+                            if waku.transcript_session_id() == Some(session_id) {
                                 waku.reset_transcript_rows(waku.transcript_row_count());
                             }
                             waku.save();
@@ -1302,12 +1302,21 @@ impl Waku {
                                             offset_in_item,
                                         });
                                     }
-                                    waku.store_transcript_scroll_position();
-                                    waku.transcript_landing = Some((
-                                        session_id,
-                                        waku.saved_transcript_landing(session_id)
-                                            .unwrap_or(TranscriptLanding::Tail),
-                                    ));
+                                    if waku.big_picture.rush_session_id().is_none() {
+                                        waku.store_transcript_scroll_position();
+                                        waku.transcript_landing = Some((
+                                            session_id,
+                                            waku.saved_transcript_landing(session_id)
+                                                .unwrap_or(TranscriptLanding::Tail),
+                                        ));
+                                    }
+                                }
+                                if applied
+                                    && previous_rows.is_none()
+                                    && waku.big_picture.rush_session_id() == Some(session_id)
+                                {
+                                    waku.reset_transcript_rows(waku.transcript_row_count());
+                                    waku.reapply_transcript_landing(session_id, cx);
                                 }
                                 waku.finish_selected_session_hydration(
                                     session_id,
@@ -1408,7 +1417,7 @@ impl Waku {
         }
         // Selection already reset the departing view and restored this draft.
         // A data arrival must preserve typing, annotations and an open paste editor.
-        if detail_arrived {
+        if detail_arrived && self.big_picture.rush_session_id().is_none() {
             self.reset_transcript_rows(self.transcript_row_count());
             // The loading view cannot scroll. Re-apply even a saved Position
             // that set `transcript_is_scrolled` before any rows existed.
@@ -1530,6 +1539,9 @@ impl Waku {
     }
 
     fn activate_session(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        if self.big_picture.rush_session_id().is_some() {
+            self.dismiss_big_picture(cx);
+        }
         self.transcript_preloads.cancel_hover();
         let session_changed = self.state.selected_session != Some(session_id);
         if session_changed {
@@ -2173,6 +2185,9 @@ impl Waku {
     /// Park the departing session's scroll position for back/forward history.
     /// Runs while `selected_session` still points at the session being left.
     pub(super) fn store_transcript_scroll_position(&mut self) {
+        if self.big_picture.rush_session_id().is_some() {
+            return;
+        }
         let Some(session_id) = self.state.selected_session else {
             return;
         };
@@ -5945,9 +5960,10 @@ impl Waku {
         // Annotations are session-scoped too, but survive a round trip: park
         // the departing set under its session id, then load the arriving
         // session's parked set (usually none). `annotation_session` tracks who
-        // owns the live set because `selected_session` already points at the
-        // new session by the time this runs.
+        // owns the live set because the transcript already targets the new
+        // session by the time this runs.
         {
+            let session_id = self.transcript_session_id();
             let mut annotations = self.transcript_selection.annotations.borrow_mut();
             if let Some(owner) = self.annotation_session.take() {
                 self.transcript_annotations
@@ -5956,8 +5972,8 @@ impl Waku {
             annotations.hovered = None;
             annotations.hovered_ref = None;
             annotations.editing = None;
-            self.annotation_session = self.state.selected_session;
-            if let Some(id) = self.state.selected_session {
+            self.annotation_session = session_id;
+            if let Some(id) = self.annotation_session {
                 annotations.items = self.transcript_annotations.remove(&id).unwrap_or_default();
             }
         }
@@ -5979,7 +5995,7 @@ impl Waku {
             })
         });
         self.reset_transcript_search_for_session();
-        let (streaming_messages, live_reasoning) = self.selected_session().map_or_else(
+        let (streaming_messages, live_reasoning) = self.transcript_session().map_or_else(
             || (Vec::new(), Vec::new()),
             |session| {
                 let messages = session
@@ -7909,9 +7925,7 @@ impl Waku {
     /// shared composer-adjacent input for the selected session, the card's
     /// own entity for a supervisor-surfaced employee request.
     fn user_input_answer_for(&self, session_id: Uuid) -> Option<Entity<TextInput>> {
-        if self.state.selected_session == Some(session_id)
-            || self.big_picture.rush_session_id() == Some(session_id)
-        {
+        if self.attention_session_id() == Some(session_id) {
             Some(self.user_input_answer.clone())
         } else {
             self.employee_input_answers.get(&session_id).cloned()

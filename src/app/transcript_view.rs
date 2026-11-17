@@ -275,7 +275,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if let Some(session_id) = self
-            .selected_session()
+            .transcript_session()
             .filter(|session| !session.detail_loaded)
             .map(|session| session.id)
         {
@@ -314,7 +314,7 @@ impl Waku {
         });
         self.retire_fading_working_indicator(cx);
         self.retire_fading_queued_card(cx);
-        self.sync_transcript_layout_width(window);
+        self.sync_transcript_layout_width(chat_viewport_width);
         self.apply_pending_transcript_search_reveal(window, cx);
         self.apply_pending_transcript_match_reveal(window, cx);
         self.prune_transcript_annotations(cx);
@@ -325,12 +325,7 @@ impl Waku {
         let annotation_ref_tooltip = self.render_annotation_ref_tooltip(cx);
         let commit_popover = self.render_transcript_commit_popover(cx);
         let boss_lifecycle = self.render_boss_lifecycle_status(cx);
-        let daemon_request = self
-            .big_picture
-            .rush_session_id()
-            .is_none()
-            .then(|| self.render_daemon_request(cx))
-            .flatten();
+        let daemon_request = self.render_daemon_request(cx);
         let employee_requests = self.render_employee_requests(window, cx);
         let transcript_rows = self.active_transcript_rows().clone();
         // A scrollbar drag owns the position for as long as it lasts, and the
@@ -428,8 +423,7 @@ impl Waku {
             let navigation_rail_visible = should_show_navigation_rail(
                 transcript_scrollable
                     || self
-                        .state
-                        .selected_session
+                        .transcript_session_id()
                         .is_some_and(|id| self.session_transcript_is_partial(id)),
                 navigation_turns.len(),
                 chat_viewport_width,
@@ -437,8 +431,7 @@ impl Waku {
             let scroll_top_row = transcript_rows.logical_scroll_top().item_ix;
             let at_full_tail = !self.transcript_is_scrolled.get()
                 && self
-                    .state
-                    .selected_session
+                    .transcript_session_id()
                     .and_then(|id| self.transcript_views.get(&id))
                     .is_none_or(|view| !view.has_more_after);
             let active_turn = self
@@ -830,7 +823,7 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
-        let Some(selected) = self.state.selected_session else {
+        let Some(selected) = self.transcript_session_id() else {
             return Vec::new();
         };
         // Answer fields for requests that settled or vanished go with them.
@@ -940,7 +933,7 @@ impl Waku {
     /// handoff worth reporting.
     fn render_boss_lifecycle_status(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         use waku_protocol::boss::{BossOperation, BossRotationPhase};
-        let session_id = self.state.selected_session?;
+        let session_id = self.transcript_session_id()?;
         let (key, status) = self.boss_ui.states.iter().find_map(|(key, state)| {
             if state.session_id != Some(session_id) {
                 return None;
@@ -1088,6 +1081,17 @@ impl Waku {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.big_picture.rush_session_id().is_some() {
+            if let Some(item) = self
+                .transcript_selection
+                .selection
+                .borrow()
+                .clipboard_item()
+            {
+                cx.write_to_clipboard(item);
+            }
+            return;
+        }
         let reviewing_diff = self.right_panel_visible
             && self
                 .right_panel_active_surface
@@ -1603,7 +1607,7 @@ impl Waku {
             .find(|turn| turn.message_id == message_id)
             .cloned();
         let Some(target) = target else { return };
-        if let Some(id) = self.state.selected_session
+        if let Some(id) = self.transcript_session_id()
             && let Some(view) = self.transcript_views.get_mut(&id)
         {
             view.navigation_request = None;
@@ -1617,7 +1621,7 @@ impl Waku {
             self.transcript_is_scrolled.set(true);
             cx.notify();
         } else if let Some(session_id) = self
-            .selected_session()
+            .transcript_session()
             .filter(|session| {
                 session
                     .messages
@@ -1746,11 +1750,6 @@ impl Waku {
         current: bool,
         cx: &mut Context<Self>,
     ) {
-        if self.big_picture.rush_session_id() == Some(session_id) {
-            self.set_rush_activity_expanded(session_id, block_index, !current);
-            cx.notify();
-            return;
-        }
         if self.boss_history_session(session_id).is_some() {
             self.pin_transcript_for_disclosure();
             for history in self.boss_ui.chat_history.values_mut() {
@@ -1769,7 +1768,7 @@ impl Waku {
             cx.notify();
             return;
         }
-        if self.state.selected_session != Some(session_id) {
+        if self.transcript_session_id() != Some(session_id) {
             let Some(view) = self.side_chat_views.get_mut(&session_id) else {
                 return;
             };
@@ -1805,7 +1804,7 @@ impl Waku {
                 .transcript_blocks
                 .iter()
                 .position(|block| block.activities.iter().any(|activity| activity.id == id))
-        } else if self.state.selected_session == Some(session_id) {
+        } else if self.transcript_session_id() == Some(session_id) {
             self.selected_transcript_blocks()
                 .iter()
                 .position(|block| block.activities.iter().any(|activity| activity.id == id))
@@ -1824,16 +1823,6 @@ impl Waku {
         let Some(block_index) = block_index else {
             return;
         };
-        if self.big_picture.rush_session_id() == Some(session_id) {
-            self.expanded_activity_items.insert(id, !current);
-            if current {
-                self.activity_diffs.borrow_mut().remove(&id);
-                self.activity_diff_viewports.borrow_mut().remove(&id);
-            }
-            self.remeasure_rush_block(session_id, block_index);
-            cx.notify();
-            return;
-        }
         if self.boss_history_session(session_id).is_some() {
             self.pin_transcript_for_disclosure();
             self.expanded_activity_items.insert(id, !current);
@@ -1852,7 +1841,7 @@ impl Waku {
             cx.notify();
             return;
         }
-        if self.state.selected_session != Some(session_id) {
+        if self.transcript_session_id() != Some(session_id) {
             self.expanded_activity_items.insert(id, !current);
             if current {
                 self.activity_diffs.borrow_mut().remove(&id);
@@ -2072,7 +2061,7 @@ impl Waku {
     /// cache which retained turn counts have one. The rewind affordance
     /// appears once the result lands and notifies.
     fn prefetch_checkpoint_refs(&self, cx: &mut Context<Self>) {
-        let Some(session) = self.selected_session() else {
+        let Some(session) = self.transcript_session() else {
             return;
         };
         let generation = self.checkpoint_ref_generation.get();
@@ -2331,13 +2320,13 @@ impl Waku {
                 return self.render_boss_history_boundary(id, cx);
             }
             Some(TranscriptRowKind::HistoryBoundary) => {
-                let Some(session_id) = self.state.selected_session else {
+                let Some(session_id) = self.transcript_session_id() else {
                     return div().into_any_element();
                 };
                 return self.render_transcript_history_boundary(session_id, false, cx);
             }
             Some(TranscriptRowKind::FutureBoundary) => {
-                let Some(session_id) = self.state.selected_session else {
+                let Some(session_id) = self.transcript_session_id() else {
                     return div().into_any_element();
                 };
                 return self.render_transcript_history_boundary(session_id, true, cx);
@@ -2490,8 +2479,7 @@ impl Waku {
                         })
                         .collect();
                     let attachments_can_reveal = !self
-                        .state
-                        .selected_session
+                        .transcript_session_id()
                         .is_some_and(|id| self.is_remote_session(id));
                     let menu = self.menu_handle(format!("message-{}", message.id), cx);
                     let user_message_viewport = (message.role == MessageRole::User).then(|| {
@@ -2557,7 +2545,7 @@ impl Waku {
                     if message.role == MessageRole::User {
                         ctx = ctx
                             .with_file_link_root(
-                                self.selected_workspace_path()
+                                self.transcript_workspace_path()
                                     .map(std::path::Path::to_path_buf),
                             )
                             // Tables in a user bubble fade into its raised fill,
@@ -2572,7 +2560,7 @@ impl Waku {
                     // just without the bare-name matching.
                     ctx = ctx.with_mention_glyphs(self.mention_glyphs());
                     if let Some(key) = self
-                        .boss_chat_key()
+                        .transcript_boss_chat_key()
                         .or_else(|| self.selected_surface_boss_key())
                     {
                         let (mentions, avatars) = self.boss_session_mentions(key);
@@ -2749,9 +2737,7 @@ impl Waku {
                 let session_id = self.transcript_display_session().map(|session| session.id);
                 session_id
                     .map(|session_id| {
-                        self.render_counsel_recommendation_row(
-                            session_id, id, &theme, window, cx,
-                        )
+                        self.render_counsel_recommendation_row(session_id, id, &theme, window, cx)
                     })
                     .unwrap_or_else(|| div().into_any_element())
             }
@@ -2819,7 +2805,7 @@ impl Waku {
             .as_ref()
             .filter(|flash| {
                 flash.armed_at.elapsed() < transcript_search::MATCH_FLASH_FADE
-                    && self.state.selected_session == Some(flash.session_id)
+                    && self.transcript_session_id() == Some(flash.session_id)
                     && !cx.reduce_motion()
                     && matches!(kind, TranscriptRowKind::Message(row_message) if row_message == flash.message_index)
                     && self
@@ -3054,7 +3040,7 @@ impl Waku {
     }
 
     fn remeasure_notice_message(&self, message_id: Uuid) {
-        if let Some(message_index) = self.selected_session().and_then(|session| {
+        if let Some(message_index) = self.transcript_session().and_then(|session| {
             session
                 .messages
                 .iter()
@@ -3062,7 +3048,7 @@ impl Waku {
         }) {
             self.remeasure_transcript_message(message_index);
         } else if let Some(history) = self
-            .boss_chat_key()
+            .transcript_boss_chat_key()
             .and_then(|key| self.boss_ui.chat_history.get(&key))
         {
             if let Some((id, index)) = history.sessions.iter().find_map(|(id, entry)| {
@@ -3250,7 +3236,7 @@ impl Waku {
             return;
         };
         let Some(project_path) = self
-            .selected_workspace_path()
+            .transcript_workspace_path()
             .map(std::path::Path::to_path_buf)
         else {
             return;
@@ -4162,7 +4148,7 @@ impl Waku {
     /// the turn settles into its "Worked for N" fold, then lingers for a
     /// [`WORKING_INDICATOR_FADE_OUT`] fade rather than a jump cut.
     fn render_working_indicator_row(&self, theme: &Theme) -> AnyElement {
-        let session = self.selected_session();
+        let session = self.transcript_session();
         let fade = self
             .working_indicator_fade
             .get()
@@ -4240,7 +4226,7 @@ impl Waku {
         let fade = self
             .queued_card_fade
             .get()
-            .filter(|fade| Some(fade.session_id) == self.state.selected_session);
+            .filter(|fade| Some(fade.session_id) == self.transcript_session_id());
         let card = self.queued_employee_card();
         let (phase, headline, secondary, session_id, key) = match (card, fade) {
             (Some(card), _) => (
@@ -4645,11 +4631,9 @@ impl Waku {
                     )
                 })
         });
-        let expanded = if self.big_picture.rush_session_id() == Some(session_id) {
-            self.rush_activity_expanded(session_id, block_index)
-        } else if let Some(entry) = self.boss_history_session(session_id) {
+        let expanded = if let Some(entry) = self.boss_history_session(session_id) {
             entry.expanded_blocks.get(&block_index).copied()
-        } else if self.state.selected_session == Some(session_id) {
+        } else if self.transcript_session_id() == Some(session_id) {
             self.activities_expanded.get(&block_index).copied()
         } else {
             self.side_chat_views
@@ -5553,7 +5537,7 @@ impl Waku {
             "memory-card-{owner_session}-{}-{}",
             card.bucket_id, card.note_id
         );
-        let selection = if self.state.selected_session == Some(owner_session)
+        let selection = if self.transcript_session_id() == Some(owner_session)
             || self.boss_history_session(owner_session).is_some()
         {
             self.transcript_selection.clone()
@@ -5623,7 +5607,7 @@ impl Waku {
             owner: cx.entity_id(),
             toggle: Rc::new(move |_, cx| {
                 let _ = toggle_waku.update(cx, |this, cx| {
-                    if this.state.selected_session == Some(owner_session)
+                    if this.transcript_session_id() == Some(owner_session)
                         || this.boss_history_session(owner_session).is_some()
                     {
                         this.pin_transcript_for_disclosure();
@@ -5658,7 +5642,7 @@ impl Waku {
             }) {
                 self.remeasure_transcript_rows(row..row + 1);
             }
-        } else if self.state.selected_session == Some(session_id) {
+        } else if self.transcript_session_id() == Some(session_id) {
             self.remeasure_transcript_block(block_index);
         } else if let Some(view) = self.side_chat_views.get(&session_id)
             && let Some(row) = view

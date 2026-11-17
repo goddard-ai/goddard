@@ -20,13 +20,14 @@
 
 use gpui::{KeyBinding, actions};
 
-use crate::persistence::ComposerDraftKey;
+use crate::persistence::{ComposerDraft, ComposerDraftKey};
 
 use super::*;
 use crate::ui::ActivationExt;
 
 pub const MAX_CARDS: usize = 8;
 const CARD_GAP: f32 = 16.0;
+const RUSH_MODAL_MARGIN: f32 = 36.0;
 const CARD_RADIUS: f32 = 14.0;
 /// Distance from the window's side edges to the card grid and composer.
 const EDGE_MARGIN: f32 = 32.0;
@@ -167,6 +168,31 @@ impl Render for RushIndicator {
     }
 }
 
+/// State the covered task needs when the shared transcript pane returns.
+struct ParkedTranscript {
+    session_id: Option<Uuid>,
+    offset: ListOffset,
+    top_row: Option<TranscriptRowKind>,
+    incognito_draft: Option<(ComposerDraftKey, ComposerDraft)>,
+    scrolled: bool,
+    anchor: Option<TranscriptAnchor>,
+    following: bool,
+    landing: Option<(Uuid, TranscriptLanding)>,
+    activities_expanded: HashMap<usize, bool>,
+    expanded_activity_items: HashMap<Uuid, bool>,
+    expanded_turns: HashSet<Uuid>,
+    expanded_trigger_groups: HashSet<Uuid>,
+    expanded_changed_files: HashSet<Uuid>,
+    expanded_landed_notices: HashSet<Uuid>,
+    landed_notice_show_all: HashSet<Uuid>,
+    transfer_notice_show_all: HashSet<Uuid>,
+    expanded_user_messages: HashSet<Uuid>,
+    transcript_control_focuses: HashMap<String, FocusHandle>,
+    user_message_expand_focuses: HashMap<Uuid, FocusHandle>,
+    transcript_search: Option<super::transcript_search::TranscriptSearch>,
+    message_edit: Option<MessageEdit>,
+}
+
 /// Runtime-only overlay state; nothing here persists across windows.
 pub(super) struct BigPictureUi {
     open: bool,
@@ -176,10 +202,9 @@ pub(super) struct BigPictureUi {
     rush_modal_indicator: Entity<RushIndicator>,
     rush_pending: VecDeque<Uuid>,
     rush_session: Option<Uuid>,
+    parked_transcript: Option<ParkedTranscript>,
     rush_resumes: HashMap<Uuid, Uuid>,
     rush_queued_resumes: HashMap<Uuid, Uuid>,
-    rush_activities: HashMap<(Uuid, usize), bool>,
-    rush_footers: RefCell<HashMap<Uuid, (SharedString, u64)>>,
     slots: Vec<BigPictureSlot>,
     /// Arrow-key position — the card Enter or a click arms as the target.
     highlighted: Option<Uuid>,
@@ -255,10 +280,9 @@ impl BigPictureUi {
             rush_modal_indicator: cx.new(|_| RushIndicator),
             rush_pending: VecDeque::new(),
             rush_session: None,
+            parked_transcript: None,
             rush_resumes: HashMap::new(),
             rush_queued_resumes: HashMap::new(),
-            rush_activities: HashMap::new(),
-            rush_footers: RefCell::new(HashMap::new()),
             slots: Vec::new(),
             highlighted: None,
             window_start: 0,
@@ -476,6 +500,86 @@ impl Waku {
         self.open_big_picture_mode(None, window, cx);
     }
 
+    fn park_transcript_for_rush(&mut self, cx: &App) -> ParkedTranscript {
+        self.sync_transcript_rows();
+        let offset = self.active_transcript_rows().logical_scroll_top();
+        let incognito_draft = self
+            .composer_draft_key()
+            .filter(|key| self.draft_key_incognito(*key))
+            .map(|key| (key, self.current_composer_draft(Some(key), cx)));
+        ParkedTranscript {
+            session_id: self.state.selected_session,
+            offset,
+            top_row: self
+                .transcript_row_kinds
+                .borrow()
+                .get(offset.item_ix)
+                .copied(),
+            incognito_draft,
+            scrolled: self.transcript_is_scrolled.get(),
+            anchor: self.transcript_anchor.get(),
+            following: self.transcript_anchor_following.get(),
+            landing: self.transcript_landing.take(),
+            activities_expanded: std::mem::take(&mut self.activities_expanded),
+            expanded_activity_items: std::mem::take(&mut self.expanded_activity_items),
+            expanded_turns: std::mem::take(&mut self.expanded_turns),
+            expanded_trigger_groups: std::mem::take(&mut self.expanded_trigger_groups),
+            expanded_changed_files: std::mem::take(&mut self.expanded_changed_files),
+            expanded_landed_notices: std::mem::take(&mut self.expanded_landed_notices),
+            landed_notice_show_all: std::mem::take(&mut self.landed_notice_show_all),
+            transfer_notice_show_all: std::mem::take(&mut self.transfer_notice_show_all),
+            expanded_user_messages: std::mem::take(&mut self.expanded_user_messages),
+            transcript_control_focuses: std::mem::take(self.transcript_control_focuses.get_mut()),
+            user_message_expand_focuses: std::mem::take(self.user_message_expand_focuses.get_mut()),
+            transcript_search: std::mem::take(&mut self.transcript_search),
+            message_edit: std::mem::take(&mut self.message_edit),
+        }
+    }
+
+    fn restore_transcript_after_rush(&mut self) -> Option<(ComposerDraftKey, ComposerDraft)> {
+        let parked = self.big_picture.parked_transcript.take()?;
+        self.reset_visible_state();
+        self.expanded_trigger_groups.clear();
+        self.transcript_landing = None;
+        if self.state.selected_session == parked.session_id {
+            self.activities_expanded = parked.activities_expanded;
+            self.expanded_activity_items = parked.expanded_activity_items;
+            self.expanded_turns = parked.expanded_turns;
+            self.expanded_trigger_groups = parked.expanded_trigger_groups;
+            self.expanded_changed_files = parked.expanded_changed_files;
+            self.expanded_landed_notices = parked.expanded_landed_notices;
+            self.landed_notice_show_all = parked.landed_notice_show_all;
+            self.transfer_notice_show_all = parked.transfer_notice_show_all;
+            self.expanded_user_messages = parked.expanded_user_messages;
+            *self.transcript_control_focuses.get_mut() = parked.transcript_control_focuses;
+            *self.user_message_expand_focuses.get_mut() = parked.user_message_expand_focuses;
+            self.transcript_search = parked.transcript_search;
+            self.message_edit = parked.message_edit;
+            self.transcript_anchor.set(parked.anchor);
+            self.transcript_anchor_following.set(parked.following);
+            self.transcript_landing = parked.landing;
+        }
+        self.reset_transcript_rows(self.transcript_row_count());
+        if self.state.selected_session == parked.session_id {
+            if parked.scrolled || parked.anchor.is_some() {
+                let mut offset = parked.offset;
+                if let Some(top_row) = parked.top_row
+                    && let Some(index) = self
+                        .transcript_row_kinds
+                        .borrow()
+                        .iter()
+                        .position(|row| *row == top_row)
+                {
+                    offset.item_ix = index;
+                }
+                self.active_transcript_rows().scroll_to(offset);
+            }
+            self.transcript_is_scrolled.set(parked.scrolled);
+        }
+        self.transcript_tail_recheck.set(false);
+        parked.incognito_draft
+    }
+
     fn open_big_picture_mode(
         &mut self,
         rush_session: Option<Uuid>,
@@ -507,11 +611,23 @@ impl Waku {
         if rush_session.is_some() {
             window.focus(&self.big_picture.focus, cx);
         }
+        let parked_transcript = rush_session.map(|_| {
+            self.store_transcript_scroll_position();
+            self.park_transcript_for_rush(cx)
+        });
         self.big_picture.open = true;
         self.big_picture.rush_session = rush_session;
-        self.big_picture.rush_footers.borrow_mut().clear();
+        self.big_picture.parked_transcript = parked_transcript;
         if let Some(session_id) = rush_session {
-            self.big_picture.card_kinds.borrow_mut().remove(&session_id);
+            self.reset_visible_state();
+            self.reset_transcript_rows(self.transcript_row_count());
+            if self
+                .transcript_session()
+                .is_some_and(|session| session.detail_loaded)
+            {
+                self.scroll_to_transcript_landing(TranscriptLanding::LastTurn, cx);
+            }
+            self.transcript_landing = Some((session_id, TranscriptLanding::LastTurn));
         }
         self.big_picture.slots.clear();
         self.big_picture.window_start = 0;
@@ -554,6 +670,9 @@ impl Waku {
         self.big_picture.draft_key = None;
         self.sync_big_picture_draft(cx);
         self.sync_big_picture_placeholder(cx);
+        if rush_session.is_some() {
+            self.refresh_composer_sources(cx);
+        }
         self.big_picture.backdrop = None;
         // Snapshot the frame before the scrim covers it — capture, repack,
         // and blur all run on the background executor.
@@ -605,48 +724,25 @@ impl Waku {
         if self.project_switcher.is_open() {
             self.cancel_project_switcher(window, cx);
         }
-        // File the composer's content under whichever overlay slot owned it —
-        // a card's session draft or the new-task draft — before the selected
-        // session's draft takes the composer back.
-        if let Some(key) = self.big_picture.draft_key.take() {
-            let key = self.rotated_draft_key(key);
-            if !self.draft_key_incognito(key) {
-                let draft = self.current_composer_draft(Some(key), cx);
-                if self.composer_drafts.set(key, draft) {
-                    self.schedule_composer_draft_save(cx);
-                }
-            }
-        }
-        self.big_picture.open = false;
-        self.big_picture.rush_session = None;
-        self.big_picture.slots.clear();
-        self.big_picture.highlighted = None;
-        self.big_picture.target = None;
-        self.big_picture.new_task_incognito = false;
-        self.big_picture.pending_submission = None;
-        self.big_picture.backdrop = None;
-        self.composer.update(cx, |composer, cx| {
-            composer.set_placeholder(tr!("input.do_anything"), cx);
-        });
-        self.restore_selected_composer_draft(cx);
-        if let Some(session_id) = self.attention_session_id() {
-            self.sync_user_input_answer(session_id, cx);
-        }
-        if let Some(previous_focus) = self.big_picture.previous_focus.take() {
+        let previous_focus = self.big_picture.previous_focus.take();
+        self.finish_big_picture(cx);
+        if let Some(previous_focus) = previous_focus {
             window.focus(&previous_focus, cx);
         }
         cx.notify();
     }
 
-    /// The window-free half of `close_big_picture` — used by the Experiments
-    /// opt-out, where a toggle callback has no window to hand focus back to.
+    /// Window-free dismissal for navigation and experiment opt-out.
     pub(super) fn dismiss_big_picture(&mut self, cx: &mut Context<Self>) {
-        if !self.big_picture.open {
-            return;
+        if self.big_picture.open {
+            self.project_switcher.dismiss();
+            self.finish_big_picture(cx);
         }
-        // No window here to hand the switcher's recorded focus back to —
-        // just drop the overlay state.
-        self.project_switcher.dismiss();
+    }
+
+    fn finish_big_picture(&mut self, cx: &mut Context<Self>) {
+        // File the composer under the overlay's target before returning it
+        // to the covered task.
         if let Some(key) = self.big_picture.draft_key.take() {
             let key = self.rotated_draft_key(key);
             if !self.draft_key_incognito(key) {
@@ -657,7 +753,8 @@ impl Waku {
             }
         }
         self.big_picture.open = false;
-        self.big_picture.rush_session = None;
+        let rush = self.big_picture.rush_session.take().is_some();
+        let incognito_draft = self.restore_transcript_after_rush();
         self.big_picture.slots.clear();
         self.big_picture.highlighted = None;
         self.big_picture.target = None;
@@ -668,9 +765,19 @@ impl Waku {
         self.composer.update(cx, |composer, cx| {
             composer.set_placeholder(tr!("input.do_anything"), cx);
         });
-        self.restore_selected_composer_draft(cx);
+        if let Some((key, draft)) = incognito_draft
+            && self.composer_draft_key() == Some(key)
+        {
+            self.apply_composer_draft(Some(key), draft, cx);
+            self.sync_composer_placeholder(cx);
+        } else {
+            self.restore_selected_composer_draft(cx);
+        }
         if let Some(session_id) = self.attention_session_id() {
             self.sync_user_input_answer(session_id, cx);
+        }
+        if rush {
+            self.refresh_composer_sources(cx);
         }
     }
 
@@ -1365,8 +1472,7 @@ impl Waku {
             .is_some_and(|card| card.scrollbar.engaged())
     }
 
-    /// A virtualized, bottom-pinned transcript. Overview cards use compact
-    /// rows; rush keeps normal text size, activity disclosures, and footers.
+    /// A virtualized, bottom-pinned transcript for compact overview cards.
     fn render_big_picture_transcript(
         &self,
         session: &AgentSession,
@@ -1389,9 +1495,7 @@ impl Waku {
                 .clone()
         };
         let pending_turn = self.blocked_checkpoint_turn(session.id);
-        let rushed = self.big_picture.rush_session == Some(session_id);
         let fingerprint = transcript_rows_fingerprint(session, &self.expanded_turns, pending_turn)
-            ^ u64::from(rushed)
             ^ (u64::from(self.runtime_submission_checks.contains_key(&session_id)) << 1);
         let (kinds, refolded) = {
             let mut cache = self.big_picture.card_kinds.borrow_mut();
@@ -1409,7 +1513,7 @@ impl Waku {
                 // Cards have no footer or file summary, but a capture
                 // holding a queued prompt still marks the settled turn.
                 folded.retain(|kind| match kind {
-                    TranscriptRowKind::ResponseFooter(..) => rushed,
+                    TranscriptRowKind::ResponseFooter(..) => false,
                     TranscriptRowKind::ChangedFiles(turn_id) => pending_turn == Some(*turn_id),
                     _ => true,
                 });
@@ -1419,22 +1523,6 @@ impl Waku {
                     && !folded.contains(&TranscriptRowKind::ChangedFiles(turn_id))
                 {
                     folded.push(TranscriptRowKind::ChangedFiles(turn_id));
-                }
-                if rushed {
-                    let mut footers = self.big_picture.rush_footers.borrow_mut();
-                    footers.clear();
-                    for kind in &folded {
-                        if let TranscriptRowKind::ResponseFooter(_, index) = *kind
-                            && let Some(message) = session.messages.get(index)
-                            && let Some(content) =
-                                super::transcript::assistant_response_footer(session, index)
-                        {
-                            let time =
-                                super::transcript::assistant_response_footer_time(session, index)
-                                    .unwrap_or(message.created_at);
-                            footers.insert(message.id, (SharedString::from(content), time));
-                        }
-                    }
                 }
                 *entry = (fingerprint, Rc::new(folded));
                 (entry.1.clone(), true)
@@ -1479,7 +1567,7 @@ impl Waku {
             .size_full()
             .relative()
             .child(
-                rem_scale(self.big_picture_text_scale()).size_full().child(
+                rem_scale(CARD_TEXT_SCALE).size_full().child(
                     list(card.rows.clone(), move |index, window, cx| {
                         entity
                             .upgrade()
@@ -1535,8 +1623,8 @@ impl Waku {
     /// cannot reach them — they scale here instead.
     fn card_markdown_metrics(&self, metrics: MarkdownMetrics) -> MarkdownMetrics {
         metrics.scaled(
-            self.state.ui_font_size * self.big_picture_text_scale(),
-            self.state.code_font_size * self.big_picture_text_scale(),
+            self.state.ui_font_size * CARD_TEXT_SCALE,
+            self.state.code_font_size * CARD_TEXT_SCALE,
         )
     }
 
@@ -1698,28 +1786,10 @@ impl Waku {
                 })
                 .unwrap_or_else(|| div().into_any_element()),
             TranscriptRowKind::TurnBlock(block_index) => {
-                if self.big_picture.rush_session == Some(session_id) {
-                    session.transcript_blocks.get(block_index).map(|block| {
-                        self.render_activities_row(session_id, &block.activities, block_index, &theme, window, cx)
-                    }).unwrap_or_else(|| div().into_any_element())
-                } else {
-                    self.render_card_activities_row(session, block_index, &theme)
-                }
+                self.render_card_activities_row(session, block_index, &theme)
             }
             TranscriptRowKind::TurnFold(turn_id) => {
-                let row = self.render_card_turn_fold_row(session, turn_id, &theme);
-                if self.big_picture.rush_session == Some(session_id) {
-                    let focus = self.transcript_control_focus(format!("rush-turn-{turn_id}"), cx);
-                    div().id(SharedString::from(format!("rush-turn-{turn_id}")))
-                        .track_focus(&focus).tab_index(0).cursor_default()
-                        .focus_visible(|style| style.bg(theme.focus_highlight()))
-                        .child(row).on_activation(cx, move |this, _, cx| {
-                            if !this.expanded_turns.remove(&turn_id) {
-                                this.expanded_turns.insert(turn_id);
-                            }
-                            cx.notify();
-                        }).into_any_element()
-                } else { row }
+                self.render_card_turn_fold_row(session, turn_id, &theme)
             }
             TranscriptRowKind::BossHistory(..)
             | TranscriptRowKind::BossHistoryBoundary(_)
@@ -1769,31 +1839,6 @@ impl Waku {
             {
                 self.render_card_checkpoint_pending_row(turn_id, &theme)
             }
-            TranscriptRowKind::ResponseFooter(turn_id, message_index)
-                if self.big_picture.rush_session == Some(session_id) =>
-            {
-                let Some(message) = session.messages.get(message_index) else {
-                    return div().into_any_element();
-                };
-                let Some((content, timestamp)) = self.big_picture.rush_footers.borrow().get(&message.id).cloned() else {
-                    return div().into_any_element();
-                };
-                super::components::render_message_footer(
-                    &theme,
-                    message,
-                    timestamp,
-                    content,
-                    self.copied_message_feedback.contains_key(&message.id),
-                    self.state.show_response_token_speed,
-                    SharedString::from(format!("rush-footer-{turn_id}")),
-                    true,
-                    false,
-                    None,
-                    None,
-                    None,
-                    cx.entity().downgrade(),
-                )
-            }
             TranscriptRowKind::CounselRecommendation(id) => {
                 self.render_counsel_recommendation_row(session_id, id, &theme, window, cx)
             }
@@ -1810,7 +1855,7 @@ impl Waku {
             .py(px(4.0))
             .when(index == 0, |element| element.pt(px(6.0)))
             .when(starts_followup_turn, |element| {
-                element.pt(px(FOLLOWUP_TURN_TOP_GAP * self.big_picture_text_scale()))
+                element.pt(px(FOLLOWUP_TURN_TOP_GAP * CARD_TEXT_SCALE))
             })
             .when(index + 1 == row_count, |element| element.pb(px(6.0)))
             .child(inner)
@@ -2099,14 +2144,6 @@ impl Waku {
             .child(self.render_workspace_footer(cx))
     }
 
-    fn big_picture_text_scale(&self) -> f32 {
-        if self.big_picture.rush_session.is_some() {
-            1.0
-        } else {
-            CARD_TEXT_SCALE
-        }
-    }
-
     /// Permission controls must answer the foreground modal, never the covered task.
     pub(super) fn attention_session_id(&self) -> Option<Uuid> {
         self.big_picture
@@ -2116,44 +2153,6 @@ impl Waku {
 
     pub(super) fn attention_runtime(&self) -> Option<&SessionRuntime> {
         self.runtimes.get(&self.attention_session_id()?)
-    }
-
-    pub(super) fn rush_activity_expanded(
-        &self,
-        session_id: Uuid,
-        block_index: usize,
-    ) -> Option<bool> {
-        self.big_picture
-            .rush_activities
-            .get(&(session_id, block_index))
-            .copied()
-    }
-
-    pub(super) fn set_rush_activity_expanded(
-        &mut self,
-        session_id: Uuid,
-        block_index: usize,
-        expanded: bool,
-    ) {
-        self.big_picture
-            .rush_activities
-            .insert((session_id, block_index), expanded);
-        self.remeasure_rush_block(session_id, block_index);
-    }
-
-    pub(super) fn remeasure_rush_block(&self, session_id: Uuid, block_index: usize) {
-        let kinds = self.big_picture.card_kinds.borrow();
-        let cards = self.big_picture.card_transcripts.borrow();
-        if let Some((_, kinds)) = kinds.get(&session_id)
-            && let Some(index) = kinds
-                .iter()
-                .position(|kind| *kind == TranscriptRowKind::TurnBlock(block_index))
-            && let Some(card) = cards.get(&session_id)
-        {
-            let top = card.rows.logical_scroll_top();
-            card.rows.remeasure_items(index..index + 1);
-            card.rows.scroll_to(top);
-        }
     }
 
     pub(super) fn pending_rush_resume(&self, session_id: Uuid) -> Option<Uuid> {
@@ -2357,6 +2356,12 @@ impl Waku {
             .into_any_element()
     }
 
+    pub(super) fn rush_task_width(&self, window: &Window) -> f32 {
+        let available = f32::from(window.viewport_size().width)
+            - 2.0 * (RUSH_MODAL_MARGIN + f32::from(hairline()));
+        self.chat_viewport_width(window).min(available).max(1.0)
+    }
+
     fn render_rush_modal(
         &mut self,
         session_id: Uuid,
@@ -2364,38 +2369,38 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
-        let Some(session) = self
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-        else {
-            return div().into_any_element();
-        };
-        let title = super::sidebar::localized_session_title(session);
-        let status = match session.status {
-            SessionStatus::Waiting => tr!("session.waiting_for_answer"),
-            SessionStatus::Idle => tr!("session.turn_completed"),
-            SessionStatus::Failed => tr!("session.stopped"),
-            _ => String::new(),
-        };
-        let body = if session.detail_loaded {
-            self.render_big_picture_transcript(session, cx)
-        } else {
-            div()
-                .p(px(24.0))
-                .child(tr!("sessions.loading"))
-                .into_any_element()
-        };
         let permission = self.render_permission(cx);
-        let daemon_request = self.render_daemon_request(cx);
+        let approval_visible = permission.is_some();
         let close_focus = self.transcript_control_focus("rush-close", cx);
+        let controls = div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .child(self.render_rush_toggle(session_id, cx))
+            .child(
+                div()
+                    .id("rush-close")
+                    .track_focus(&close_focus)
+                    .tab_index(0)
+                    .h(px(28.0))
+                    .px(px(10.0))
+                    .rounded(px(8.0))
+                    .flex()
+                    .items_center()
+                    .cursor_default()
+                    .text_color(theme.text_secondary)
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                    .child(tr!("rush.dismiss"))
+                    .on_activation(cx, |this, window, cx| this.close_big_picture(window, cx)),
+            );
+        let header =
+            self.render_rush_task_header(session_id, controls.into_any_element(), window, cx);
         let card = div()
             .id("rush-task-page")
             .occlude()
-            .w_full()
+            .w(px(self.rush_task_width(window)) + hairline() * 2.0)
             .h_full()
-            .max_w(px(1100.0))
             .rounded(px(16.0))
             .border(hairline())
             .border_color(theme.border_strong)
@@ -2405,60 +2410,10 @@ impl Waku {
             .flex_col()
             .min_h_0()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(
-                div()
-                    .flex_none()
-                    .h(px(48.0))
-                    .px(px(16.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(12.0))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .truncate()
-                            .text_color(theme.text)
-                            .child(title),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_size(sp(12.0))
-                            .text_color(theme.text_secondary)
-                            .child(status),
-                    )
-                    .child(self.render_rush_toggle(session_id, cx))
-                    .child(
-                        div()
-                            .id("rush-close")
-                            .track_focus(&close_focus)
-                            .tab_index(0)
-                            .h(px(28.0))
-                            .px(px(10.0))
-                            .rounded(px(8.0))
-                            .cursor_default()
-                            .text_color(theme.text_secondary)
-                            .focus_visible(|style| style.bg(theme.focus_highlight()))
-                            .child(tr!("rush.dismiss"))
-                            .on_activation(cx, |this, window, cx| {
-                                this.close_big_picture(window, cx)
-                            }),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .w_full()
-                    .child(md::render::frame_reset(
-                        self.big_picture.card_selection.clone(),
-                    ))
-                    .child(body),
-            )
-            .children(daemon_request)
-            .children(permission)
-            .child(self.render_big_picture_composer(window, cx));
+            .child(header)
+            .child(self.render_task_transcript())
+            .children(permission.map(|card| div().flex_none().child(card)))
+            .child(self.render_session_composer_lane(approval_visible, window, cx));
         deferred(
             div()
                 .id("rush-modal")
@@ -2481,10 +2436,17 @@ impl Waku {
                 .on_action(cx.listener(|_, _: &OpenResumePicker, _, cx| cx.stop_propagation()))
                 .on_action(cx.listener(|_, _: &RunProjectScript, _, cx| cx.stop_propagation()))
                 .on_action(cx.listener(|_, _: &FocusTerminal, _, cx| cx.stop_propagation()))
-                .on_action(cx.listener(|_, _: &OpenFind, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|this, _: &OpenFind, window, cx| {
+                    this.open_transcript_search(window, cx);
+                    cx.stop_propagation();
+                }))
                 .on_action(cx.listener(|_, _: &OpenFindReplace, _, cx| cx.stop_propagation()))
-                .on_action(cx.listener(|_, _: &FindNext, _, cx| cx.stop_propagation()))
-                .on_action(cx.listener(|_, _: &FindPrevious, _, cx| cx.stop_propagation()))
+                .on_action(cx.listener(|this, _: &FindNext, _, cx| {
+                    this.navigate_transcript_search(false, cx);
+                }))
+                .on_action(cx.listener(|this, _: &FindPrevious, _, cx| {
+                    this.navigate_transcript_search(true, cx);
+                }))
                 .on_action(cx.listener(|_, _: &CloseFind, _, cx| cx.stop_propagation()))
                 .on_action(
                     cx.listener(|_, _: &ToggleFindCaseSensitive, _, cx| cx.stop_propagation()),
@@ -2492,7 +2454,6 @@ impl Waku {
                 .on_action(cx.listener(|_, _: &ToggleFindWholeWord, _, cx| cx.stop_propagation()))
                 .on_action(cx.listener(|_, _: &ToggleFindRegex, _, cx| cx.stop_propagation()))
                 .on_action(cx.listener(|_, _: &ReplaceAllMatches, _, cx| cx.stop_propagation()))
-                .on_action(cx.listener(|_, _: &CopySelection, _, cx| cx.stop_propagation()))
                 .on_action(cx.listener(|_, _: &AddToChat, _, cx| cx.stop_propagation()))
                 .on_action(cx.listener(|_, _: &NavigateBack, _, cx| cx.stop_propagation()))
                 .on_action(cx.listener(|_, _: &NavigateForward, _, cx| cx.stop_propagation()))
@@ -2503,8 +2464,6 @@ impl Waku {
                 .on_action(cx.listener(|_, _: &ConfirmTaskSwitch, _, cx| cx.stop_propagation()))
                 .on_action(cx.listener(|_, _: &CancelTaskSwitch, _, cx| cx.stop_propagation()))
                 .on_action(cx.listener(|_, _: &SelectSidebarSession, _, cx| cx.stop_propagation()))
-                .on_action(cx.listener(|_, _: &GoToPreviousTurn, _, cx| cx.stop_propagation()))
-                .on_action(cx.listener(|_, _: &GoToNextTurn, _, cx| cx.stop_propagation()))
                 .on_action(cx.listener(|_, _: &ArchiveSession, _, cx| cx.stop_propagation()))
                 .on_action(cx.listener(|_, _: &PushBaseBranch, _, cx| cx.stop_propagation()))
                 .on_action(cx.listener(|_, _: &SyncBranch, _, cx| cx.stop_propagation()))
@@ -2520,7 +2479,11 @@ impl Waku {
                 .tab_group()
                 .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                     if event.keystroke.key == "escape" {
-                        this.close_big_picture(window, cx);
+                        if this.transcript_search_open() {
+                            this.close_transcript_search(true, window, cx);
+                        } else {
+                            this.close_big_picture(window, cx);
+                        }
                         cx.stop_propagation();
                     }
                 }))
@@ -2529,7 +2492,7 @@ impl Waku {
                     cx.listener(|this, _, window, cx| this.close_big_picture(window, cx)),
                 )
                 .bg(gpui::black().opacity(0.55))
-                .p(px(36.0))
+                .p(px(RUSH_MODAL_MARGIN))
                 .pt(px(58.0))
                 .flex()
                 .items_center()

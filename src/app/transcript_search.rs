@@ -159,7 +159,7 @@ impl Waku {
 
     pub(super) fn open_transcript_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self
-            .selected_session()
+            .transcript_session()
             .is_none_or(|session| session.messages.is_empty())
         {
             cx.propagate();
@@ -248,7 +248,7 @@ impl Waku {
         let mut limited = false;
         if !query.is_empty() {
             let regex = literal_find_regex(&query);
-            if let Some(session) = self.selected_session() {
+            if let Some(session) = self.transcript_session() {
                 for (row_index, kind) in row_kinds.iter().copied().enumerate() {
                     let TranscriptRowKind::Message(message_index) = kind else {
                         continue;
@@ -319,7 +319,7 @@ impl Waku {
         if query.is_empty() {
             return;
         }
-        let Some(session_id) = self.state.selected_session else {
+        let Some(session_id) = self.transcript_session_id() else {
             return;
         };
         if !self.transcript_views.contains_key(&session_id) {
@@ -443,7 +443,7 @@ impl Waku {
     /// through the ordinary reveal; entries outside the slice fetch an
     /// `Around` window, replace it, and reveal after it mounts.
     fn reveal_remote_find_match(&mut self, cx: &mut Context<Self>) {
-        let Some(session_id) = self.state.selected_session else {
+        let Some(session_id) = self.transcript_session_id() else {
             return;
         };
         let Some(matched) = self
@@ -535,7 +535,7 @@ impl Waku {
                         .iter()
                         .any(|message| message.id == entry_id)
                 };
-                if waku.state.selected_session == Some(session_id) {
+                if waku.transcript_session_id() == Some(session_id) {
                     waku.sync_transcript_rows();
                     if has_message {
                         waku.pending_transcript_match = Some(PendingTranscriptMatch {
@@ -619,12 +619,12 @@ impl Waku {
         // find bar — while the flash lives, on the message it names.
         let flash = self.transcript_match_flash.as_ref()?;
         if flash.message_index != message_index
-            || self.state.selected_session != Some(flash.session_id)
+            || self.transcript_session_id() != Some(flash.session_id)
         {
             return None;
         }
         let still_the_same_message = self
-            .selected_session()
+            .transcript_session()
             .and_then(|session| session.messages.get(message_index))
             .is_some_and(|message| message.id == flash.message_id);
         still_the_same_message.then(|| SearchHighlights {
@@ -642,7 +642,7 @@ impl Waku {
         pending: &PendingTranscriptMatch,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(session) = self.selected_session() else {
+        let Some(session) = self.transcript_session() else {
             return false;
         };
         if session.id != pending.session_id {
@@ -677,7 +677,7 @@ impl Waku {
         }
         let row_index = {
             let kinds = self.transcript_row_kinds.borrow();
-            let session = self.selected_session();
+            let session = self.transcript_session();
             kinds
                 .iter()
                 .position(|kind| *kind == TranscriptRowKind::Message(message_index))
@@ -784,8 +784,9 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let session_id = self.transcript_session_id();
         let target = self.transcript_match_flash.as_mut().and_then(|flash| {
-            if !flash.pending_reveal || self.state.selected_session != Some(flash.session_id) {
+            if !flash.pending_reveal || session_id != Some(flash.session_id) {
                 return None;
             }
             flash.pending_reveal = false;

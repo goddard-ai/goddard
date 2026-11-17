@@ -404,7 +404,7 @@ impl Waku {
                         }
                         *existing = snapshot;
                     }
-                    if self.state.selected_session == Some(session_id) {
+                    if self.transcript_session_id() == Some(session_id) {
                         self.reset_visible_state();
                         self.reset_transcript_rows(self.transcript_row_count());
                         self.reapply_transcript_landing(session_id, cx);
@@ -414,9 +414,7 @@ impl Waku {
                     // list columns, the last turn, the send queue — but no
                     // transcript. The resident detail, materialized window and
                     // loading facade survive; only the control fields merge.
-                    let previous_kinds = (self.state.selected_session == Some(session_id))
-                        .then(|| self.snapshot_selected_transcript_rows(session_id))
-                        .flatten();
+                    let previous_kinds = self.snapshot_selected_transcript_rows(session_id);
                     if let Some(existing) = self.state.session_mut(session_id) {
                         apply_compact_task_view_snapshot(existing, &session);
                     }

@@ -11161,6 +11161,119 @@ mod live_employee_approvals {
         );
     }
 
+    #[gpui::test]
+    fn rush_task_page_answers_the_foreground_task_and_restores_the_covered_draft(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (_env, daemon, view, vcx, supervisor, ids) = two_employee_app(cx);
+        let focus = update_app(vcx, &view, |waku, window, cx| {
+            waku.state.selected_project = Some(ids.project.id);
+            waku.state.selected_session = Some(ids.first);
+            let task = waku.state.session_mut(ids.first).unwrap();
+            task.messages[0].content = "A line from the covered task.\n".repeat(150);
+            let message_id = task.messages[0].id;
+            waku.reset_visible_state();
+            waku.expanded_user_messages.insert(message_id);
+            waku.reset_transcript_rows(waku.transcript_row_count());
+            let focus = waku.composer_focus(cx);
+            window.focus(&focus, cx);
+            waku.composer
+                .update(cx, |input, cx| input.set_content("Covered draft", cx));
+            // Exercise attention on an already-fast running turn. Toggling
+            // Rush must not first interrupt it to change its service tier.
+            let rushed = waku.state.session_mut(ids.second).unwrap();
+            rushed.service_tier = Some("fast".into());
+            waku.toggle_rush(ids.second, cx);
+            assert!(waku.session_is_rushed(ids.second));
+            focus
+        });
+        vcx.run_until_parked();
+        let normal_width = vcx.debug_bounds("task-transcript").unwrap().size.width;
+        let (offset, max_width) = update_app(vcx, &view, |waku, window, cx| {
+            let offset = ListOffset {
+                item_ix: 0,
+                offset_in_item: px(4.0),
+            };
+            waku.scroll_to_transcript_landing(TranscriptLanding::Position(offset), cx);
+            (
+                offset,
+                window.viewport_size().width - px(72.0) - crate::theme::hairline() * 2.0,
+            )
+        });
+        update_app(vcx, &view, |waku, window, cx| {
+            let rushed = waku.state.session_mut(ids.second).unwrap();
+            if rushed.active_turn_id().is_none() {
+                rushed.begin_turn("Request approval for the rushed task");
+            }
+            rushed.status = SessionStatus::Working;
+            let mut runtime = attach_runtime(waku, &supervisor, ids.second, ids.second_runtime);
+            let PendingPermission {
+                request_id,
+                title,
+                title_i18n,
+                detail,
+                detail_i18n,
+                options,
+            } = pending_permission("req-rush");
+            assert!(waku.handle_driver_event(
+                ids.second,
+                &mut runtime,
+                crate::model::DriverEvent::Permission {
+                    request_id,
+                    title,
+                    title_i18n,
+                    detail,
+                    detail_i18n,
+                    options,
+                },
+                true,
+                cx,
+            ));
+            assert!(runtime.pending_permission.is_some(), "the running turn accepted the ask");
+            waku.runtimes.insert(ids.second, runtime);
+            waku.show_pending_rush(window, cx);
+            assert_eq!(waku.big_picture.rush_session_id(), Some(ids.second));
+        });
+        let approval = selector(format!("permission-option-{}-req-rush-allow", ids.second));
+        assert!(card_painted(vcx, approval));
+        let modal_transcript = vcx.debug_bounds("task-transcript").unwrap();
+        assert!((modal_transcript.size.width - normal_width.min(max_width)).abs() <= px(1.0));
+        update_app(vcx, &view, |waku, _, cx| {
+            assert_eq!(waku.state.selected_session, Some(ids.first));
+            assert_eq!(waku.transcript_session_id(), Some(ids.second));
+            assert!(waku.composer.read(cx).content(cx).is_empty());
+            waku.composer
+                .update(cx, |input, cx| input.set_content("Rush draft", cx));
+        });
+        click(vcx, approval);
+        wait_for(vcx, &view, |_| {
+            daemon.wire_responses(ids.second).iter().any(|command| {
+                matches!(
+                    command,
+                    Command::Respond { request_id, option_id }
+                        if request_id == "req-rush" && option_id == "allow"
+                )
+            })
+        });
+        assert!(daemon.wire_responses(ids.first).is_empty());
+        vcx.simulate_keystrokes("escape");
+        update_app(vcx, &view, |waku, window, cx| {
+            assert!(waku.big_picture.rush_session_id().is_none());
+            assert_eq!(waku.transcript_session_id(), Some(ids.first));
+            assert_eq!(waku.composer.read(cx).content(cx), "Covered draft");
+            let restored = waku.active_transcript_rows().logical_scroll_top();
+            assert_eq!(restored.item_ix, offset.item_ix);
+            assert_eq!(restored.offset_in_item, offset.offset_in_item);
+            assert_eq!(window.focused(cx), Some(focus));
+            assert_eq!(
+                waku.composer_drafts
+                    .get(crate::persistence::ComposerDraftKey::Session(ids.second))
+                    .map(|draft| draft.text.as_str()),
+                Some("Rush draft"),
+            );
+        });
+    }
+
     /// Two employees pinned atop the boss transcript: each card's click
     /// resolves its own session's request on its own runtime — the same
     /// named request id on a sibling is never touched.
