@@ -195,7 +195,7 @@ fn compact_activity(activity: &ActivityItem) -> ActivityItem {
 /// render after `after_message` persisted messages, so the interleave is
 /// "activities anchored at K, then message K" — one `seq` per row, shared by
 /// the writer and nothing else (reads page by `seq` directly).
-fn flatten_transcript(session: &AgentSession) -> Vec<FlatEntry> {
+fn flatten_transcript(session: &AgentSession, message_fingerprints: &[u64]) -> Vec<FlatEntry> {
     let mut blocks_at: HashMap<usize, Vec<usize>> = HashMap::new();
     for (index, block) in session.transcript_blocks.iter().enumerate() {
         blocks_at
@@ -255,7 +255,14 @@ fn flatten_transcript(session: &AgentSession) -> Vec<FlatEntry> {
         if let Some(message) = session.messages.get(anchor) {
             let mut fold = Fold::new();
             fold.value(1);
-            fold.value(message_fingerprint(message, anchor));
+            // The save has already hashed this exact message and position.
+            // Legacy index conversion builds the fingerprints here instead.
+            fold.value(
+                message_fingerprints
+                    .get(anchor)
+                    .copied()
+                    .unwrap_or_else(|| message_fingerprint(message, anchor)),
+            );
             entries.push(FlatEntry {
                 entry_id: message.id,
                 kind: EntryKind::Message,
@@ -323,9 +330,10 @@ fn read_head(connection: &Connection, session_id: &str) -> io::Result<Option<Tra
 pub(crate) fn write_transcript_index(
     transaction: &Connection,
     session: &AgentSession,
+    message_fingerprints: &[u64],
 ) -> io::Result<u64> {
     let session_id = session.id.to_string();
-    let flat = flatten_transcript(session);
+    let flat = flatten_transcript(session, message_fingerprints);
 
     let mut stored_entries: Vec<(Uuid, u64)> = {
         let mut statement = transaction

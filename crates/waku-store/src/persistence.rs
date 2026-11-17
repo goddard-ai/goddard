@@ -2116,7 +2116,7 @@ impl StateStore {
         let Some(session) = read_session_detail(&transaction, session_id)? else {
             return Ok(false);
         };
-        crate::transcript_index::write_transcript_index(&transaction, &session)?;
+        crate::transcript_index::write_transcript_index(&transaction, &session, &[])?;
         transaction.commit().map_err(to_io_error)?;
         Ok(true)
     }
@@ -2705,18 +2705,29 @@ impl StateStore {
             transaction
                 .execute(UPSERT_SESSION_DETAIL, params![session.id.to_string(), data])
                 .map_err(to_io_error)?;
+            let message_fingerprints: Vec<_> = session
+                .messages
+                .iter()
+                .enumerate()
+                .map(|(position, message)| message_fingerprint(message, position))
+                .collect();
             written_messages.push((
                 session.id,
                 write_messages(
                     &transaction,
                     session,
+                    &message_fingerprints,
                     storage.written_messages.get(&session.id).unwrap_or(&EMPTY),
                 )?,
             ));
             persisted_checkpoints.push((session.id, checkpoint_cache));
             // The flattened index lives in the same transaction so it can
             // never disagree with the detail/messages it derives from.
-            crate::transcript_index::write_transcript_index(&transaction, session)?;
+            crate::transcript_index::write_transcript_index(
+                &transaction,
+                session,
+                &message_fingerprints,
+            )?;
         }
 
         let removed = storage
@@ -3516,6 +3527,7 @@ const UPSERT_MESSAGE: &str = "INSERT INTO messages(
 fn write_messages(
     transaction: &Connection,
     session: &AgentSession,
+    fingerprints: &[u64],
     written: &HashMap<Uuid, u64>,
 ) -> io::Result<HashMap<Uuid, u64>> {
     use rusqlite::types::Value;
@@ -3534,7 +3546,7 @@ fn write_messages(
     for (position, message) in session.messages.iter().enumerate() {
         let message_id = message.id.to_string();
         let stored = stored_ids.remove(&message_id);
-        let fingerprint = message_fingerprint(message, position);
+        let fingerprint = fingerprints[position];
         current.insert(message.id, fingerprint);
         // Another writer may have removed a row this connection still caches.
         if stored && written.get(&message.id) == Some(&fingerprint) {
