@@ -1,7 +1,7 @@
 //! Codex app-server transport.
 
 use std::collections::{HashMap, HashSet};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, LazyLock, Weak};
@@ -9,6 +9,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, anyhow};
+use base64::Engine as _;
 use crossbeam_channel::{Sender, bounded, unbounded};
 use parking_lot::{Condvar, Mutex};
 use serde_json::{Value, json};
@@ -2598,7 +2599,13 @@ fn handle_codex_message(
                         detail,
                         complete,
                     )
-                    .with_tool_name(item.get("tool").and_then(Value::as_str))
+                    .with_tool_name(
+                        if item.get("type").and_then(Value::as_str) == Some("imageGeneration") {
+                            Some("image_gen")
+                        } else {
+                            item.get("tool").and_then(Value::as_str)
+                        },
+                    )
                     .with_mcp_server(item.get("server").and_then(Value::as_str))
                     .with_arguments(codex_item_arguments(item))
                     .with_activity_source(Some(item))
@@ -2899,6 +2906,8 @@ fn codex_activity_kind(item: &Value) -> Option<ActivityKind> {
         Some(ActivityKind::Search)
     } else if item_type.contains("plan") || item_type.contains("todo") {
         Some(ActivityKind::Plan)
+    } else if item_type == "imagegeneration" {
+        Some(ActivityKind::Tool)
     } else if item_type.contains("tool") || item_type.contains("collab") {
         Some(
             item.get("tool")
@@ -3146,6 +3155,39 @@ fn codex_item_output(item: &Value) -> Option<String> {
 }
 
 fn codex_item_image_urls(item: &Value) -> Vec<String> {
+    if item.get("type").and_then(Value::as_str) == Some("imageGeneration") {
+        if let Some(result) = item
+            .get("result")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+        {
+            return vec![format!("data:image/png;base64,{result}")];
+        }
+        // Newer Codex versions can store the result as an attachment and
+        // report its saved path instead of including bytes in the event.
+        const MAX_IMAGE_BYTES: u64 = 32 * 1024 * 1024;
+        if let Some(path) = item.get("savedPath").and_then(Value::as_str)
+            && let Ok(file) = std::fs::File::open(path)
+            && file
+                .metadata()
+                .is_ok_and(|m| m.is_file() && m.len() <= MAX_IMAGE_BYTES)
+        {
+            let mut bytes = Vec::new();
+            if file
+                .take(MAX_IMAGE_BYTES + 1)
+                .read_to_end(&mut bytes)
+                .is_ok()
+                && !bytes.is_empty()
+                && bytes.len() as u64 <= MAX_IMAGE_BYTES
+            {
+                return vec![format!(
+                    "data:image/png;base64,{}",
+                    base64::engine::general_purpose::STANDARD.encode(bytes)
+                )];
+            }
+        }
+        return Vec::new();
+    }
     let content = match item.get("type").and_then(Value::as_str) {
         Some("mcpToolCall") => item.pointer("/result/content"),
         _ => None,
@@ -5011,6 +5053,65 @@ mod tests {
             state.rewrite_citation_delta("Claim.\u{e200}cite\u{e202}turn9search0\u{e201} After."),
             "Claim. After."
         );
+    }
+
+    #[test]
+    fn codex_generated_image_is_a_tool_activity_with_image_output() {
+        let item = json!({
+            "type": "imageGeneration", "id": "generation-1",
+            "status": "completed", "result": "aGVsbG8=", "savedPath": null
+        });
+        assert_eq!(codex_activity_kind(&item), Some(ActivityKind::Tool));
+        assert_eq!(
+            codex_item_image_urls(&item),
+            vec!["data:image/png;base64,aGVsbG8="]
+        );
+        assert!(codex_item_output(&item).is_none());
+        let thread_id = Mutex::new(Some("thread-1".to_owned()));
+        let turn_id = Mutex::new(Some("turn-1".to_owned()));
+        let turn_ids = Mutex::new(vec!["turn-1".to_owned()]);
+        let pending_rollbacks = Mutex::new(HashMap::new());
+        let pending_steers = Mutex::new(HashMap::new());
+        let background_rpcs = Mutex::new(BackgroundRpcState::default());
+        let goal_rpcs = Mutex::new(GoalRpcState::default());
+        let (commands, _) = unbounded();
+        let (events, received) = unbounded();
+        handle_codex_message(
+            json!({"method":"item/completed", "params":{
+                "threadId":"thread-1", "turnId":"turn-1", "item":item
+            }}),
+            &thread_id,
+            &turn_id,
+            &turn_ids,
+            &pending_rollbacks,
+            &pending_steers,
+            &background_rpcs,
+            &goal_rpcs,
+            &commands,
+            &events,
+            &mut CodexStreamState::default(),
+        );
+        let DriverEvent::RichActivity(activity) = received.try_recv().unwrap() else {
+            panic!("expected image activity");
+        };
+        assert!(activity.complete);
+        assert_eq!(activity.tool_name.as_deref(), Some("image_gen"));
+        assert_eq!(activity.image_urls, vec!["data:image/png;base64,aGVsbG8="]);
+    }
+
+    #[test]
+    fn codex_generated_image_can_use_the_saved_file() {
+        let path = std::env::temp_dir().join(format!("goddard-image-{}.png", Uuid::new_v4()));
+        std::fs::write(&path, b"hello").unwrap();
+        let item = json!({
+            "type": "imageGeneration", "status": "completed", "fileId": "file-1",
+            "savedPath": path,
+        });
+        assert_eq!(
+            codex_item_image_urls(&item),
+            vec!["data:image/png;base64,aGVsbG8="]
+        );
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

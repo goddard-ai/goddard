@@ -4652,7 +4652,12 @@ impl Waku {
                 .get(&session_id)
                 .and_then(|view| view.expanded_activity_blocks.get(&block_index).copied())
         }
-        .unwrap_or(live_group);
+        .unwrap_or_else(|| {
+            live_group
+                || activities
+                    .iter()
+                    .any(|activity| activity.tool_name.as_deref() == Some("image_gen"))
+        });
         let live_reasoning_id = (self
             .runtimes
             .get(&session_id)
@@ -4836,11 +4841,11 @@ impl Waku {
                 || !sections.is_empty()
                 || shows_diff;
             let item_expanded = has_detail
-                && self
-                    .expanded_activity_items
-                    .get(&id)
-                    .copied()
-                    .unwrap_or(reasoning_live);
+                && self.expanded_activity_items.get(&id).copied().unwrap_or(
+                    reasoning_live
+                        || (activity.tool_name.as_deref() == Some("image_gen")
+                            && !activity.image_urls.is_empty()),
+                );
             let item_focus = self.transcript_control_focus(format!("activity-item-{id}"), cx);
             let mut item = div()
                 .w_full()
@@ -5278,7 +5283,9 @@ impl Waku {
                     detail_card = detail_card.child(section_view);
                 }
                 for (image_index, image_url) in activity.image_urls.iter().enumerate() {
-                    let image = self.image_for_reference(image_url, None, None, cx);
+                    let daemon_path =
+                        session.and_then(|session| self.workspace_path_for_session(session));
+                    let image = self.image_for_reference(image_url, daemon_path, None, cx);
                     detail_card = detail_card.child(render_activity_image(
                         image_url,
                         image,

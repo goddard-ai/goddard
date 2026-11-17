@@ -175,7 +175,17 @@ fn compact_activity(activity: &ActivityItem) -> ActivityItem {
     compact.arguments = None;
     compact.output = None;
     compact.output_truncated = false;
-    compact.image_urls.clear();
+    // Generated images are conversation results. Keep their small, daemon-owned
+    // references in the window so they can appear without opening an activity;
+    // keep only small inline images in the compact row.
+    if activity.tool_name.as_deref() == Some("image_gen") {
+        compact.image_urls.retain(|url| {
+            waku_protocol::blob::is_reference(url)
+                || (url.starts_with("data:image/") && url.len() <= 16 * 1024)
+        });
+    } else {
+        compact.image_urls.clear();
+    }
     compact.file_changes.clear();
     compact.reasoning = None;
     compact
@@ -2123,6 +2133,61 @@ mod tests {
             "ordinary pages reuse the existing index"
         );
         let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn generated_image_windows_keep_blob_references_without_inline_data() {
+        let large_inline = format!("data:image/png;base64,{}", "a".repeat(20_000));
+        let generated = activity(ActivityKind::Tool, "Image Generation", None)
+            .with_tool_name(Some("image_gen"))
+            .with_image_urls(vec!["waku-blob:1234567890abcdef.png".into(), large_inline]);
+        let compact = compact_activity(&generated);
+        assert_eq!(compact.image_urls, vec!["waku-blob:1234567890abcdef.png"]);
+        assert!(activity_payload(&generated, TranscriptPayloadField::ImageUrls).is_some());
+
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let session_id = state.sessions[0].id;
+        state.sessions[0].begin_turn("generate an image");
+        state
+            .session_mut(session_id)
+            .unwrap()
+            .transcript_blocks
+            .push(TranscriptBlock {
+                after_message: 1,
+                turn_id: None,
+                activities: vec![
+                    activity(ActivityKind::Tool, "Image Generation", None)
+                        .with_tool_name(Some("image_gen"))
+                        .with_image_urls(vec![format!(
+                            "data:image/png;base64,{}",
+                            "a".repeat(20_000)
+                        )]),
+                ],
+            });
+        state.sessions[0].finish_active_turn(TurnStatus::Completed);
+        store.save(&mut state).unwrap();
+        let window = store
+            .read_transcript_window(
+                session_id,
+                &TranscriptWindowTarget::Latest,
+                64,
+                u32::MAX,
+                None,
+            )
+            .unwrap()
+            .unwrap();
+        let activity = window
+            .entries
+            .iter()
+            .find_map(|entry| match &entry.data {
+                TranscriptEntryData::Activity { activity, .. } => Some(activity),
+                _ => None,
+            })
+            .unwrap();
+        assert!(waku_protocol::blob::is_reference(&activity.image_urls[0]));
+        std::fs::remove_dir_all(directory).ok();
     }
 
     #[test]
