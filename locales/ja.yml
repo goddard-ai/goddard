@@ -1371,6 +1371,7 @@ suggestions.prompt_text: 提案するプロンプトの本文
 suggestions.prompt_editor_description: 提案をクリックすると、この文が送信されます。
 suggestions.prompt_invalid: 2,000文字以内のプロンプトを入力してください。
 suggestions.prompt_duplicate: 別の提案アクションが同じプロンプトを送信します。
+suggestions.do_that: それを実行して
 suggestions.proceed: はい、進めてください。
 suggestions.make_it_happen: 作業を始めて
 suggestions.add_details: 詳細を入力

@@ -98,6 +98,7 @@ impl JournalAction {
 /// Stable ids and localized defaults for suggested prompts. The settings
 /// page edits the payload while predictions keep these ids unchanged.
 pub(super) const CANNED_PROMPTS: &[(&str, &str)] = &[
+    ("do-that", "suggestions.do_that"),
     ("proceed", "suggestions.proceed"),
     ("make-it-happen", "suggestions.make_it_happen"),
     ("keep-going", "suggestions.keep_going"),
@@ -137,6 +138,9 @@ pub(super) fn suggested_prompt(
 /// Human-readable defaults for the evaluator, independent of the sent text.
 pub(super) fn default_prompt_condition(action: &str) -> &'static str {
     match action {
+        "do-that" => {
+            "The assistant clearly recommends one specific, actionable next step that it can carry out, and the user can authorize it without resolving a choice or providing missing information. Do not suggest this for advice the assistant cannot perform or when there is no clear recommendation."
+        }
         "proceed" => "The agent is waiting for permission to continue with an agreed approach.",
         "make-it-happen" => {
             "The user needs to perform an action that the agent could handle instead."
@@ -209,6 +213,7 @@ pub(super) fn canned_prompt_id(
 /// `other` are outcomes, session lifecycle picks are better left to the
 /// sidebar, and `revert`/`terminal-command` stay manual in v1.
 pub(super) const ACTIONABLE_SUGGESTIONS: &[&str] = &[
+    "do-that",
     "run-tests",
     "fix-errors",
     "commit-changes",
@@ -254,6 +259,7 @@ pub(super) fn suggested_action_title(action: &str) -> Option<String> {
 
 /// Commit remains review-gated; Pull changes always requires a manual click.
 pub(super) const AUTOMATIC_ACTIONS: &[&str] = &[
+    "do-that",
     "run-tests",
     "fix-errors",
     "commit-changes",
@@ -291,6 +297,7 @@ const SUGGESTION_MIN_MARGIN: f64 = 0.15;
 /// gate relaxes while the mode is on. Review-style picks and outcome-only
 /// candidates keep the standard bar — eager, not indiscriminate.
 pub(super) const MOVE_FAST_ACTIONS: &[&str] = &[
+    "do-that",
     "run-tests",
     "fix-errors",
     "commit-changes",
@@ -575,6 +582,10 @@ fn next_action_candidates(
         .flat_map(|block| block.activities.iter())
         .any(|activity| activity.failed && !crate::model::is_context_compaction(activity));
     let mut candidates: Vec<(&'static str, &'static str)> = vec![
+        (
+            "do-that",
+            "Ask the agent to carry out its single clear recommendation",
+        ),
         ("whats-next", "Ask the agent what to do next"),
         ("archive", "Archive this session"),
         ("new-task", "Start a new task"),
@@ -2002,6 +2013,7 @@ mod tests {
         );
         assert_eq!(canned_prompt_id("run the tests please", &defaults), None);
         assert_eq!(canned_prompt_id("", &defaults), None);
+        assert_eq!(canned_prompt_id("Do that", &defaults), Some("do-that"));
 
         let overrides = BTreeMap::from([("run-tests".to_owned(), "Run focused tests".to_owned())]);
         assert_eq!(
@@ -2045,6 +2057,7 @@ mod tests {
             assert!(!ids.contains(&gated), "unexpected candidate: {gated}");
         }
         for always in [
+            "do-that",
             "whats-next",
             "archive",
             "new-task",

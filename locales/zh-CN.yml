@@ -1343,6 +1343,7 @@ suggestions.prompt_text: 建议提示词内容
 suggestions.prompt_editor_description: 点击建议后会发送此文本。
 suggestions.prompt_invalid: 请输入不超过 2,000 个字符的提示词。
 suggestions.prompt_duplicate: 另一个建议操作已使用此提示词。
+suggestions.do_that: 就这么做
 suggestions.proceed: 好的，请继续。
 suggestions.make_it_happen: 开始实现
 suggestions.add_details: 补充信息

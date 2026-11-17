@@ -1,0 +1,1 @@
+- When an agent offers one clear recommendation, Jev can suggest “Do that” to ask the agent to carry it out.

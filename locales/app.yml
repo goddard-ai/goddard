@@ -3890,6 +3890,8 @@ suggestions.prompt_invalid:
   en: Enter a prompt of at most 2,000 characters.
 suggestions.prompt_duplicate:
   en: Another suggested action already sends this prompt.
+suggestions.do_that:
+  en: Do that
 suggestions.proceed:
   en: Yes, proceed.
 suggestions.make_it_happen:
