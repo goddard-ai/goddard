@@ -88,6 +88,7 @@ impl CodexHistoryRefresh {
         if !session.detail_loaded
             || session.incognito
             || session.status.is_busy()
+            || (session.thread_goal.is_none() && session.awaiting_first_friend_reply())
             || session
                 .turns
                 .iter()

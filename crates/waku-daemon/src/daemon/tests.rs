@@ -1174,8 +1174,16 @@ fn incoming_chat_materializes_a_session() {
     assert!(context.contains("maya"));
     assert!(context.contains("shipping the update tonight — changelog attached"));
     assert!(context.contains("third-party reference material"));
-    assert!(session.take_provider_context().is_none());
     assert_eq!(session.messages.len(), 1);
+    session.begin_turn("the first attempt");
+    session.finish_active_turn(TurnStatus::Interrupted);
+    assert_eq!(
+        session.take_provider_context().as_deref(),
+        Some(context.as_str())
+    );
+    session.begin_turn("try again");
+    session.mark_active_turn_provider_started();
+    assert!(session.take_provider_context().is_none());
 
     // A second message reuses the same friend project; a different
     // sender still lands in the same Friends project.
@@ -4510,6 +4518,65 @@ fn runtime_generation_retirement_fences_observed_events(shutdown: bool) {
         serde_json::to_value(&backend.task_state.lock().sessions).unwrap(),
         before
     );
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn received_codex_chat_retries_without_an_unconfirmed_cursor() {
+    let root = std::env::temp_dir().join(format!("waku-chat-retry-{}", Uuid::new_v4()));
+    let (mut backend, _) = surface_test_backend(&root);
+    runtime_generation_configure_launch(&mut backend, &root);
+    let delivery = crate::share::ChatDelivery {
+        peer_id: "peer".into(),
+        peer_name: "Maya".into(),
+        title: "Release note".into(),
+        text: "The release is on Tuesday.".into(),
+    };
+    let share_dir = root.join("share");
+    std::fs::create_dir(&share_dir).unwrap();
+    let session_id = create_chat_session(
+        &backend.task_state,
+        &backend.task_store,
+        &share_dir,
+        &delivery,
+    )
+    .unwrap();
+    let cursor = ProviderResumeCursor::Codex {
+        thread_id: "unconfirmed-thread".into(),
+    };
+    {
+        let mut state = backend.task_state.lock();
+        let session = state.session_mut(session_id).unwrap();
+        session.provider = ProviderKind::Codex;
+        session.provider_cursor = Some(cursor.clone());
+        session.begin_turn("When is the release?");
+        session.finish_active_turn(TurnStatus::Interrupted);
+        session.pending_provider_context = None;
+        session.status = SessionStatus::Failed;
+        assert!(waku_protocol::provider_session::CodexHistoryRefresh::capture(session).is_none());
+        backend.task_store.save(&mut state).unwrap();
+    }
+    let (launches, launch) = crossbeam_channel::unbounded();
+    backend.runtime_test_start = Some(Arc::new(move |_, options, _| {
+        launches.send(options.provider_cursor).unwrap();
+        let capture = Arc::new(CaptureDriver::default());
+        Ok(DriverHandle::from_control(capture))
+    }));
+    let events = EventSink::detached();
+    backend.ensure_agent_runtime(session_id, &events).unwrap();
+    assert!(launch.try_recv().unwrap().is_none());
+    drop_detached(backend.remove_runtime(session_id, None, false));
+    {
+        let mut state = backend.task_state.lock();
+        let session = state.session_mut(session_id).unwrap();
+        session.begin_turn("When is the release?");
+        session.mark_active_turn_provider_started();
+        session.finish_active_turn(TurnStatus::Completed);
+        backend.task_store.save(&mut state).unwrap();
+    }
+    backend.ensure_agent_runtime(session_id, &events).unwrap();
+    assert_eq!(launch.try_recv().unwrap(), Some(cursor));
+    drop(backend);
     std::fs::remove_dir_all(root).ok();
 }
 

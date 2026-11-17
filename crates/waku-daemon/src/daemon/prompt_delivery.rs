@@ -332,7 +332,7 @@ pub(super) fn deliver_agent_prompt(
                         session.pending_provider_context.clone()
                     }
                 } else {
-                    session.pending_provider_context.take()
+                    session.take_provider_context()
                 }
             })
     };

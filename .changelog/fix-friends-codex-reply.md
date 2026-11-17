@@ -1,0 +1,1 @@
+- Retrying a first Codex reply to a forwarded message opens a fresh thread when the earlier attempt never started and includes the original message as context.

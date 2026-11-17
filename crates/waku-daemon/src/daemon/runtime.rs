@@ -52,7 +52,7 @@ impl WakuBackend {
         session_id: Uuid,
         runtime_id: Uuid,
         provider: ProviderKind,
-        options: DriverStartOptions,
+        mut options: DriverStartOptions,
         events: EventSink,
     ) -> anyhow::Result<(DriverHandle, bool)> {
         let _admission = self.idle_shutdown.enter()?;
@@ -71,6 +71,27 @@ impl WakuBackend {
                 !self.removed_session_ids.lock().contains(&session_id),
                 "task {session_id} was removed"
             );
+            if provider == ProviderKind::Codex {
+                let mut state = self.task_state.lock();
+                if let Some(session) = state.sessions.iter_mut().find(|s| s.id == session_id)
+                    && session.friend_peer_id.is_some()
+                {
+                    self.task_store.hydrate(session)?;
+                    if session.awaiting_first_friend_reply() {
+                        options.read_own_transcript = true;
+                        // A thread opened before its first turn may never have
+                        // written a rollout. Keep a thread with a saved goal.
+                        if session.thread_goal.is_none()
+                            && matches!(
+                                options.provider_cursor,
+                                Some(ProviderResumeCursor::Codex { .. })
+                            )
+                        {
+                            options.provider_cursor = None;
+                        }
+                    }
+                }
+            }
             drop_detached(self.remove_runtime(session_id, None, false));
             owner.set(Some(runtime_id));
             self.spawn_runtime_inner(session_id, runtime_id, provider, options, events.clone())
