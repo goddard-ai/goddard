@@ -80,6 +80,9 @@ fn group(path: &str) -> &str {
 
 fn authority(path: &str) -> &str {
     match path {
+        p if p.starts_with("boss counsel ") => {
+            "Counsel chat or the human only; sending, deferring, and dismissing require the client’s human controls"
+        }
         p if p.starts_with("boss instructions ") => {
             "Only the live Boss chat or a human; employees and planning sessions cannot modify user obligations"
         }
@@ -133,6 +136,15 @@ fn authority(path: &str) -> &str {
 
 fn purpose(path: &str) -> &str {
     match path {
+        "boss counsel view" => {
+            "Inspect Counsel recommendations, decisions, and linked Boss handoffs."
+        }
+        "boss counsel propose" => {
+            "Draft a source-backed next action for the human to review and send to Boss."
+        }
+        "boss counsel complete" => {
+            "Record concrete reported evidence that an approved instruction is complete."
+        }
         "boss instructions list" => {
             "Inspect active instructions, review candidates, sources and retirement evidence."
         }
@@ -295,7 +307,9 @@ fn purpose(path: &str) -> &str {
         p if p.starts_with("boss persona ") => {
             "Inspect or maintain role instructions and shipped-default state."
         }
-        "memory confirm" | "boss memory confirm" => "Save the exact proposal after reconsidering the returned memory rules; only its original caller can confirm it.",
+        "memory confirm" | "boss memory confirm" => {
+            "Save the exact proposal after reconsidering the returned memory rules; only its original caller can confirm it."
+        }
         "memory record" | "boss memory record" => waku_protocol::boss::MEMORY_RECORDING_GUIDANCE,
         p if p.contains(" memory ") || p.starts_with("memory ") => {
             "Read or maintain durable notes in an explicitly accessible bucket."

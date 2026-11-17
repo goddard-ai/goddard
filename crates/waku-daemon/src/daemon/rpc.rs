@@ -348,6 +348,20 @@ impl Backend for WakuBackend {
         agent: Option<Uuid>,
     ) -> anyhow::Result<ResponsePayload> {
         let _admission = self.idle_shutdown.enter()?;
+        if agent.is_some_and(|id| self.boss.is_counsel(id)) {
+            anyhow::ensure!(
+                matches!(
+                    &request.command,
+                    Command::Boss { .. }
+                        | Command::AgentReadSession { .. }
+                        | Command::AgentSearchSessions { .. }
+                        | Command::AgentHistorySearch { .. }
+                        | Command::AgentListModels
+                        | Command::AgentAsk { .. }
+                ),
+                "Counsel can read work and propose an instruction for the human to send to Boss"
+            );
+        }
         // Conditional sidebar edits and older user metadata paths share an
         // ordering boundary. Reentrant because the receipt path delegates to
         // the existing metadata/Boss handlers on this same thread.

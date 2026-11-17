@@ -1545,6 +1545,7 @@ pub(super) enum SidebarRow {
     ErrandsShowMore(waku_client::DaemonKey),
     EmployeesShowMore(waku_client::DaemonKey),
     Boss(waku_client::DaemonKey),
+    Counsel(waku_client::DaemonKey),
     /// A daemon-managed planning session — the boss's own document, so the
     /// row sits under the boss like an employee but carries the plan's idea
     /// and kind label instead of a persona's name and job.
@@ -1728,7 +1729,7 @@ fn sidebar_row_height(row: SidebarRow) -> Pixels {
         SidebarRow::Session(_) | SidebarRow::Deliverable(..) | SidebarRow::Employee(_) => {
             SIDEBAR_SESSION_ROW_HEIGHT
         }
-        SidebarRow::Boss(_) | SidebarRow::Planning(_) => 42.0,
+        SidebarRow::Boss(_) | SidebarRow::Counsel(_) | SidebarRow::Planning(_) => 42.0,
         SidebarRow::Terminal(_) => terminals::SIDEBAR_TERMINAL_ROW_HEIGHT,
         SidebarRow::BossShowMore(_)
         | SidebarRow::ErrandsShowMore(_)
@@ -4873,6 +4874,9 @@ impl Waku {
                     );
                 }
             }
+            for key in &self.boss_ui.hosts {
+                rows.push(SidebarRow::Counsel(*key));
+            }
             rows.push(SidebarRow::GroupSpacer);
         }
 
@@ -5242,6 +5246,7 @@ impl Waku {
                 self.render_boss_employee_show_more(key, SidebarGroup::Employees, cx)
             }
             SidebarRow::Boss(key) => self.render_boss_sidebar_row(key, cx),
+            SidebarRow::Counsel(key) => self.render_counsel_sidebar_row(key, cx),
             SidebarRow::Planning(session_id) => {
                 let shortcut_index = (self.sidebar_shortcut_hints
                     && self.sidebar_multi_selection.is_empty())
@@ -8688,6 +8693,7 @@ mod tests {
 
     fn boss_state_with_deliverables(deliverables: Vec<BossDeliverable>) -> BossState {
         BossState {
+            counsel: Default::default(),
             employee_prompt_controls: Default::default(),
             identity: BossIdentity {
                 id: Uuid::new_v4(),

@@ -6,6 +6,22 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "counsel"
+            },
+            "action": {
+              "$ref": "#/definitions/CounselOperation"
+            }
+          },
+          "required": [
+            "type",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "instructionPin"
             },
             "action": {
@@ -3206,6 +3222,163 @@
       "required": [],
       "additionalProperties": false
     },
+    "CounselOperation": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "open"
+            },
+            "provider": {
+              "$ref": "#/definitions/ProviderKind"
+            },
+            "model": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "mode": {
+              "$ref": "#/definitions/RuntimeMode"
+            }
+          },
+          "required": [
+            "type",
+            "provider",
+            "model",
+            "mode"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "view"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "propose"
+            },
+            "title": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "instruction": {
+              "type": "string"
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "replaces": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "title",
+            "reason",
+            "instruction",
+            "sources"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "decide"
+            },
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "expectedRevision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "decision": {
+              "$ref": "#/definitions/CounselDecision"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "expectedRevision",
+            "decision"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "complete"
+            },
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "expectedRevision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "evidence": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "expectedRevision",
+            "evidence"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "CounselDecision": {
+      "anyOf": [
+        {
+          "const": "send"
+        },
+        {
+          "const": "later"
+        },
+        {
+          "const": "dismiss"
+        }
+      ]
+    },
     "CustomCommandIcon": {
       "anyOf": [
         {
@@ -4121,6 +4294,22 @@
     },
     "BossResult": {
       "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "counsel"
+            },
+            "state": {
+              "protocolType": "CounselState"
+            }
+          },
+          "required": [
+            "type",
+            "state"
+          ],
+          "additionalProperties": false
+        },
         {
           "type": "object",
           "properties": {

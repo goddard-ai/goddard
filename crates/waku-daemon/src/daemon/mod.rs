@@ -721,6 +721,7 @@ mod catalog_ops;
 mod chain_exec;
 mod chain_handoff;
 mod checkout_history;
+mod counsel;
 mod driver_commands;
 mod events;
 mod idle;

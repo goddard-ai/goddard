@@ -2077,6 +2077,8 @@ pub fn strip_injected_prompt_blocks(text: &str) -> String {
             "project-memory",
             "goddard-agent",
             "boss-persona",
+            "goddard-counsel",
+            "goddard-counsel-recent-sessions",
         ] {
             let open = format!("<{tag}>");
             let close = format!("</{tag}>");

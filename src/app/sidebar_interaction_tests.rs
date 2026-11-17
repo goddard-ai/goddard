@@ -231,6 +231,7 @@ fn fixture_session(project_id: Uuid, title: &str, last_reply_at: u64) -> AgentSe
 
 fn boss_state_fixture(identity_seed: u8, employees: Vec<waku_protocol::boss::BossEmployee>) -> BossState {
     BossState {
+        counsel: Default::default(),
         employee_prompt_controls: Default::default(),
         identity: BossIdentity {
             id: Uuid::from_u128(0xB0550000_0000_4000_8000_000000000000 | identity_seed as u128),

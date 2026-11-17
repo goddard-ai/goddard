@@ -4625,6 +4625,7 @@ mod command_palette;
 mod commit_dialog;
 mod components;
 mod composer;
+mod counsel;
 mod daemon_degraded;
 mod deep_link;
 mod diagnostics_page;

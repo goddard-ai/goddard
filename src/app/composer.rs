@@ -4138,6 +4138,7 @@ impl Waku {
             || self.execute_land_composer_command(prompt, cx)
             || self.execute_compact_composer_command(prompt, cx)
             || self.execute_clear_boss_command(prompt, cx)
+            || self.execute_counsel_composer_command(prompt, cx)
             || self.execute_side_composer_command(prompt, cx)
             || self.execute_incognito_composer_command(prompt, cx)
             || self.execute_fast_mode_toggle(prompt, cx)
@@ -6331,6 +6332,16 @@ impl Waku {
             .filter(|session| session.quarantined && session.detail_loaded)
             .map(|session| session.id);
         let field = self.render_composer_field(window, cx);
+        let field = if let Some(recommendations) = self.render_counsel_recommendations(cx) {
+            div()
+                .flex_none()
+                .flex()
+                .flex_col()
+                .child(recommendations)
+                .child(field)
+        } else {
+            field
+        };
         let Some(session_id) = quarantined else {
             return field;
         };

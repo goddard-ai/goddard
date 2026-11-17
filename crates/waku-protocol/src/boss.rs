@@ -2230,6 +2230,9 @@ pub struct BossRotationStatus {
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct BossState {
+    /// Independent advisory conversation and human-approved Boss handoffs.
+    #[serde(default)]
+    pub counsel: crate::counsel::CounselState,
     /// Daemon-computed direct-prompt controls, refreshed with each snapshot.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub employee_prompt_controls: BTreeMap<Uuid, EmployeePromptControl>,
@@ -3388,6 +3391,9 @@ pub struct BossFile {
     deny_unknown_fields
 )]
 pub enum BossOperation {
+    Counsel {
+        action: crate::counsel::CounselOperation,
+    },
     InstructionPin {
         action: crate::instruction_pins::InstructionPinOperation,
     },
@@ -4114,6 +4120,9 @@ fn default_true() -> bool {
     rename_all_fields = "camelCase"
 )]
 pub enum BossResult {
+    Counsel {
+        state: crate::counsel::CounselState,
+    },
     InstructionPins {
         pins: Vec<crate::instruction_pins::InstructionPin>,
     },

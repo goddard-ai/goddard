@@ -143,7 +143,7 @@ impl WakuBackend {
     /// scoped credentials, but every action through either is denied: the
     /// pointer, not the credential, defines who may coordinate.
     pub(super) fn boss_fenced_chat(&self, session_id: Uuid) -> bool {
-        if self.boss.is_boss(session_id) {
+        if self.boss.is_boss(session_id) || self.boss.is_counsel(session_id) {
             return false;
         }
         let journal_fenced = RotationJournal::load(&self.boss_journal_path())
@@ -1349,6 +1349,7 @@ impl WakuBackend {
                 session.boss_managed
                     && session.project_id == identity.id
                     && session.planning.is_none()
+                    && !self.boss.is_counsel(session.id)
             }) {
                 self.task_store.hydrate(session)?;
                 ids.extend(session.messages.iter().filter_map(|message| {
@@ -1454,6 +1455,7 @@ impl WakuBackend {
                     session.boss_managed
                         && session.project_id == identity.id
                         && session.id != new_id
+                        && !self.boss.is_counsel(session.id)
                         && session.planning.is_none()
                         && self.boss.employee_including_retired(session.id).is_none()
                 })

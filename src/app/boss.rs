@@ -617,6 +617,7 @@ enum BossDeliverablesFilter {
 
 pub(super) struct BossUi {
     pub states: HashMap<DaemonKey, BossState>,
+    pub(super) counsel_visible: HashMap<DaemonKey, Vec<waku_protocol::counsel::CounselRecommendation>>,
     pin_rows: HashMap<(DaemonKey, Uuid), waku_protocol::instruction_pins::InstructionPin>,
     pin_scope_labels: HashMap<(DaemonKey, Uuid), String>,
     pin_history: HashSet<DaemonKey>,
@@ -810,7 +811,7 @@ pub(super) struct BossUi {
     retracted_memory: HashSet<(DaemonKey, String, String)>,
     editor: Option<BossEditor>,
     generation: u64,
-    pending: bool,
+    pub(super) pending: bool,
     pending_reply: Option<BossReply>,
     /// The session that was selected when the in-flight `BossOperation::Open`
     /// went out — the surface the open was asked to navigate away from. Its
@@ -856,6 +857,7 @@ impl Default for BossUi {
     fn default() -> Self {
         Self {
             states: HashMap::new(),
+            counsel_visible: HashMap::new(),
             pin_rows: HashMap::new(),
             pin_scope_labels: HashMap::new(),
             pin_history: HashSet::new(),
@@ -1469,6 +1471,8 @@ pub(super) enum BossReply {
     /// A `/clear` dispatch — its Session reply takes the same landing the
     /// boss row's Open gets: swap bookkeeping, catalog insert, activation.
     Clear,
+    CounselOpen(Option<Uuid>),
+    CounselDecision,
     /// An Employees → History lookup — the reply merges into the host's
     /// `BossHistorySearch` instead of the roster list.
     HistorySearch,
@@ -1751,6 +1755,14 @@ impl Waku {
             }) {
                 continue;
             }
+            // A decision reply can beat an older full-state push. Preserve
+            // its Counsel revision until the matching snapshot arrives.
+            if let Some(previous) = self.boss_ui.states.get(&key).filter(|previous| {
+                previous.identity.id == state.identity.id
+                    && previous.counsel.revision > state.counsel.revision
+            }) {
+                state.counsel = previous.counsel.clone();
+            }
             // Agent-initiated approval has no BossReply in this client.
             // Follow its live state transition, but don't redirect when
             // opening an already-finalized plan or syncing another host.
@@ -1832,6 +1844,7 @@ impl Waku {
             }
             self.sidebar_intents.observe_boss(key, &mut state);
             self.boss_ui.states.insert(key, state);
+            self.refresh_counsel_recommendations(key);
             if let Some((from, to)) = rotated_session {
                 self.migrate_boss_annotations(key, from, to, cx);
                 self.migrate_voice_scratchpad(from, to);
@@ -2676,12 +2689,13 @@ impl Waku {
         // means the user moved on and the late reply must not drag them
         // back. A `/clear` follows the same contract: the fresh chat opens
         // only while the composer still shows the chat it replaced.
-        self.boss_ui.open_from =
-            if matches!(operation, BossOperation::Open { .. } | BossOperation::Clear) {
-                self.state.selected_session
-            } else {
-                None
-            };
+        self.boss_ui.open_from = if let BossReply::CounselOpen(from) = reply {
+            from
+        } else if matches!(operation, BossOperation::Open { .. } | BossOperation::Clear) {
+            self.state.selected_session
+        } else {
+            None
+        };
         if let BossReply::Finalize(session_id) = reply {
             self.boss_ui.plan_finalizing.insert(session_id);
         }
@@ -2730,6 +2744,50 @@ impl Waku {
                 match result {
                     Ok(waku_client::ResponsePayload::Boss { result }) => {
                         match result {
+                            BossResult::Session { session, project }
+                                if matches!(reply, BossReply::CounselOpen(_)) =>
+                            {
+                                let id = session.id;
+                                this.daemons.claim_project(project.id, key);
+                                this.boss_ui.projects.insert(project.id, *project);
+                                this.daemons.claim_session(id, key);
+                                if let Some(existing) =
+                                    this.state.sessions.iter_mut().find(|entry| entry.id == id)
+                                {
+                                    *existing = *session;
+                                } else {
+                                    this.state.sessions.push(*session);
+                                }
+                                if let Some(state) = this.boss_ui.states.get_mut(&key) {
+                                    state.counsel.session_id = Some(id);
+                                }
+                                if boss_open_reply_navigates(
+                                    this.boss_ui.open_from,
+                                    this.state.selected_session,
+                                ) {
+                                    this.request_session_activation(
+                                        id,
+                                        SessionActivationTransition::Visit,
+                                        cx,
+                                    );
+                                }
+                                this.refresh_boss_state_on(key, cx);
+                            }
+                            BossResult::Counsel { state } => {
+                                let session_id = state.session_id;
+                                if let Some(boss) = this.boss_ui.states.get_mut(&key)
+                                    && boss.counsel.revision <= state.revision
+                                {
+                                    boss.counsel = state;
+                                }
+                                this.refresh_counsel_recommendations(key);
+                                if reply == BossReply::CounselDecision {
+                                    if let Some(id) = session_id {
+                                        this.ensure_session_loaded(id, cx);
+                                    }
+                                    this.refresh_boss_state_on(key, cx);
+                                }
+                            }
                             BossResult::InstructionPins { pins } => {
                                 if let (
                                     Some(editor),
@@ -4410,11 +4468,9 @@ impl Waku {
         if !self.state.boss_experiment_enabled {
             return false;
         }
-        self.boss_ui
-            .states
-            .values()
-            .any(|state| state.session_id == Some(session.id))
-            || Self::session_kind_is_boss_owned(session)
+        self.boss_ui.states.values().any(|state| {
+            state.session_id == Some(session.id) || state.counsel.session_id == Some(session.id)
+        }) || Self::session_kind_is_boss_owned(session)
     }
 
     /// Managed-session kinds that are boss surfaces rather than employee
@@ -12875,6 +12931,7 @@ mod tests {
 
     fn deliverable_state(updated_at: u64, viewed_at: Option<u64>) -> BossState {
         BossState {
+            counsel: Default::default(),
             employee_prompt_controls: Default::default(),
             identity: BossIdentity {
                 id: Uuid::new_v4(),
@@ -14677,6 +14734,7 @@ mod tests {
 
     fn boss_state_for_queue_test() -> BossState {
         BossState {
+            counsel: Default::default(),
             employee_prompt_controls: Default::default(),
             identity: BossIdentity {
                 id: Uuid::from_u128(u128::MAX - 2),

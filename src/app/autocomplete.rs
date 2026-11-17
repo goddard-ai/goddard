@@ -603,6 +603,19 @@ impl Waku {
                 if !merged.iter().any(|command| command.name == "goal") {
                     merged.push(waku_goal_command());
                 }
+                // Counsel is a separate conversation on the same daemon.
+                if self.state.boss_experiment_enabled
+                    && (self.boss_chat_key().is_some() || self.counsel_chat_key().is_some())
+                {
+                    merged.retain(|command| command.name != "counsel");
+                    merged.push(SlashCommand {
+                        name: "counsel".to_owned(),
+                        description: tr!("counsel.command_description"),
+                        scope: composer_complete::CommandScope::Waku,
+                        argument_hint: None,
+                        template: None,
+                    });
+                }
                 // `/clear` is the Boss chat's own reset — offered only on
                 // that surface and shadowing any provider entry so the
                 // shown row matches what Enter actually runs.

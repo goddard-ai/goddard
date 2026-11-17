@@ -695,6 +695,7 @@ mod tests {
 
     fn boss_state() -> BossState {
         BossState {
+            counsel: Default::default(),
             employee_prompt_controls: Default::default(),
             identity: BossIdentity {
                 id: Uuid::new_v4(),

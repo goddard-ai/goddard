@@ -2978,6 +2978,7 @@ fn is_subprocess_heavy(command: &Command) -> bool {
             | Command::EmployeeComposerPrompt { .. }
             | Command::Boss {
                 operation: waku_protocol::boss::BossOperation::Summon { .. }
+                    | waku_protocol::boss::BossOperation::Counsel { .. }
                     | waku_protocol::boss::BossOperation::CreatePlan { .. }
                     | waku_protocol::boss::BossOperation::Automation { .. }
                     | waku_protocol::boss::BossOperation::Control { .. }
@@ -3557,6 +3558,7 @@ fn task_catalog_action(command: &Command) -> TaskCatalogAction {
             }
         }
         Command::Boss { operation: waku_protocol::boss::BossOperation::Open { .. }
+            | waku_protocol::boss::BossOperation::Counsel { .. }
             | waku_protocol::boss::BossOperation::Clear
             | waku_protocol::boss::BossOperation::Automation { .. }
             | waku_protocol::boss::BossOperation::Summon { .. }

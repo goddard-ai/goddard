@@ -709,7 +709,7 @@ impl BossService {
         )
     }
 
-    fn update_with_session(
+    pub(crate) fn update_with_session(
         &self,
         change: impl FnOnce(&mut BossState) -> anyhow::Result<()>,
         host: &mut dyn crate::SessionCommit,
@@ -1017,6 +1017,10 @@ impl BossService {
         self.state.lock().session_id == Some(session)
     }
 
+    pub fn is_counsel(&self, session: Uuid) -> bool {
+        self.state.lock().counsel.session_id == Some(session)
+    }
+
     /// The boss chat itself — a planning session is the same principal
     /// working in a dedicated session, so owner-level operations and the
     /// boss persona apply to both.
@@ -1092,7 +1096,10 @@ impl BossService {
     }
 
     pub fn is_managed(&self, session: Uuid) -> bool {
-        self.is_boss(session) || self.is_employee(session) || self.is_planning(session)
+        self.is_boss(session)
+            || self.is_counsel(session)
+            || self.is_employee(session)
+            || self.is_planning(session)
     }
 
     /// The planning record for a session, or for a plan file when the
@@ -2233,7 +2240,7 @@ impl BossService {
         let Some(caller) = caller else {
             return Ok(());
         };
-        if caller == target || self.has_boss_authority(caller) {
+        if caller == target || self.is_counsel(caller) || self.has_boss_authority(caller) {
             return Ok(());
         }
         let state = self.document();
@@ -2784,6 +2791,9 @@ impl BossService {
     }
 
     pub fn prompt_with_context(&self, session: Uuid, prompt: String) -> String {
+        if self.is_counsel(session) {
+            return self.counsel_prompt(prompt);
+        }
         let prompt = self.prepend_persona_default_notice(session, prompt);
         if !self.is_managed(session) || !self.injected.lock().insert(session) {
             return prompt;
@@ -4605,7 +4615,8 @@ impl BossService {
         operation: BossOperation,
     ) -> anyhow::Result<BossResult> {
         match operation {
-            BossOperation::Chain { .. }
+            BossOperation::Counsel { .. }
+            | BossOperation::Chain { .. }
             | BossOperation::InstructionPin { .. }
             | BossOperation::Context
             | BossOperation::Projects { .. }
@@ -4697,6 +4708,9 @@ impl BossService {
             }
             BossOperation::View => {
                 let mut state = self.document();
+                if caller.is_some_and(|id| !self.is_counsel(id)) {
+                    state.counsel = Default::default();
+                }
                 if caller.is_some_and(|id| !self.is_boss(id)) {
                     // User obligations are private to the main Boss chat,
                     // including when an employee has coordination authority.
@@ -8051,6 +8065,7 @@ fn fresh_state() -> BossState {
         *persona_defaults.get_mut(role) = current_persona_default_state(role);
     }
     BossState {
+        counsel: Default::default(),
         employee_prompt_controls: Default::default(),
         identity: BossIdentity {
             id,
@@ -8088,6 +8103,7 @@ fn fresh_state() -> BossState {
 
 fn disabled_state() -> BossState {
     BossState {
+        counsel: Default::default(),
         employee_prompt_controls: Default::default(),
         identity: BossIdentity {
             id: Uuid::nil(),

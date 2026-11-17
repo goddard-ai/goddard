@@ -150,6 +150,14 @@ struct Snapshot {
     payloads: BTreeMap<String, String>,
 }
 
+// Counsel's session metadata stays in the coordinator; each recommendation
+// is an independent record so a decision does not rewrite the advice history.
+const COUNSEL_COLLECTIONS: &[Collection] = &[Collection {
+    field: "recommendations",
+    children: &[],
+    payloads: &[],
+}];
+
 fn extract(
     value: &mut Value,
     parent: &str,
@@ -210,6 +218,9 @@ fn encode(state: &BossState) -> anyhow::Result<Snapshot> {
     let mut value = serde_json::to_value(state)?;
     let mut snapshot = Snapshot::default();
     extract(&mut value, "", "", COLLECTIONS, &mut snapshot)?;
+    if let Some(counsel) = value.get_mut("counsel") {
+        extract(counsel, "", "counsel.", COUNSEL_COLLECTIONS, &mut snapshot)?;
+    }
     snapshot.coordinator = serde_json::to_string(&value)?;
     Ok(snapshot)
 }
@@ -376,6 +387,9 @@ impl SqliteStorage {
         let mut value: Value = serde_json::from_str(&snapshot.coordinator)?;
         let mut visited = BTreeSet::new();
         restore(&mut value, "", "", COLLECTIONS, &snapshot, &mut visited)?;
+        if let Some(counsel) = value.get_mut("counsel") {
+            restore(counsel, "", "counsel.", COUNSEL_COLLECTIONS, &snapshot, &mut visited)?;
+        }
         ensure!(
             visited.len() == snapshot.rows.len(),
             "unreachable Boss records"

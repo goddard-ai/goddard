@@ -23110,6 +23110,7 @@ fn plan_blocker_receipt_replays_once_without_employee_cli_authentication() {
     remove_tree(root);
 }
 
+mod counsel;
 mod instruction_pins;
 mod plan_acceptance;
 mod rotation_oracle;

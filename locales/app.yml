@@ -7736,3 +7736,51 @@ usage.likely_compaction:
   en: Context likely compacted — an unusually long wait was followed by a large drop in context usage.
 usage.possible_compaction:
   en: Context is nearly full and the provider is taking unusually long to respond. It may be compacting.
+
+counsel.title:
+  en: "Counsel"
+
+counsel.subtitle:
+  en: "Your next move"
+
+counsel.command_description:
+  en: "Open Counsel to discuss what to do next"
+
+counsel.recommendation:
+  en: "Recommended next"
+
+counsel.saved_later:
+  en: "Saved for later"
+
+counsel.dismissed:
+  en: "Dismissed"
+
+counsel.sent:
+  en: "Sent to Boss · queued or in progress"
+
+counsel.completed:
+  en: "Completed · reported evidence"
+
+counsel.send:
+  en: "Send to Boss"
+
+counsel.later:
+  en: "Later"
+
+counsel.dismiss:
+  en: "Dismiss"
+
+counsel.revise:
+  en: "Revise"
+
+counsel.revise_prompt:
+  en: "Revise the recommendation “%{title}” (ID %{id}). Use its ID as replaces when proposing the revision. My changes:"
+
+counsel.message_to_boss:
+  en: "Message to Boss"
+
+counsel.source:
+  en: "Source session"
+
+counsel.open_boss:
+  en: "Open Boss"

@@ -19,6 +19,7 @@
 //! user.
 
 mod boss_contract;
+mod counsel;
 mod help;
 mod instruction_pins;
 mod resources;
@@ -140,6 +141,7 @@ static HELP_JSON_OUTPUT: AtomicBool = AtomicBool::new(false);
 /// leaf in `schema()` must resolve through one of these. Regression guard:
 /// the tests assert every schema leaf's action is listed here.
 const BOSS_ACTIONS: &[&str] = &[
+    "counsel",
     "summon",
     "prompt",
     "transcript",
@@ -337,6 +339,21 @@ fn leaf_schema(path: &str) -> serde_json::Value {
         .filter_map(|icon| serde_json::to_value(icon).ok()?.as_str().map(str::to_owned))
         .collect::<Vec<_>>();
     let (inputs, output, example) = match path {
+        "boss counsel view" => (
+            json!({}),
+            json!({"json":{"type":"counsel","state":"persistent Counsel conversation and recommendation decisions"}}),
+            "goddard-agent boss counsel view".to_owned(),
+        ),
+        "boss counsel propose" => (
+            json!({"--json|--json-file":{"required":true,"exactlyOne":true,"type":"object: title, reason, instruction, sources (session UUIDs), optional replaces (pending recommendation UUID)"}}),
+            json!({"json":{"type":"counsel","state":"recommendations awaiting human approval; never sends to Boss"}}),
+            "goddard-agent boss counsel propose --json-file proposal.json".to_owned(),
+        ),
+        "boss counsel complete" => (
+            json!({"ID":{"positional":true,"required":true,"type":"recommendation UUID"},"--revision":{"required":true,"type":"integer"},"--evidence":{"required":true,"type":"concrete reported completion evidence"}}),
+            json!({"json":{"type":"counsel","state":"recommendation completion with reported evidence"}}),
+            "goddard-agent boss counsel complete ID --revision 2 --evidence 'Boss reported the remaining check passed'".to_owned(),
+        ),
         "boss instructions list" => (
             json!({"--all":{"optional":true,"type":"boolean flag","notes":"include retired and superseded pins"}}),
             json!({"json":{"type":"instructionPins","pins":"source-backed instruction records, states and revisions"}}),
@@ -930,6 +947,9 @@ fn schema() -> serde_json::Value {
         "boss projects resolve",
         "boss view",
         "boss context",
+        "boss counsel view",
+        "boss counsel propose",
+        "boss counsel complete",
         "boss instructions list",
         "boss instructions show",
         "boss instructions pin",
@@ -1643,6 +1663,7 @@ fn read_content_file(path: &str) -> anyhow::Result<String> {
 fn boss_everyday(action: &str, args: Vec<String>) -> anyhow::Result<()> {
     use waku_protocol::boss::BossOperation;
     match action {
+        "counsel" => counsel::run(args),
         "chain" => {
             let (_, opts) = flags(args, &["json", "json-file"], false)?;
             let payload = json_input(&opts)?;

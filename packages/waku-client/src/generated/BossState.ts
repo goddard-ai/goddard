@@ -8,6 +8,7 @@ import type { BossPlan } from "./BossPlan";
 import type { BossResourcePolicy } from "./BossResourcePolicy";
 import type { BossRotationStatus } from "./BossRotationStatus";
 import type { BossWave } from "./BossWave";
+import type { CounselState } from "./CounselState";
 import type { DispatchNotification } from "./DispatchNotification";
 import type { EmployeeChain } from "./EmployeeChain";
 import type { EmployeeCompletionReport } from "./EmployeeCompletionReport";
@@ -19,6 +20,10 @@ import type { PersonaDefaultsState } from "./PersonaDefaultsState";
 import type { WaveNotification } from "./WaveNotification";
 
 export type BossState = {
+/**
+ * Independent advisory conversation and human-approved Boss handoffs.
+ */
+counsel: CounselState,
 /**
  * Daemon-computed direct-prompt controls, refreshed with each snapshot.
  */

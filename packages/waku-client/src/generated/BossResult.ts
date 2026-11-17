@@ -8,6 +8,7 @@ import type { BossFile } from "./BossFile";
 import type { BossResourcePolicy } from "./BossResourcePolicy";
 import type { BossState } from "./BossState";
 import type { CanonicalProject } from "./CanonicalProject";
+import type { CounselState } from "./CounselState";
 import type { EmployeeLifecycle } from "./EmployeeLifecycle";
 import type { InstructionPin } from "./InstructionPin";
 import type { MemoryMigrationReport } from "./MemoryMigrationReport";
@@ -19,7 +20,7 @@ import type { ProjectSelectionError } from "./ProjectSelectionError";
 import type { SummonAdmission } from "./SummonAdmission";
 import type { JsonValue } from "./serde_json/JsonValue";
 
-export type BossResult = { "type": "instructionPins", pins: Array<InstructionPin>, } | { "type": "planRejected", error: PlanContractError, } | { "type": "planPreview", reviewed: PlanReview, content: string, } | { "type": "state", state: BossState, } | { "type": "roster", roster: string, } | { "type": "context", context: string, } | { "type": "projects", projects: Array<CanonicalProject>, } | { "type": "project", project: CanonicalProject, } | { "type": "projectRejected", error: ProjectSelectionError, } | { "type": "automations", state: AutomationsState, } | { "type": "files", files: Array<BossFile>, } | { "type": "file", path: string, content: string, } | { "type": "saved" } | { "type": "deliverablePublished", deliverable: BossDeliverable,
+export type BossResult = { "type": "counsel", state: CounselState, } | { "type": "instructionPins", pins: Array<InstructionPin>, } | { "type": "planRejected", error: PlanContractError, } | { "type": "planPreview", reviewed: PlanReview, content: string, } | { "type": "state", state: BossState, } | { "type": "roster", roster: string, } | { "type": "context", context: string, } | { "type": "projects", projects: Array<CanonicalProject>, } | { "type": "project", project: CanonicalProject, } | { "type": "projectRejected", error: ProjectSelectionError, } | { "type": "automations", state: AutomationsState, } | { "type": "files", files: Array<BossFile>, } | { "type": "file", path: string, content: string, } | { "type": "saved" } | { "type": "deliverablePublished", deliverable: BossDeliverable,
 /**
  * The `deliverable:<id>` reference form chain artifacts accept.
  */

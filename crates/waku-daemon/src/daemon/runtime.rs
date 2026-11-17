@@ -132,6 +132,7 @@ impl WakuBackend {
             // native service. Other employees retain the ordinary task cwd;
             // sandbox guests already have an isolated provider service.
             if self.boss.is_boss_principal(session_id)
+                || self.boss.is_counsel(session_id)
                 || (provider == ProviderKind::OpenCode && !environment.is_sandbox())
             {
                 options.cwd = self.boss.workspace(session_id)?;
@@ -664,7 +665,7 @@ impl WakuBackend {
             shim_directory,
             task_tools: settings.agent_tools_enabled || self.boss.is_managed(session_id),
             settings_writes: settings.agent_settings_enabled && !self.boss.is_managed(session_id),
-            boss: self.boss.is_boss_principal(session_id),
+            boss: self.boss.is_boss_principal(session_id) || self.boss.is_counsel(session_id),
             // `memory` rides the bucket store the Boss experiment owns, and
             // only a session with a real registered project has a shared
             // bucket to reach — Boss principals keep their own channel.

@@ -41,6 +41,7 @@ pub mod checkpoint;
 pub mod compaction;
 pub mod composer;
 pub mod computer_use;
+pub mod counsel;
 pub mod custom_commands;
 mod driver_wire;
 pub mod eval;

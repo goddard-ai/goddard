@@ -413,6 +413,12 @@ pub(super) fn wrap_boss_outbound_prompt(
     prompt: String,
 ) -> String {
     let prompt = boss.prompt_with_context(session_id, prompt);
+    if boss.is_counsel(session_id) {
+        let state = task_state.lock();
+        let (context, _) =
+            waku_boss::counsel::recent_context(&state.projects, &state.sessions, session_id);
+        return format!("{context}\n\n{prompt}");
+    }
     if !boss.is_boss(session_id) {
         return prompt;
     }

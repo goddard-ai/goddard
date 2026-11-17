@@ -12,6 +12,9 @@ pub(super) fn inputs() -> Value {
 
 pub(super) fn availability(path: &str) -> Value {
     match path {
+        path if path.starts_with("boss counsel ") => {
+            json!({"roles":["counsel","human"],"conditions":["Boss experiment enabled","Counsel drafts and records reported completion; only the human client can send, defer, or dismiss recommendations"]})
+        }
         path if path.starts_with("boss instructions ") => {
             json!({"roles":["boss","human"],"conditions":["Only the live Boss chat can use scoped credentials","Employee and planning credentials cannot read or modify user obligations","Boss-created pins must cite a visible original human message"]})
         }
@@ -169,6 +172,11 @@ pub(super) fn aggregate() -> Value {
             .as_str()
             .expect("operation type tag");
         let paths: &[&str] = match name {
+            "counsel" => &[
+                "boss counsel view",
+                "boss counsel propose",
+                "boss counsel complete",
+            ],
             "instructionPin" => &[
                 "boss instructions list",
                 "boss instructions show",
@@ -263,6 +271,7 @@ pub(super) fn aggregate() -> Value {
         );
         let human_only = matches!(name, "open" | "finalizePlan" | "setAvatarStyle");
         let output = match name {
+            "counsel" => "counsel",
             "view" | "rename" | "renameEmployee" | "regenerateAvatar" | "setAvatarStyle"
             | "upsertPersona" | "deletePersona" | "setEmployeeIcon" | "updatePlanItems"
             | "setPlanItemState" | "setPlanOutcome" | "createOutcome" | "setOutcomeState"

@@ -215,6 +215,11 @@ impl WakuBackend {
                 {
                     state.instruction_pins.clear();
                 }
+                if caller.is_some_and(|id| !self.boss.is_counsel(id))
+                    && let waku_protocol::boss::BossResult::State { state } = &mut result
+                {
+                    state.counsel = Default::default();
+                }
                 result
             })
     }
@@ -234,6 +239,20 @@ impl WakuBackend {
         );
         let was_active = self.boss.is_active();
         self.boss.activate()?;
+        if caller.is_some_and(|id| self.boss.is_counsel(id)) {
+            anyhow::ensure!(
+                matches!(
+                    &operation,
+                    BossOperation::Counsel { .. }
+                        | BossOperation::Context
+                        | BossOperation::Roster
+                        | BossOperation::Transcript { .. }
+                        | BossOperation::HistorySearch { .. }
+                        | BossOperation::Projects { .. }
+                ),
+                "Counsel can advise and propose; only the human can send instructions to Boss"
+            );
+        }
         if !was_active {
             self.wake_summon_queue();
             // Chains waiting on admission or a deferred seal resume on the
@@ -241,6 +260,7 @@ impl WakuBackend {
             self.drive_chains();
         }
         match operation {
+            BossOperation::Counsel { action } => self.handle_counsel_operation(caller, action, events),
             BossOperation::InstructionPin { action } => self.handle_instruction_pin(caller, action),
             BossOperation::Chain { action } => {
                 use waku_protocol::chains::{ChainControl, ChainOperation};
@@ -1129,7 +1149,7 @@ impl WakuBackend {
                 limit,
                 offset,
             } => {
-                if caller.is_some_and(|id| !self.boss.has_boss_authority(id)) {
+                if caller.is_some_and(|id| !self.boss.is_counsel(id) && !self.boss.has_boss_authority(id)) {
                     bail!("only the boss or a human can search history");
                 }
                 // `None` scopes to the boss's reach — every retained record,
@@ -1153,7 +1173,7 @@ impl WakuBackend {
                 Ok(BossResult::Speak { delivered })
             }
             BossOperation::Context => {
-                if caller.is_some_and(|id| !self.boss.has_boss_authority(id)) {
+                if caller.is_some_and(|id| !self.boss.is_counsel(id) && !self.boss.has_boss_authority(id)) {
                     bail!("only the boss or a human can read the work digest");
                 }
                 Ok(BossResult::Context {
@@ -1161,7 +1181,7 @@ impl WakuBackend {
                 })
             }
             BossOperation::Projects { action } => {
-                if caller.is_some_and(|id| !self.boss.has_boss_authority(id)) {
+                if caller.is_some_and(|id| !self.boss.is_counsel(id) && !self.boss.has_boss_authority(id)) {
                     bail!("only the boss or a human can discover the project catalog");
                 }
                 use waku_protocol::projects::ProjectOperation;
