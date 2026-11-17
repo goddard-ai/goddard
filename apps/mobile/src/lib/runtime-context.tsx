@@ -3,6 +3,7 @@ import type {
   AgentSession,
   GoalOperation,
   MessageAttachment,
+  PromptConfiguration,
   PendingPermission,
   PendingUserInput,
   ProviderKind,
@@ -19,6 +20,7 @@ import {
   MANAGED_GOAL_QUESTION,
   sessionAcceptsImmediateSteer,
   sameSessionRuntimeOptions,
+  promptConfigurationForSession,
 } from '@waku/client';
 import { isAgentQueuedMessage, reduceRuntimeEvent } from '@waku/client/event-reducer';
 import { writeProviderProbeCache } from '@waku/client/provider-probe-cache';
@@ -93,6 +95,7 @@ interface PendingSubmission {
   displayContent: string;
   attachments: MessageAttachment[];
   queuedId?: string;
+  configuration: PromptConfiguration;
 }
 
 /** Stream deltas commit at ≤ ~8.3 Hz, the desktop stream pump's cadence: the
@@ -121,6 +124,7 @@ interface RuntimeContextValue {
     attachments?: MessageAttachment[],
     providerPromptOverride?: string,
     hidden?: boolean,
+    configuration?: PromptConfiguration,
   ) => Promise<AgentSession>;
   steerPrompt: (
     session: AgentSession,
@@ -203,6 +207,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       attachments?: MessageAttachment[],
       providerPromptOverride?: string,
       hidden?: boolean,
+      configuration?: PromptConfiguration,
     ) => Promise<AgentSession>) | null
   >(null);
   const managedGoalSettleRef = useRef<((session: AgentSession) => Promise<void>) | null>(null);
@@ -352,6 +357,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         next.attachments ?? [],
         next.content,
         next.hidden,
+        next.configuration ?? undefined,
       );
     } catch (cause) {
       setErrors((values) => ({ ...values, [sessionId]: errorMessage(cause) }));
@@ -464,6 +470,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
                   pending.attachments,
                   pending.providerPrompt,
                   pending.queuedId,
+                  pending.configuration,
                 )
               : queueSubmission(
                   state.current,
@@ -473,6 +480,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
                   pending.providerPrompt,
                   false,
                   pending.queuedId,
+                  pending.configuration,
                 );
             if (!settledCleanly) void persistOrdered(state.current).catch(() => {});
           }
@@ -629,6 +637,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     attachments: MessageAttachment[] = [],
     providerPromptOverride?: string,
     hidden = false,
+    submittedConfiguration?: PromptConfiguration,
   ): Promise<AgentSession> => {
     const client = daemon.client;
     const profileId = daemon.activeProfile?.id;
@@ -644,6 +653,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     // still in flight; building the turn on that would persist a transcript
     // with only the new messages. Always start from the full session.
     let current = await loadFullSession(inputSession.id);
+    const configuration = submittedConfiguration ?? promptConfigurationForSession(current);
     const cachedRuntime = entries.current.get(current.id);
     if (cachedRuntime) {
       const generation = cacheGenerations.current.get(current.id);
@@ -683,7 +693,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       }
     }
     if (sessionBusy(current)) {
-      const queued = queueSubmission(current, prompt, clock, attachments, providerPrompt, hidden);
+      const queued = queueSubmission(current, prompt, clock, attachments, providerPrompt, hidden, undefined, configuration);
       cacheSession(queued);
       return persistOrdered(queued);
     }
@@ -770,7 +780,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       }
       await client.request(
         {
-          type: 'prompt',
+          type: 'promptWithConfiguration',
+          configuration,
           prompt: providerPrompt,
           turnId: submitted.turnId,
           messageId: submitted.messageId,
@@ -783,10 +794,15 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       setErrors((values) => removeKey(values, current.id));
       return current;
     } catch (cause) {
-      if (runtime?.starting) removeRuntime(current.id);
       const latest = queryClient.getQueryData<AgentSession>(
         daemonKeys.session(profileId, current.id),
       ) ?? current;
+      // The old reply cannot settle a turn created after Stop or rewind.
+      if (entries.current.get(current.id) !== runtime
+        || (latest.history_generation ?? 0) !== (current.history_generation ?? 0)
+        || latest.turns.at(-1)?.id !== submitted.turnId
+        || latest.turns.at(-1)?.status !== 'running') throw cause;
+      if (runtime?.starting) removeRuntime(current.id);
       const cursor = latest.runtime_event_cursor;
       const failed = reduceRuntimeEvent(latest, {
         sessionId: latest.id,
@@ -915,7 +931,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       ? queueSteerSubmission(latest, prompt, clock, attachments, providerPrompt, queuedId)
       : undefined;
     if (queued) cacheSession(queued);
-    const submission = { providerPrompt, displayContent: prompt, attachments, queuedId };
+    const submission = { providerPrompt, displayContent: prompt, attachments, queuedId,
+      configuration: promptConfigurationForSession(latest) };
     pending.push(submission);
     pendingSteers.current.set(session.id, pending);
     try {

@@ -327,6 +327,7 @@ fn catalog_merge_carries_the_confirmed_activation_mark_forward() {
     let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
     session.model = Some("gpt-6".into());
     session.reasoning_effort = Some("low".into());
+    session.metadata_revision = 3;
     session.config_activation = Some(ConfigActivation {
         generation: 1,
         revision: 5,
@@ -339,6 +340,7 @@ fn catalog_merge_carries_the_confirmed_activation_mark_forward() {
     let mut stale_projection = session.list_projection();
     stale_projection.model = Some("gpt-5.5".into());
     stale_projection.reasoning_effort = Some("high".into());
+    stale_projection.metadata_revision = 2;
     stale_projection.config_activation = Some(ConfigActivation {
         generation: 1,
         revision: 2,
@@ -361,11 +363,12 @@ fn catalog_merge_carries_the_confirmed_activation_mark_forward() {
         })
     );
 
-    // A snapshot carrying a newer activation adopts it together with the
-    // confirmed fields.
+    // A newer metadata choice updates the selected values; the independent
+    // activation mark merges forward alongside it.
     let mut newer = session.clone();
     newer.model = Some("gpt-6.1".into());
     newer.reasoning_effort = Some("high".into());
+    newer.metadata_revision = 4;
     newer.config_activation = Some(ConfigActivation {
         generation: 1,
         revision: 6,
@@ -1306,6 +1309,7 @@ fn voice_pad_appends_composer_annotations_atoms_and_attachments() {
         std::slice::from_ref(&atom),
     );
     let composer = ComposerSubmission {
+        configuration: None,
         prompt: format!(
             "Annotation 1:\n> quoted passage\n\nComment: annotation note\n\nWhen responding, refer to the annotations above by their label (e.g. \"Annotation 1\") when appropriate.\n\ntyped draft {} @src/main.rs",
             atom.payload()
@@ -5960,13 +5964,26 @@ fn queued_message_is_continue_names_only_the_hidden_nudge() {
 /// rather than minting a duplicate the stored entry cannot match.
 #[test]
 fn a_queued_submission_keeps_its_chip_id_through_delivery_and_reparking() {
-    let queued = QueuedMessage::new("follow up");
+    let mut queued = QueuedMessage::new("follow up");
+    let configuration = waku_protocol::PromptConfiguration {
+        provider: ProviderKind::Codex,
+        options: waku_protocol::model::SessionOptions {
+            mode: RuntimeMode::FullAccess,
+            model: Some("selected-model".into()),
+            reasoning_effort: Some("high".into()),
+            service_tier: None,
+            context_window: None,
+        },
+    };
+    queued.configuration = Some(configuration.clone());
     let queued_id = queued.id;
     let submission = ComposerSubmission::from_queued_message(queued);
     assert_eq!(submission.queued_id, Some(queued_id));
+    assert_eq!(submission.configuration, Some(configuration.clone()));
 
     let reparked = submission.into_queued_message();
     assert_eq!(reparked.id, queued_id);
+    assert_eq!(reparked.configuration, Some(configuration));
 
     // A daemon-owned chip never rides a client submission — the daemon owns
     // its delivery and consumes the mirrored entry itself.
@@ -9147,6 +9164,7 @@ mod live_employee_approvals {
     use std::net::TcpListener;
     use std::path::PathBuf;
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use waku_client::{
         ClientMessage, Command, DaemonSettings, DaemonSupervisor, PROTOCOL_VERSION,
         ResponseOutcome, ResponsePayload, ServerMessage,
@@ -9162,6 +9180,8 @@ mod live_employee_approvals {
         session_id: Uuid,
         runtime_id: Uuid,
         command: Command,
+        model_at_execution: Option<String>,
+        executed_prompt: bool,
     }
 
     /// The smallest daemon the desktop can live against: answers the
@@ -9179,6 +9199,7 @@ mod live_employee_approvals {
         project: Project,
         boss: Arc<Mutex<waku_client::boss::BossState>>,
         response_hook: Arc<Mutex<Option<Arc<FakeResponseHook>>>>,
+        reject_configured_prompts: Arc<AtomicBool>,
     }
 
     impl FakeDaemon {
@@ -9208,6 +9229,7 @@ mod live_employee_approvals {
                 project,
                 boss: Arc::new(Mutex::new(boss)),
                 response_hook: Arc::new(Mutex::new(None)),
+                reject_configured_prompts: Arc::new(AtomicBool::new(false)),
             };
             let commands = daemon.commands.clone();
             let sockets = daemon.sockets.clone();
@@ -9215,6 +9237,7 @@ mod live_employee_approvals {
             let project = daemon.project.clone();
             let boss = daemon.boss.clone();
             let response_hook = daemon.response_hook.clone();
+            let reject_configured_prompts = daemon.reject_configured_prompts.clone();
             std::thread::Builder::new()
                 .name("waku-test-fake-daemon".into())
                 .spawn(move || {
@@ -9240,6 +9263,7 @@ mod live_employee_approvals {
                         let project = project.clone();
                         let boss = boss.clone();
                         let response_hook = response_hook.clone();
+                        let reject_configured_prompts = reject_configured_prompts.clone();
                         let cwd = default_cwd.clone();
                         let connection = socket.clone();
                         std::thread::Builder::new()
@@ -9280,28 +9304,46 @@ mod live_employee_approvals {
                                             })
                                         }
                                         ClientMessage::Request(request) => {
+                                            let configured = matches!(&request.command, Command::PromptWithConfiguration { .. });
+                                            let refused = configured && reject_configured_prompts.load(Ordering::Acquire);
+                                            if !refused
+                                                && let Command::PromptWithConfiguration { configuration, .. } = &request.command
+                                                && let Some(session) = sessions.lock().iter_mut().find(|s| s.id == request.session_id)
+                                            {
+                                                session.model.clone_from(&configuration.options.model);
+                                            }
                                             commands.lock().push(RecordedCommand {
                                                 session_id: request.session_id,
                                                 runtime_id: request.runtime_id,
                                                 command: request.command.clone(),
+                                                model_at_execution: sessions
+                                                    .lock()
+                                                    .iter()
+                                                    .find(|session| session.id == request.session_id)
+                                                    .and_then(|session| session.model.clone()),
+                                                executed_prompt: !refused && matches!(&request.command,
+                                                    Command::Prompt { .. } | Command::PromptWithConfiguration { .. }),
                                             });
                                             if request.request_id.is_nil() {
                                                 None
                                             } else {
                                                 let hook = response_hook.lock().clone();
                                                 let outcome = hook
-                                                    .and_then(|hook| {
-                                                        hook(request.session_id, &request.command)
-                                                    })
-                                                    .unwrap_or_else(|| ResponseOutcome::Ok {
+                                                    .and_then(|hook| hook(request.session_id, &request.command))
+                                                    .unwrap_or_else(|| if refused {
+                                                        ResponseOutcome::Error {
+                                                            error: waku_client::RpcError::configuration_rejected("fixture rejected the selected settings"),
+                                                        }
+                                                    } else { ResponseOutcome::Ok {
                                                         payload: response_payload(
                                                             &request.command,
+                                                            request.session_id,
                                                             &sessions,
                                                             &project,
                                                             &boss,
                                                             &cwd,
                                                         ),
-                                                    });
+                                                    } });
                                                 Some(ServerMessage::Response {
                                                     request_id: request.request_id,
                                                     outcome,
@@ -9382,12 +9424,19 @@ mod live_employee_approvals {
 
     fn response_payload(
         command: &Command,
+        session_id: Uuid,
         sessions: &Mutex<Vec<AgentSession>>,
         project: &Project,
         boss: &Mutex<waku_client::boss::BossState>,
         default_cwd: &PathBuf,
     ) -> ResponsePayload {
         match command {
+            Command::ApplyOptions { options } => {
+                if let Some(session) = sessions.lock().iter_mut().find(|s| s.id == session_id) {
+                    session.model.clone_from(&options.model);
+                }
+                ResponsePayload::OptionsApplied { applied: true }
+            }
             Command::GetSettings => ResponsePayload::Settings {
                 settings: DaemonSettings {
                     boss_experiment_enabled: true,
@@ -10085,6 +10134,8 @@ mod live_employee_approvals {
         SessionRuntime {
             driver,
             options_generation: Uuid::nil(),
+            options_in_flight: None,
+            options_deferred: false,
             events: receiver,
             pending_events: VecDeque::new(),
             pending_steers: VecDeque::new(),
@@ -10328,7 +10379,7 @@ mod live_employee_approvals {
                 daemon
                     .commands_for(id)
                     .iter()
-                    .all(|command| !matches!(command, Command::Prompt { .. }))
+                    .all(|command| !matches!(command, Command::Prompt { .. } | Command::PromptWithConfiguration { .. }))
             );
         });
     }
@@ -10365,7 +10416,7 @@ mod live_employee_approvals {
                 daemon
                     .commands_for(id)
                     .iter()
-                    .all(|command| !matches!(command, Command::Prompt { .. }))
+                    .all(|command| !matches!(command, Command::Prompt { .. } | Command::PromptWithConfiguration { .. }))
             );
         });
     }
@@ -10405,7 +10456,7 @@ mod live_employee_approvals {
                 daemon
                     .commands_for(id)
                     .iter()
-                    .all(|command| !matches!(command, Command::Prompt { .. }))
+                    .all(|command| !matches!(command, Command::Prompt { .. } | Command::PromptWithConfiguration { .. }))
             );
         });
     }
@@ -10451,7 +10502,7 @@ mod live_employee_approvals {
                 daemon
                     .commands_for(id)
                     .iter()
-                    .all(|command| !matches!(command, Command::Prompt { .. }))
+                    .all(|command| !matches!(command, Command::Prompt { .. } | Command::PromptWithConfiguration { .. }))
             );
         });
     }
@@ -10478,7 +10529,7 @@ mod live_employee_approvals {
             assert_eq!(waku.state.sessions[0].queued_messages.len(), 2);
             assert!(daemon.commands_for(id).iter().all(|command| !matches!(
                 command,
-                Command::Prompt { .. } | Command::AttachSession
+                Command::Prompt { .. } | Command::PromptWithConfiguration { .. } | Command::AttachSession
             )));
         });
     }
@@ -10547,16 +10598,21 @@ mod live_employee_approvals {
                 .states
                 .values()
                 .any(|state| state.employees.len() == 2)
-                && waku.state.sessions.iter().any(|session| session.id == ids.first)
+                && waku
+                    .state
+                    .sessions
+                    .iter()
+                    .any(|session| session.id == ids.first)
         });
         update_app(vcx, &view, |waku, _, cx| {
             waku.state.selected_session = Some(ids.boss);
             for session_id in [ids.boss, ids.first, ids.second] {
                 waku.ensure_session_loaded(session_id, cx);
             }
-            for (session_id, runtime_id) in
-                [(ids.first, ids.first_runtime), (ids.second, ids.second_runtime)]
-            {
+            for (session_id, runtime_id) in [
+                (ids.first, ids.first_runtime),
+                (ids.second, ids.second_runtime),
+            ] {
                 let runtime = attach_runtime(waku, &supervisor, session_id, runtime_id);
                 waku.runtimes.insert(session_id, runtime);
             }
@@ -10565,13 +10621,10 @@ mod live_employee_approvals {
         // Hydrated detail is what lifts the transcript's loading gate —
         // and what lets provider asks pass the turn-output gate.
         wait_for(vcx, &view, |waku| {
-            waku
-                .state
+            waku.state
                 .sessions
                 .iter()
-                .filter(|session| {
-                    [ids.boss, ids.first, ids.second].contains(&session.id)
-                })
+                .filter(|session| [ids.boss, ids.first, ids.second].contains(&session.id))
                 .all(|session| session.detail_loaded)
         });
         (env, daemon, view, vcx, supervisor, ids)
@@ -10595,6 +10648,483 @@ mod live_employee_approvals {
 
     fn selector(text: String) -> &'static str {
         Box::leak(text.into_boxed_str())
+    }
+
+    fn model_selection_app(
+        cx: &mut gpui::TestAppContext,
+    ) -> (
+        parking_lot::MutexGuard<'static, ()>,
+        FakeDaemon,
+        DaemonSupervisor,
+        Entity<Waku>,
+        &'static mut VisualTestContext,
+        Uuid,
+        Uuid,
+    ) {
+        cx.skip_drawing();
+        let (env, directory) = isolated_env();
+        let project = Project::from_path(directory.join("project"));
+        std::fs::create_dir_all(&project.path).unwrap();
+        let mut session = AgentSession::new(project.id, ProviderKind::Claude);
+        let session_id = session.id;
+        session.model = Some("previous-model".into());
+        let daemon = FakeDaemon::start(
+            directory,
+            project.clone(),
+            vec![session],
+            boss_state(None, Vec::new()),
+        );
+        let supervisor = DaemonSupervisor::connect(&daemon.address, "test-token".into()).unwrap();
+        let (view, vcx) = test_app(cx, supervisor.clone());
+        wait_for(vcx, &view, |waku| {
+            waku.state.sessions.iter().any(|s| s.id == session_id)
+        });
+        // Private tasks have no durable catalog row. The fixture's session
+        // model tracks provider execution; publishing it as saved metadata
+        // would turn an old activation into a spurious user selection.
+        let catalog_project = project.clone();
+        *daemon.response_hook.lock() = Some(Arc::new(move |_, command| {
+            matches!(command, Command::LoadTaskState).then(|| ResponseOutcome::Ok {
+                payload: ResponsePayload::TaskState {
+                    projects: vec![catalog_project.clone()],
+                    sessions: Vec::new(),
+                    default_cwd: catalog_project.path.clone(),
+                    projectless_root: waku_client::projectless::workspace_root(),
+                },
+            })
+        }));
+        let runtime_id = Uuid::new_v4();
+        update_app(vcx, &view, |waku, _, _| {
+            let session = waku.state.session_mut(session_id).unwrap();
+            session.detail_loaded = true;
+            // These command/state checks leave Git checkpoint behavior to its
+            // existing tests; no filesystem dependency controls their schedule.
+            session.incognito = true;
+            session.auto_route = false;
+            waku.state.selected_session = Some(session_id);
+            waku.state.selected_project = Some(project.id);
+            waku.model_picker_target = super::super::model_picker::ModelPickerTarget::Composer;
+            let runtime = attach_runtime(waku, &supervisor, session_id, runtime_id);
+            waku.runtimes.insert(session_id, runtime);
+        });
+        (env, daemon, supervisor, view, vcx, session_id, runtime_id)
+    }
+
+    #[gpui::test]
+    fn delayed_provider_activation_cannot_replace_a_newer_selected_model(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (_env, daemon, _supervisor, view, vcx, session_id, runtime_id) =
+            model_selection_app(cx);
+        update_app(vcx, &view, |waku, _, cx| {
+            waku.choose_model(
+                ProviderKind::Claude,
+                "selected-model".into(),
+                None,
+                false,
+                cx,
+            );
+        });
+        wait_for(vcx, &view, |waku| {
+            waku.runtimes
+                .get(&session_id)
+                .is_some_and(|runtime| runtime.options_in_flight.is_none())
+        });
+        // An activation from the preceding turn can arrive after a newer
+        // selection is accepted for the next turn. It is effective-state
+        // evidence, not a new user choice.
+        daemon.send_event(
+            session_id,
+            runtime_id,
+            1,
+            waku_client::event_to_wire(DriverEvent::ConfigActivated {
+                generation: 1,
+                revision: 1,
+                boundary: waku_protocol::model::ConfigActivationBoundary::NextTurn,
+                provider: Some("claude".into()),
+                model: Some("previous-model".into()),
+                reasoning_effort: None,
+            })
+            .unwrap(),
+        );
+        wait_for(vcx, &view, |waku| {
+            waku.state
+                .sessions
+                .iter()
+                .find(|s| s.id == session_id)
+                .is_some_and(|session| session.config_activation.is_some())
+        });
+        update_app(vcx, &view, |waku, _, cx| {
+            waku.submit_submission_for_session(
+                session_id,
+                ComposerSubmission::plain("keep the model I selected".into()),
+                cx,
+            );
+        });
+        wait_for(vcx, &view, |_| {
+            daemon
+                .commands
+                .lock()
+                .iter()
+                .any(|record| record.executed_prompt)
+        });
+        let commands = daemon.commands.lock();
+        let prompt = commands
+            .iter()
+            .find(|record| record.executed_prompt)
+            .unwrap();
+        assert_eq!(
+            prompt.model_at_execution.as_deref(),
+            Some("selected-model"),
+            "a delayed provider activation erased the newer user selection"
+        );
+    }
+
+    #[gpui::test]
+    fn selected_model_precedes_an_immediate_prompt(cx: &mut gpui::TestAppContext) {
+        let (_env, daemon, _supervisor, view, vcx, session_id, _) = model_selection_app(cx);
+        update_app(vcx, &view, |waku, _, cx| {
+            let began = Instant::now();
+            waku.choose_model(
+                ProviderKind::Claude,
+                "selected-model".into(),
+                None,
+                false,
+                cx,
+            );
+            waku.submit_submission_for_session(
+                session_id,
+                ComposerSubmission::plain("use my selected model".into()),
+                cx,
+            );
+            assert!(began.elapsed() < Duration::from_millis(250));
+            let session = waku
+                .state
+                .sessions
+                .iter()
+                .find(|s| s.id == session_id)
+                .unwrap();
+            assert_eq!(session.model.as_deref(), Some("selected-model"));
+            let queued = session
+                .queued_messages
+                .first()
+                .expect("waiting prompt was not admitted");
+            assert_eq!(
+                queued
+                    .configuration
+                    .as_ref()
+                    .unwrap()
+                    .options
+                    .model
+                    .as_deref(),
+                Some("selected-model")
+            );
+            assert!(
+                !daemon
+                    .commands
+                    .lock()
+                    .iter()
+                    .any(|record| record.executed_prompt)
+            );
+        });
+        wait_for(vcx, &view, |_| {
+            daemon
+                .commands
+                .lock()
+                .iter()
+                .any(|record| record.session_id == session_id && record.executed_prompt)
+        });
+        let commands = daemon.commands.lock();
+        let prompt = commands
+            .iter()
+            .find(|record| record.session_id == session_id && record.executed_prompt)
+            .unwrap();
+        assert_eq!(
+            prompt.model_at_execution.as_deref(),
+            Some("selected-model"),
+            "accepted prompt used stale settings"
+        );
+    }
+
+    #[gpui::test]
+    fn selected_model_survives_ordinary_task_owner_validation(cx: &mut gpui::TestAppContext) {
+        let (_env, daemon, _supervisor, view, vcx, session_id, runtime_id) =
+            model_selection_app(cx);
+        *daemon.response_hook.lock() = Some(Arc::new(move |_, command| {
+            matches!(command, Command::AttachSession).then(|| ResponseOutcome::Ok {
+                payload: ResponsePayload::SessionRuntime {
+                    runtime_id: Some(runtime_id),
+                    supports_steer: false,
+                    supports_user_input_actions: false,
+                },
+            })
+        }));
+        update_app(vcx, &view, |waku, _, cx| {
+            waku.state.session_mut(session_id).unwrap().incognito = false;
+            waku.choose_model(ProviderKind::Claude, "selected-model".into(), None, false, cx);
+            waku.submit_submission_for_session(
+                session_id,
+                ComposerSubmission::plain("validate the owner and my chosen model".into()),
+                cx,
+            );
+            assert!(waku.runtime_submission_checks.contains_key(&session_id));
+            assert!(!daemon.commands.lock().iter().any(|record| record.executed_prompt));
+        });
+        wait_for(vcx, &view, |_| {
+            daemon.commands.lock().iter().any(|record| record.executed_prompt)
+        });
+        let commands = daemon.commands.lock();
+        let executions: Vec<_> = commands.iter().filter(|record| record.executed_prompt).collect();
+        assert_eq!(executions.len(), 1);
+        assert_eq!(executions[0].model_at_execution.as_deref(), Some("selected-model"));
+    }
+
+    #[gpui::test]
+    fn queued_prompts_keep_the_configuration_selected_for_each(cx: &mut gpui::TestAppContext) {
+        let (_env, daemon, _supervisor, view, vcx, session_id, runtime_id) =
+            model_selection_app(cx);
+        update_app(vcx, &view, |waku, _, cx| {
+            for (model, prompt) in [
+                ("first-model", "first prompt"),
+                ("latest-model", "second prompt"),
+            ] {
+                waku.choose_model(ProviderKind::Claude, model.into(), None, false, cx);
+                waku.submit_submission_for_session(
+                    session_id,
+                    ComposerSubmission::plain(prompt.into()),
+                    cx,
+                );
+            }
+            let session = waku
+                .state
+                .sessions
+                .iter()
+                .find(|s| s.id == session_id)
+                .unwrap();
+            let models: Vec<_> = session
+                .queued_messages
+                .iter()
+                .map(|q| {
+                    q.configuration
+                        .as_ref()
+                        .unwrap()
+                        .options
+                        .model
+                        .as_deref()
+                        .unwrap()
+                })
+                .collect();
+            assert_eq!(models, ["first-model", "latest-model"]);
+        });
+        wait_for(vcx, &view, |_| {
+            daemon
+                .commands
+                .lock()
+                .iter()
+                .filter(|record| record.executed_prompt)
+                .count()
+                == 1
+        });
+        daemon.send_event(
+            session_id,
+            runtime_id,
+            1,
+            waku_client::event_to_wire(DriverEvent::TurnStarted).unwrap(),
+        );
+        wait_for(vcx, &view, |waku| {
+            waku.state
+                .sessions
+                .iter()
+                .find(|s| s.id == session_id)
+                .unwrap()
+                .turns
+                .last()
+                .unwrap()
+                .provider_turn_started
+        });
+        daemon.send_event(
+            session_id,
+            runtime_id,
+            2,
+            waku_client::event_to_wire(DriverEvent::TurnFinished {
+                success: true,
+                summary: None,
+                summary_i18n: None,
+            })
+            .unwrap(),
+        );
+        wait_for(vcx, &view, |_| {
+            daemon
+                .commands
+                .lock()
+                .iter()
+                .filter(|record| record.executed_prompt)
+                .count()
+                == 2
+        });
+        let commands = daemon.commands.lock();
+        let executions: Vec<_> = commands
+            .iter()
+            .filter(|record| record.executed_prompt)
+            .map(|record| record.model_at_execution.as_deref().unwrap())
+            .collect();
+        assert_eq!(executions, ["first-model", "latest-model"]);
+        assert_eq!(
+            daemon
+                .sessions
+                .lock()
+                .iter()
+                .find(|s| s.id == session_id)
+                .unwrap()
+                .model
+                .as_deref(),
+            Some("latest-model")
+        );
+    }
+
+    #[gpui::test]
+    fn rejected_prompt_configuration_fails_without_stale_execution(cx: &mut gpui::TestAppContext) {
+        let (_env, daemon, _supervisor, view, vcx, session_id, _) = model_selection_app(cx);
+        daemon
+            .reject_configured_prompts
+            .store(true, Ordering::Release);
+        update_app(vcx, &view, |waku, _, cx| {
+            waku.choose_model(
+                ProviderKind::Claude,
+                "selected-model".into(),
+                None,
+                false,
+                cx,
+            );
+            waku.submit_submission_for_session(
+                session_id,
+                ComposerSubmission::plain("retain my prompt".into()),
+                cx,
+            );
+            waku.choose_model(ProviderKind::Claude, "latest-model".into(), None, false, cx);
+        });
+        wait_for(vcx, &view, |waku| {
+            waku.state
+                .sessions
+                .iter()
+                .find(|s| s.id == session_id)
+                .unwrap()
+                .turns
+                .last()
+                .is_some_and(|turn| turn.status == TurnStatus::Failed)
+        });
+        read_app(vcx, &view, |waku| {
+            let session = waku
+                .state
+                .sessions
+                .iter()
+                .find(|s| s.id == session_id)
+                .unwrap();
+            assert_eq!(session.model.as_deref(), Some("latest-model"));
+            assert!(
+                session
+                    .messages
+                    .iter()
+                    .any(|m| m.role == MessageRole::User && m.content == "retain my prompt")
+            );
+            assert!(
+                session
+                    .messages
+                    .iter()
+                    .any(|m| m.content.contains("fixture rejected the selected settings"))
+            );
+        });
+        assert!(
+            !daemon
+                .commands
+                .lock()
+                .iter()
+                .any(|record| record.executed_prompt),
+            "a rejected configuration ran a stale prompt"
+        );
+        let configured = daemon
+            .commands_for(session_id)
+            .into_iter()
+            .filter(|command| matches!(command, Command::PromptWithConfiguration { .. }))
+            .count();
+        assert_eq!(configured, 1, "a refused prompt was retried automatically");
+    }
+    #[gpui::test(iterations = 30)]
+    fn rapid_model_changes_preserve_the_latest_selection(cx: &mut gpui::TestAppContext) {
+        cx.skip_drawing();
+        let (_env, directory) = isolated_env();
+        let project = Project::from_path(directory.join("project"));
+        std::fs::create_dir_all(&project.path).unwrap();
+        let mut session = AgentSession::new(project.id, ProviderKind::Claude);
+        let session_id = session.id;
+        session.model = Some("previous-model".into());
+        session.detail_loaded = true;
+        let daemon = FakeDaemon::start(
+            directory,
+            project,
+            vec![session],
+            boss_state(None, Vec::new()),
+        );
+        let supervisor = DaemonSupervisor::connect(&daemon.address, "test-token".into()).unwrap();
+        let (view, vcx) = test_app(cx, supervisor.clone());
+        wait_for(vcx, &view, |waku| {
+            waku.state.sessions.iter().any(|s| s.id == session_id)
+        });
+        update_app(vcx, &view, |waku, _, cx| {
+            let runtime = attach_runtime(waku, &supervisor, session_id, Uuid::new_v4());
+            waku.runtimes.insert(session_id, runtime);
+            let began = Instant::now();
+            for model in ["middle-model", "latest-model"] {
+                waku.state.session_mut(session_id).unwrap().model = Some(model.into());
+                waku.apply_session_options_with_rush_resume(session_id, None, cx);
+            }
+            assert!(began.elapsed() < Duration::from_millis(250));
+            assert_eq!(
+                waku.state
+                    .sessions
+                    .iter()
+                    .find(|s| s.id == session_id)
+                    .unwrap()
+                    .model
+                    .as_deref(),
+                Some("latest-model")
+            );
+        });
+        wait_for(vcx, &view, |_| {
+            daemon
+                .commands_for(session_id)
+                .iter()
+                .filter(|command| matches!(command, Command::ApplyOptions { .. }))
+                .count()
+                == 2
+        });
+        // This same-connection reply is a read-loop barrier after both updates.
+        // It observes their completed server state without waiting for a model
+        // value that would hide an obsolete final configuration.
+        supervisor
+            .client()
+            .request(Uuid::nil(), Uuid::nil(), Command::GetDaemonStats)
+            .unwrap();
+        let order: Vec<_> = daemon
+            .commands_for(session_id)
+            .into_iter()
+            .filter_map(|command| match command {
+                Command::ApplyOptions { options } => options.model,
+                _ => None,
+            })
+            .collect();
+        eprintln!("model-update wire order={order:?}");
+        let sessions = daemon.sessions.lock();
+        assert_eq!(
+            sessions
+                .iter()
+                .find(|s| s.id == session_id)
+                .unwrap()
+                .model
+                .as_deref(),
+            Some("latest-model"),
+            "an obsolete update changed the runtime after the latest selection"
+        );
     }
 
     /// Two employees pinned atop the boss transcript: each card's click

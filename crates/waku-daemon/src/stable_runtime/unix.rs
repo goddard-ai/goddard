@@ -7,7 +7,7 @@ use super::enabled;
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -20,9 +20,9 @@ use waku_protocol::model::RuntimeEventCursor;
 use waku_runtime::client::{ClientError, RuntimeClient};
 use waku_runtime::contract::{
     ActionEnvelope, AgentIngress, AnswerDisposition, CanonicalAction, ClientHello, ControlGrant,
-    EventCursor, EventEnvelope, ForwardedOutcome, ForwardedRequest, INGRESS_DESCRIPTOR_VERSION,
-    IngressDescriptor, Inventory, PendingRequestSnapshot, ProviderEvent, RequestClass,
-    ResourceClaim, SessionInventory, SessionRef, SessionStatus,
+    EffectiveConfig, EventCursor, EventEnvelope, ForwardedOutcome, ForwardedRequest,
+    INGRESS_DESCRIPTOR_VERSION, IngressDescriptor, Inventory, PendingRequestSnapshot,
+    ProviderEvent, RequestClass, ResourceClaim, SessionInventory, SessionRef, SessionStatus,
 };
 use waku_runtime::host::load_credentials;
 
@@ -39,6 +39,7 @@ const HOST_BIN_ENV: &str = "WAKU_RUNTIME_HOST_BIN";
 /// How long an events/service long-poll blocks — bounded so a stopping link
 /// observes its flag between polls.
 const POLL_WAIT_MS: u64 = 200;
+const CONFIGURATION_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long to wait for a freshly spawned host to publish its endpoint.
 const HOST_READY_WAIT: Duration = Duration::from_secs(15);
 
@@ -102,6 +103,7 @@ impl IngressService for BackendIngress {
 #[derive(Clone)]
 pub(crate) struct StableLink {
     shared: Arc<LinkShared>,
+    initial_configuration_confirmed: bool,
     // Workers retain LinkShared but never this lifetime token. A temporary
     // forwarder clone must not detach the owning driver and registry entry.
     _lifetime: Arc<LinkLifetime>,
@@ -201,6 +203,10 @@ struct LinkShared {
     /// The last configuration revision the link requested — reconfigure is
     /// monotone, never rolled back by a stale caller.
     config_revision: Mutex<u64>,
+    /// Only provider activation can confirm an asynchronous reconfiguration.
+    /// The existing replay pump wakes waiters; no extra reader or worker.
+    applied_configuration: Mutex<Option<EffectiveConfig>>,
+    configuration_changed: Condvar,
     /// Devin elicitation schemas keyed by request id — recorded when an
     /// input request opens so `respond_user_input` can coerce the product's
     /// string answers into the declared primitive field types, and evicted
@@ -322,8 +328,28 @@ pub(crate) fn start_link(
         .context("could not read the task's runtime link state")?;
     let attach = resolve_attachment(prior.as_ref(), &inventory, provider)?;
     let reattaching = matches!(&attach, Attachment::Reattach { .. });
+    // Validate supported features on both paths. A new controller's options
+    // cannot relabel an immutable policy retained by a surviving owner.
+    let launch = launch_payload(provider, options, prepared.as_ref())?;
     let (sref, mut row) = match attach {
         Attachment::Reattach { sref, row } => {
+            let admitted = &inventory
+                .sessions
+                .iter()
+                .find(|inv| inv.session == sref)
+                .context("the surviving runtime is missing from reconciliation")?
+                .launch;
+            anyhow::ensure!(
+                !admitted.is_null(),
+                "the surviving host cannot verify its launch permissions; explicit recovery is required"
+            );
+            if provider == ProviderKind::Codex {
+                anyhow::ensure!(
+                    admitted.get("approvalPolicy") == launch.get("approvalPolicy")
+                        && admitted.get("sandbox") == launch.get("sandbox"),
+                    "the surviving provider has different permissions; confirmed stop is required before replacement"
+                );
+            }
             // The host's session is still live under the same identity —
             // attach to its existing work; nothing is resumed or replayed
             // as a new turn.
@@ -337,7 +363,7 @@ pub(crate) fn start_link(
             let action = CanonicalAction::AdmitSession {
                 session_id: runtime_id,
                 adapter,
-                launch: launch_payload(provider, options, prepared.as_ref())?,
+                launch,
                 requested: requested_config(provider, options),
             };
             let receipt = execute_safe(
@@ -446,6 +472,14 @@ pub(crate) fn start_link(
             }
         }),
         config_revision: Mutex::new(inventory_config_revision(&inventory, &sref)),
+        applied_configuration: Mutex::new(
+            inventory
+                .sessions
+                .iter()
+                .find(|session| session.session == sref)
+                .and_then(|session| session.effective.clone()),
+        ),
+        configuration_changed: Condvar::new(),
         input_schemas: Mutex::new(HashMap::new()),
         agent_delivery: match (options.agent.is_some(), provider) {
             (true, ProviderKind::Codex) => crate::driver::AgentSurfaceDelivery::Announced,
@@ -467,6 +501,19 @@ pub(crate) fn start_link(
     }
     let link = StableLink {
         shared: shared.clone(),
+        initial_configuration_confirmed: !reattaching
+            || inventory
+                .sessions
+                .iter()
+                .find(|inv| inv.session == sref)
+                .is_some_and(|inv| {
+                    let target = requested_config(provider, options);
+                    inv.effective.as_ref().is_some_and(|effective| {
+                        effective.revision >= inv.requested_revision
+                            && !configuration_requires_reset(&inv.requested, &target)
+                            && configuration_matches(&effective.config, &target)
+                    })
+                }),
         _lifetime: Arc::new(LinkLifetime(shared.stop.clone())),
     };
     controller
@@ -723,6 +770,63 @@ fn inventory_config_revision(inventory: &Inventory, sref: &SessionRef) -> u64 {
                 .max(inv.effective.as_ref().map_or(0, |config| config.revision))
         })
         .unwrap_or(0)
+}
+
+fn configuration_matches(
+    effective: &waku_runtime::contract::RequestedConfig,
+    target: &waku_runtime::contract::RequestedConfig,
+) -> bool {
+    target
+        .provider
+        .as_ref()
+        .is_none_or(|provider| effective.provider.as_ref() == Some(provider))
+        && target
+            .model
+            .as_ref()
+            .is_none_or(|model| effective.model.as_ref() == Some(model))
+        && target
+            .effort
+            .as_ref()
+            .is_none_or(|effort| effective.effort.as_ref() == Some(effort))
+}
+
+fn configuration_requires_reset(
+    previous: &waku_runtime::contract::RequestedConfig,
+    target: &waku_runtime::contract::RequestedConfig,
+) -> bool {
+    (previous.model.is_some() && target.model.is_none())
+        || (previous.effort.is_some() && target.effort.is_none())
+}
+
+impl LinkShared {
+    fn wait_for_configuration(
+        &self,
+        expected: u64,
+        target: &waku_runtime::contract::RequestedConfig,
+        cancelled: &dyn Fn() -> bool,
+    ) -> bool {
+        let deadline = std::time::Instant::now() + CONFIGURATION_TIMEOUT;
+        let mut confirmed = self.applied_configuration.lock().unwrap();
+        loop {
+            if self.stop.load(Ordering::Acquire) || cancelled() {
+                return false;
+            }
+            if let Some(effective) = confirmed.as_ref()
+                && effective.revision >= expected
+            {
+                return configuration_matches(&effective.config, target);
+            }
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                return false;
+            }
+            let (next, _) = self
+                .configuration_changed
+                .wait_timeout(confirmed, remaining)
+                .unwrap();
+            confirmed = next;
+        }
+    }
 }
 
 /// The descriptor file inside the session's private agent directory. Its
@@ -1584,6 +1688,19 @@ fn pump_loop(shared: Arc<LinkShared>, mut requests: ReconciledRequests) {
                         } => {
                             let mut current = shared.config_revision.lock().unwrap();
                             *current = (*current).max(*revision);
+                            let mut confirmed = shared.applied_configuration.lock().unwrap();
+                            if confirmed
+                                .as_ref()
+                                .is_none_or(|value| value.revision <= *revision)
+                            {
+                                *confirmed = Some(EffectiveConfig {
+                                    revision: *revision,
+                                    boundary: *boundary,
+                                    config: effective.clone(),
+                                });
+                                shared.configuration_changed.notify_all();
+                            }
+                            drop(confirmed);
                             native.set_codex_thread(
                                 effective
                                     .options
@@ -1840,6 +1957,15 @@ fn service_loop(shared: Arc<LinkShared>) {
 }
 
 impl StableLink {
+    /// Wake only the confirmation waiter; host cancellation stays ordered.
+    pub(crate) fn wake_configuration_wait(&self) {
+        let _confirmed = self.shared.applied_configuration.lock().unwrap();
+        self.shared.configuration_changed.notify_all();
+    }
+
+    pub(crate) fn initial_configuration_confirmed(&self) -> bool {
+        self.initial_configuration_confirmed
+    }
     pub(crate) fn require_available(&self) -> anyhow::Result<()> {
         anyhow::ensure!(
             !self.shared.stop.load(Ordering::Acquire),
@@ -2100,7 +2226,16 @@ impl DriverControl for StableLink {
     }
 
     fn apply_options(&self, options: crate::driver::SessionOptions) -> bool {
-        if self.shared.stop.load(Ordering::Acquire)
+        self.apply_options_with_cancellation(options, &|| false)
+    }
+
+    fn apply_options_with_cancellation(
+        &self,
+        options: crate::driver::SessionOptions,
+        cancelled: &dyn Fn() -> bool,
+    ) -> bool {
+        if cancelled()
+            || self.shared.stop.load(Ordering::Acquire)
             || options.mode != self.shared.mode
             || options.service_tier.is_some()
             || options.context_window.is_some()
@@ -2108,35 +2243,77 @@ impl DriverControl for StableLink {
             return false;
         }
         let mut revision = self.shared.config_revision.lock().unwrap();
+        let target = waku_runtime::contract::RequestedConfig {
+            provider: Some(self.shared.provider.id().into()),
+            model: options.model,
+            effort: options.reasoning_effort,
+            options: Value::Null,
+        };
+        let mut client = self.shared.client.lock().unwrap();
+        let Ok(inventory) = client.reconcile(self.shared.epoch) else {
+            return false;
+        };
+        let Some(session) = inventory
+            .sessions
+            .iter()
+            .find(|session| session.session == self.shared.sref)
+        else {
+            return false;
+        };
+        if session.status != SessionStatus::Live {
+            return false;
+        }
+        // Missing fields leave native settings unchanged. They cannot reset an
+        // explicit choice to provider defaults on a surviving attachment.
+        if configuration_requires_reset(&session.requested, &target) {
+            return false;
+        }
+        *revision = (*revision).max(inventory_config_revision(&inventory, &self.shared.sref));
+        if let Some(effective) = &session.effective
+            && effective.revision >= session.requested_revision
+            && configuration_matches(&effective.config, &target)
+        {
+            return true;
+        }
+        // Devin confirms through ConfigActivated. A reattach must wait for
+        // an already queued selection instead of issuing a conflicting write.
+        if self.shared.provider == ProviderKind::Devin
+            && session.requested_revision
+                > session.effective.as_ref().map_or(0, |value| value.revision)
+            && configuration_matches(&session.requested, &target)
+        {
+            let expected = session.requested_revision;
+            drop(client);
+            drop(revision);
+            return self
+                .shared
+                .wait_for_configuration(expected, &target, cancelled);
+        }
         let Some(next) = revision.checked_add(1) else {
             return false;
         };
         let action = CanonicalAction::Reconfigure {
             revision: next,
-            target: waku_runtime::contract::RequestedConfig {
-                provider: Some(self.shared.provider.id().into()),
-                model: options.model.clone(),
-                effort: options.reasoning_effort.clone(),
-                options: Value::Null,
-            },
+            target: target.clone(),
         };
-        let mut client = self.shared.client.lock().unwrap();
-        let applied = execute_safe(&mut client, &self.shared.envelope(Uuid::new_v4(), action))
-            .map(|receipt| {
-                matches!(
-                    receipt.disposition,
-                    waku_runtime::contract::CommandDisposition::ProviderAccepted
-                        | waku_runtime::contract::CommandDisposition::Terminal {
-                            outcome: waku_runtime::contract::TerminalOutcome::Completed,
-                            ..
-                        }
-                )
-            })
-            .unwrap_or(false);
-        if applied {
-            *revision = next;
+        let receipt = execute_safe(&mut client, &self.shared.envelope(Uuid::new_v4(), action));
+        // Never reuse a requested revision, including uncertain dispatch.
+        *revision = next;
+        drop(client);
+        drop(revision);
+        match receipt.map(|receipt| receipt.disposition) {
+            Ok(
+                waku_runtime::contract::CommandDisposition::ProviderAccepted
+                | waku_runtime::contract::CommandDisposition::Terminal {
+                    outcome: waku_runtime::contract::TerminalOutcome::Completed,
+                    ..
+                },
+            ) => true,
+            Ok(waku_runtime::contract::CommandDisposition::Uncertain { .. }) => {
+                self.shared.wait_for_configuration(next, &target, cancelled)
+            }
+            _ => false,
         }
-        applied
     }
 
     /// Fence the host generation and forget only its confirmed stopped
@@ -2189,6 +2366,10 @@ impl DriverControl for StableLink {
 fn link_error(error: ClientError) -> anyhow::Error {
     anyhow!("{error}")
 }
+
+#[cfg(test)]
+#[path = "confirmation_test_fixture.rs"]
+pub(crate) mod confirmation_test_fixture;
 
 #[cfg(test)]
 mod tests {
@@ -2504,6 +2685,146 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(row.runtime_session_id, first_attempt);
+    }
+
+    #[test]
+    fn stable_reattachment_cannot_relabel_a_live_full_access_owner_as_supervised() {
+        let rig = rig(&["codex"]);
+        let mut initial = options();
+        initial.mode = crate::model::RuntimeMode::FullAccess;
+        let (handle, stable, _rx) =
+            link_for(&rig, ProviderKind::Codex, Uuid::new_v4(), None, initial);
+        let original = stable.sref();
+        let actual = rig
+            .factory
+            .for_session(original.session_id)
+            .unwrap()
+            .launch();
+        assert_eq!(actual["approvalPolicy"], "never");
+        assert_eq!(actual["sandbox"], "danger-full-access");
+        drop(handle);
+        drop(stable);
+
+        let mut supervised = options();
+        supervised.mode = crate::model::RuntimeMode::Ask;
+        let (sender, _rx) = link_test_event_channel();
+        let result = start_link(
+            &rig.backend,
+            rig.backend.task_store(),
+            rig.session_id,
+            Uuid::new_v4(),
+            ProviderKind::Codex,
+            &supervised,
+            sender,
+            &rig.runtime_root,
+            None,
+        );
+        let safe = match result {
+            Err(_) => true,
+            Ok((handle, replacement)) => {
+                let current = rig
+                    .factory
+                    .for_session(replacement.sref().session_id)
+                    .unwrap()
+                    .launch();
+                let guarded = handle
+                    .prepare_prompt_options(crate::driver::SessionOptions {
+                        mode: crate::model::RuntimeMode::Ask,
+                        model: None,
+                        reasoning_effort: None,
+                        service_tier: None,
+                        context_window: None,
+                    })
+                    .is_ok();
+                eprintln!(
+                    "reattached requested=Ask actual_policy={} actual_sandbox={} configured_prompt_allowed={guarded}",
+                    current["approvalPolicy"], current["sandbox"]
+                );
+                replacement.sref() != original
+                    && current["approvalPolicy"] == "untrusted"
+                    && current["sandbox"] == "read-only"
+            }
+        };
+        assert!(
+            safe,
+            "a live owner retained Full access while the replacement claimed supervised permissions"
+        );
+    }
+
+    #[test]
+    fn stable_configuration_waits_for_activation_and_reattachment_uses_confirmed_values() {
+        use waku_runtime::contract::{ActivationBoundary, RequestedConfig};
+        let rig = rig(&["codex"]);
+        let (handle, stable, _rx) = link(&rig, Uuid::new_v4(), None);
+        let adapter = rig.factory.for_session(stable.sref().session_id).unwrap();
+        let selected = crate::driver::SessionOptions {
+            mode: options().mode,
+            model: Some("selected-model".into()),
+            reasoning_effort: Some("high".into()),
+            service_tier: None,
+            context_window: None,
+        };
+        adapter.script_dispatch(waku_runtime::adapter::DispatchOutcome::Unknown {
+            detail: "settings queued; provider activation is pending".into(),
+        });
+        let (completed, completion) = crossbeam_channel::bounded(1);
+        let worker = {
+            let handle = handle.clone();
+            let selected = selected.clone();
+            std::thread::spawn(move || {
+                let prepared = handle.prepare_prompt_options(selected);
+                let applied = prepared.is_ok();
+                drop(prepared);
+                let _ = completed.send(applied);
+            })
+        };
+        wait_until(|| {
+            adapter
+                .dispatched()
+                .iter()
+                .any(|action| matches!(action, CanonicalAction::Reconfigure { .. }))
+        });
+        let premature = completion.recv_timeout(Duration::from_millis(50)).ok();
+        adapter.emit(ProviderEvent::ConfigActivated {
+            revision: 1,
+            boundary: ActivationBoundary::Immediate,
+            effective: RequestedConfig {
+                provider: Some("codex".into()),
+                model: selected.model.clone(),
+                effort: selected.reasoning_effort.clone(),
+                options: Value::Null,
+            },
+        });
+        let applied =
+            premature.unwrap_or_else(|| completion.recv_timeout(Duration::from_secs(5)).unwrap());
+        worker.join().unwrap();
+        // Joining/releasing precedes assertions so a regression leaves no
+        // blocked native worker behind.
+        assert!(
+            premature.is_none(),
+            "configuration completed before provider activation: {premature:?}"
+        );
+        assert!(applied, "confirmed settings were refused");
+
+        drop(handle);
+        drop(stable);
+        let (replacement, replacement_link, _rx) = link(&rig, Uuid::new_v4(), None);
+        let adapter = rig
+            .factory
+            .for_session(replacement_link.sref().session_id)
+            .unwrap();
+        let before = adapter.dispatched().len();
+        // This would refuse a redundant reconfigure; a reattached handle
+        // must validate against the host's confirmed inventory instead.
+        adapter.script_dispatch(waku_runtime::adapter::DispatchOutcome::Unknown {
+            detail: "redundant update would require another activation".into(),
+        });
+        assert!(replacement.prepare_prompt_options(selected).is_ok());
+        assert_eq!(
+            adapter.dispatched().len(),
+            before,
+            "reattachment retuned already-confirmed settings"
+        );
     }
 
     /// A second attachment replays only what the first never applied —
@@ -4013,10 +4334,10 @@ for line in sys.stdin:
     }
 
     /// A `ConfigActivated` applied through the real forwarder lands on the
-    /// durable session record — a reload projects what the provider
-    /// activated, not the last requested pair.
+    /// durable replay mark, without replacing the shared user selection.
+    /// The surviving host keeps the actual effective configuration.
     #[test]
-    fn config_activation_writes_the_durable_session_record() {
+    fn config_activation_persists_its_mark_without_replacing_selected_settings() {
         let runtime_root = temp_root("runtime");
         let backend_root = temp_root("backend");
         let factory = FakeFactory::new();
@@ -4062,6 +4383,36 @@ for line in sys.stdin:
         let (mut backend, session_id) = crate::daemon::tests::surface_test_backend(&backend_root);
         backend.set_daemon_address("http://127.0.0.1:1".into());
         backend.stable_test_root = Some(runtime_root.clone());
+        backend
+            .handle(
+                waku_protocol::Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: Uuid::nil(),
+                    runtime_id: Uuid::nil(),
+                    command: waku_protocol::Command::UpdateTaskMetadata {
+                        updates: vec![waku_protocol::task_metadata::TaskMetadataUpdate {
+                            session_id,
+                            edit: waku_protocol::task_metadata::TaskMetadataEdit::Configuration {
+                                configuration: waku_protocol::PromptConfiguration {
+                                    provider: ProviderKind::Codex,
+                                    options: crate::driver::SessionOptions {
+                                        mode: crate::model::RuntimeMode::AutoAcceptEdits,
+                                        model: Some("selected-model".into()),
+                                        reasoning_effort: Some("medium".into()),
+                                        service_tier: None,
+                                        context_window: None,
+                                    },
+                                },
+                                auto_route: false,
+                                route_decision: None,
+                            },
+                        }],
+                    },
+                },
+                crate::EventSink::detached(),
+                None,
+            )
+            .unwrap();
         let backend = Arc::new(backend);
         backend.install_weak_self();
         let events = crate::EventSink::detached();
@@ -4093,8 +4444,8 @@ for line in sys.stdin:
             .load_session_detail(session_id)
             .unwrap()
             .expect("session detail");
-        assert_eq!(session.model.as_deref(), Some("gpt-5.5"));
-        assert_eq!(session.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(session.model.as_deref(), Some("selected-model"));
+        assert_eq!(session.reasoning_effort.as_deref(), Some("medium"));
         assert_eq!(
             session.config_activation,
             Some(crate::model::ConfigActivation {
@@ -4106,7 +4457,7 @@ for line in sys.stdin:
         let serialized = serde_json::to_value(&session).unwrap();
         assert!(!serialized.to_string().contains("thr_private"));
 
-        // A newer activation replaces the confirmed fields and the mark...
+        // A newer activation moves the native facts and replay mark...
         adapter.emit(ProviderEvent::ConfigActivated {
             revision: 5,
             boundary: waku_runtime::contract::ActivationBoundary::NextTurn,
@@ -4123,7 +4474,11 @@ for line in sys.stdin:
                 .load_session_detail(session_id)
                 .ok()
                 .flatten()
-                .is_some_and(|session| session.model.as_deref() == Some("gpt-6"))
+                .is_some_and(|session| {
+                    session
+                        .config_activation
+                        .is_some_and(|mark| mark.revision == 5)
+                })
         });
         // ...and a stale revision behind that mark cannot resurrect the
         // superseded selection, even though it is journaled in order.
@@ -4150,8 +4505,8 @@ for line in sys.stdin:
             .load_session_detail(session_id)
             .unwrap()
             .expect("session detail");
-        assert_eq!(session.model.as_deref(), Some("gpt-6"));
-        assert_eq!(session.reasoning_effort.as_deref(), Some("low"));
+        assert_eq!(session.model.as_deref(), Some("selected-model"));
+        assert_eq!(session.reasoning_effort.as_deref(), Some("medium"));
         assert_eq!(
             session.config_activation,
             Some(crate::model::ConfigActivation {

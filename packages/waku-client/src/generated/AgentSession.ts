@@ -104,11 +104,10 @@ sandboxed?: boolean, reasoning_effort?: string | null, service_tier?: string | n
  */
 context_window?: string | null,
 /**
- * The runtime-confirmed activation the `provider`/`model`/
- * `reasoning_effort` fields reflect, once a stable-runtime
- * `ConfigActivated` fact has been applied. Daemon-owned and merged
- * forward only: a stale activation or a client save that never saw it
- * cannot resurrect a superseded selection or lower the mark.
+ * The latest runtime-confirmed activation applied from stable replay.
+ * Selected provider/options remain user-owned metadata. This separate
+ * daemon-owned mark merges forward only for replay deduplication;
+ * provider facts cannot replace the selected settings.
  * `None` for sessions no runtime has confirmed.
  */
 config_activation?: ConfigActivation | null,

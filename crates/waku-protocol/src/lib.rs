@@ -90,11 +90,11 @@ pub use protocol::{
     APP_EXECUTABLE_ENV, AgentPromptDelivery, AgentWorkspace, ClientMessage, Command,
     DAEMON_ADDRESS_ENV, DAEMON_TOKEN_ENV, DaemonChildKind, DaemonChildSample, DaemonReady,
     DaemonSessionSample, DaemonStatsSample, MAX_WIRE_MESSAGE_BYTES, PLAN_FINALIZE_REQUEST_PREFIX,
-    PROTOCOL_VERSION, RUNTIME_INGRESS_ENV, ReplayCursor, Request, RequestCommandSample,
-    RequestPoolSample, ResponseOutcome, ResponsePayload, RpcError, RpcErrorCode, SequencedEvent,
-    ServerMessage, SessionDetailTail, SubprocessLabelSample, TASK_LINK_PREFIX, WhistleWord,
-    WireComputerToolRequest, WireDriverEvent, WireDriverStartOptions, WireSessionOptions,
-    is_daemon_request,
+    PROTOCOL_VERSION, PromptConfiguration, RUNTIME_INGRESS_ENV, ReplayCursor, Request,
+    RequestCommandSample, RequestPoolSample, ResponseOutcome, ResponsePayload, RpcError,
+    RpcErrorCode, SequencedEvent, ServerMessage, SessionDetailTail, SubprocessLabelSample,
+    TASK_LINK_PREFIX, WhistleWord, WireComputerToolRequest, WireDriverEvent,
+    WireDriverStartOptions, WireSessionOptions, is_daemon_request,
 };
 pub use protocol::{KeyedError, WireTranslation};
 pub use settings::DaemonSettings;

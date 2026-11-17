@@ -225,6 +225,21 @@ pub enum Command {
     Start {
         options: WireDriverStartOptions,
     },
+    /// A prompt bound to the settings selected when the user submitted it.
+    /// Kept separate from legacy Prompt so older daemons reject the request
+    /// instead of ignoring settings they cannot enforce.
+    PromptWithConfiguration {
+        configuration: PromptConfiguration,
+        prompt: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        turn_id: Option<Uuid>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message_id: Option<Uuid>,
+        #[serde(default, skip_serializing_if = "crate::model::is_false")]
+        hidden: bool,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        attachments: Vec<MessageAttachment>,
+    },
     Prompt {
         prompt: String,
         /// Permission mode required by this turn, including hidden Resume
@@ -1176,7 +1191,7 @@ pub struct WireDriverStartOptions {
     pub provider_cursor: Option<Value>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct WireSessionOptions {
     pub mode: String,
@@ -1184,6 +1199,29 @@ pub struct WireSessionOptions {
     pub reasoning_effort: Option<String>,
     pub service_tier: Option<String>,
     pub context_window: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptConfiguration {
+    pub provider: ProviderKind,
+    pub options: crate::model::SessionOptions,
+}
+
+impl PromptConfiguration {
+    /// Capture the task's selected values, independently of provider facts.
+    pub fn for_session(session: &AgentSession) -> Self {
+        Self {
+            provider: session.provider,
+            options: crate::model::SessionOptions {
+                mode: session.runtime_mode,
+                model: session.model.clone(),
+                reasoning_effort: session.reasoning_effort.clone(),
+                service_tier: session.service_tier.clone(),
+                context_window: session.context_window.clone(),
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -1363,7 +1401,10 @@ pub enum ServerMessage {
     PairDeclined {
         message: String,
     },
-    LandingQueueChanged { queue_id: Uuid, revision: u64 },
+    LandingQueueChanged {
+        queue_id: Uuid,
+        revision: u64,
+    },
     ShuttingDown,
 }
 
@@ -1928,6 +1969,15 @@ impl std::fmt::Debug for KeyedError {
 impl std::error::Error for KeyedError {}
 
 impl RpcError {
+    /// Required prompt settings were refused before provider execution.
+    pub fn configuration_rejected(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            i18n: None,
+            code: Some(RpcErrorCode::ConfigurationRejected),
+        }
+    }
+
     /// The daemon refused this request before executing its handler.
     pub fn admission_busy(message: impl Into<String>) -> Self {
         Self {
@@ -1953,6 +2003,8 @@ impl RpcError {
 pub enum RpcErrorCode {
     /// No handler ran; admission can be attempted again when capacity opens.
     AdmissionBusy,
+    /// The prompt did not execute under its required configuration.
+    ConfigurationRejected,
     /// A newer daemon supplied a code this client does not recognize.
     #[serde(other)]
     Unknown,
@@ -1990,7 +2042,13 @@ impl From<anyhow::Error> for RpcError {
                 .chain()
                 .find_map(|cause| cause.downcast_ref::<KeyedError>())
                 .map(|keyed| keyed.i18n.clone()),
-            code: None,
+            code: error
+                .chain()
+                .filter_map(|cause| cause.downcast_ref::<RpcError>())
+                .find_map(|rpc| {
+                    (rpc.code == Some(RpcErrorCode::ConfigurationRejected))
+                        .then_some(RpcErrorCode::ConfigurationRejected)
+                }),
         }
     }
 }
@@ -2057,6 +2115,23 @@ mod tests {
         let opaque = RpcError::from(anyhow::anyhow!("provider failed"));
         assert_eq!(opaque.code, None);
         assert!(serde_json::to_value(opaque).unwrap().get("code").is_none());
+
+        // Required-settings refusal survives backend context wrapping.
+        let rejected = RpcError::from(
+            anyhow::Error::new(RpcError::configuration_rejected("settings refused"))
+                .context("starting prompt"),
+        );
+        assert_eq!(rejected.code, Some(RpcErrorCode::ConfigurationRejected));
+        assert!(rejected.message.contains("settings refused"));
+        assert_eq!(
+            serde_json::to_value(rejected).unwrap()["code"],
+            "configurationRejected"
+        );
+        // A handler cannot claim the dispatcher's safe-to-retry admission code.
+        let handler_busy = RpcError::from(anyhow::Error::new(RpcError::admission_busy(
+            "provider busy",
+        )));
+        assert_eq!(handler_busy.code, None);
     }
 
     #[test]

@@ -287,6 +287,14 @@ pub(super) fn merge_session_list_columns(
     if incoming.updated_at < existing.updated_at {
         return false;
     }
+    let configuration = waku_protocol::task_metadata::TaskMetadataEdit::capture(
+        waku_protocol::task_metadata::TaskMetadataField::Configuration,
+        if incoming.metadata_revision >= existing.metadata_revision {
+            &incoming
+        } else {
+            existing
+        },
+    );
     existing.metadata_revision = existing.metadata_revision.max(incoming.metadata_revision);
     existing.title = incoming.title;
     // Placeholder provenance lives in detail, not SQLite list columns.
@@ -296,13 +304,6 @@ pub(super) fn merge_session_list_columns(
     existing.auto_title = incoming.auto_title;
     existing.agent_rename_allowed = incoming.agent_rename_allowed;
     existing.project_id = incoming.project_id;
-    // A client that never applied the confirmed activation cannot own the
-    // effective fields — its copy is pre-activation requested state.
-    if incoming.config_activation >= existing.config_activation {
-        existing.provider = incoming.provider;
-        existing.model = incoming.model;
-        existing.reasoning_effort = incoming.reasoning_effort;
-    }
     existing.config_activation = existing.config_activation.max(incoming.config_activation);
     if !has_active_runtime {
         existing.status = incoming.status;
@@ -324,10 +325,20 @@ pub(super) fn merge_session_list_columns(
     if existing.planning.is_none() {
         existing.planning = incoming.planning;
     }
+    configuration.apply(existing);
     true
 }
 
 pub(super) fn merge_stale_session_metadata(existing: &mut AgentSession, incoming: AgentSession) {
+    let revision = existing.metadata_revision.max(incoming.metadata_revision);
+    let configuration = waku_protocol::task_metadata::TaskMetadataEdit::capture(
+        waku_protocol::task_metadata::TaskMetadataField::Configuration,
+        if incoming.metadata_revision >= existing.metadata_revision {
+            &incoming
+        } else {
+            existing
+        },
+    );
     if incoming.updated_at >= existing.updated_at {
         // A confirmed move's first prompt consumes its notice. Stable chats
         // keep daemon-owned transcripts but still owe this client-owned edit.
@@ -342,14 +353,6 @@ pub(super) fn merge_stale_session_metadata(existing: &mut AgentSession, incoming
         existing.title = incoming.title;
         existing.agent_rename_allowed = incoming.agent_rename_allowed;
         existing.project_id = incoming.project_id;
-        // Same confirmed-activation guard as the list-column merge: a
-        // client whose copy predates the activation cannot overwrite the
-        // effective provider/model/effort, only the mark itself.
-        if incoming.config_activation >= existing.config_activation {
-            existing.provider = incoming.provider;
-            existing.model = incoming.model;
-            existing.reasoning_effort = incoming.reasoning_effort;
-        }
         existing.config_activation = existing.config_activation.max(incoming.config_activation);
         // Skeletons carry the default access mode, not an explicit edit.
         if incoming.detail_loaded {
@@ -408,6 +411,8 @@ pub(super) fn merge_stale_session_metadata(existing: &mut AgentSession, incoming
             existing.queued_messages.push(queued);
         }
     }
+    existing.metadata_revision = revision;
+    configuration.apply(existing);
 }
 
 /// Client saves never mutate the daemon-owned slice of a follow-up queue:

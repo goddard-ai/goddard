@@ -1711,6 +1711,15 @@ impl crate::driver::DriverControl for RotationObservedDriver {
         self.inner.apply_options(options)
     }
 
+    fn apply_options_with_cancellation(
+        &self,
+        options: crate::driver::SessionOptions,
+        cancelled: &dyn Fn() -> bool,
+    ) -> bool {
+        self.inner
+            .apply_options_with_cancellation(options, cancelled)
+    }
+
     fn rollback(&self, turns: usize) -> anyhow::Result<Option<crate::model::ProviderResumeCursor>> {
         self.admit(AdmissionBoundary::Resume);
         self.inner.rollback(turns)

@@ -1,0 +1,1 @@
+- Prompts keep the model and options selected when sent, or report a settings failure before running. Late failures preserve newer model choices and rewound turns.

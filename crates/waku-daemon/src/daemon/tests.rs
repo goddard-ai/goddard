@@ -11325,13 +11325,10 @@ fn start_now_clears_the_memory_guard_pause_for_the_human() {
     assert!(backend.memory_guard.paused(session_id));
     let admission = admission.expect("a queued result carries its admission");
     assert!(
-        admission
-            .blocked_by
-            .iter()
-            .any(|blocker| matches!(
-                blocker,
-                AdmissionBlocker::HostResources { detail } if detail.contains("paused")
-            )),
+        admission.blocked_by.iter().any(|blocker| matches!(
+            blocker,
+            AdmissionBlocker::HostResources { detail } if detail.contains("paused")
+        )),
         "the kept fence reports as the wait reason: {:?}",
         admission.blocked_by
     );
@@ -17202,17 +17199,16 @@ fn a_stale_client_save_cannot_unfreeze_a_planning_session() {
     assert_eq!(skeleton.planning.unwrap().finalized_at, Some(10));
 }
 
-/// The activation mark is the resurrection fence the `updated_at` order
-/// cannot give: a client whose copy predates the confirmed activation —
-/// e.g. a second desktop that never attached — carries newer timestamps
-/// yet still cannot overwrite the effective provider/model/effort.
+/// User metadata versions protect selected configuration independently of
+/// streaming timestamps and the provider's effective activation mark.
 #[test]
-fn a_pre_activation_client_save_cannot_overwrite_confirmed_config() {
+fn older_metadata_cannot_overwrite_the_shared_selected_configuration() {
     let activated = ConfigActivation {
         generation: 1,
         revision: 3,
     };
     let mut existing = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    existing.metadata_revision = 3;
     existing.model = Some("gpt-6".into());
     existing.reasoning_effort = Some("low".into());
     existing.config_activation = Some(activated);
@@ -17220,6 +17216,7 @@ fn a_pre_activation_client_save_cannot_overwrite_confirmed_config() {
     // A newer save from a client that never saw the activation: its
     // requested pair loses, the mark stays.
     let mut incoming = existing.clone();
+    incoming.metadata_revision = 2;
     incoming.model = Some("gpt-5.5".into());
     incoming.reasoning_effort = Some("high".into());
     incoming.config_activation = Some(ConfigActivation {
@@ -17233,10 +17230,12 @@ fn a_pre_activation_client_save_cannot_overwrite_confirmed_config() {
     assert_eq!(existing.config_activation, Some(activated));
 
     let mut skeleton = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    skeleton.metadata_revision = 3;
     skeleton.model = Some("gpt-6".into());
     skeleton.reasoning_effort = Some("low".into());
     skeleton.config_activation = Some(activated);
     let mut incoming = skeleton.clone();
+    incoming.metadata_revision = 2;
     incoming.model = Some("gpt-5.5".into());
     incoming.reasoning_effort = Some("high".into());
     incoming.config_activation = None;
@@ -17246,9 +17245,10 @@ fn a_pre_activation_client_save_cannot_overwrite_confirmed_config() {
     assert_eq!(skeleton.reasoning_effort.as_deref(), Some("low"));
     assert_eq!(skeleton.config_activation, Some(activated));
 
-    // A client at the current mark owns a newer requested selection —
-    // its save merges normally.
+    // A newer shared metadata choice owns selected settings even while
+    // the effective activation mark remains unchanged.
     let mut incoming = existing.clone();
+    incoming.metadata_revision = 4;
     incoming.model = Some("gpt-5.5".into());
     incoming.config_activation = Some(activated);
     incoming.updated_at = existing.updated_at + 1;
@@ -24221,3 +24221,8 @@ mod task_views;
 
 #[path = "tests/scratch.rs"]
 mod scratch;
+
+#[path = "tests/configured_prompts.rs"]
+mod configured_prompts;
+
+mod stable_configuration_stop;

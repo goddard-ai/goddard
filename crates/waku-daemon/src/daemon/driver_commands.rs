@@ -37,6 +37,25 @@ pub(super) fn user_stopped_enqueue(
     cancellation.is_cancelled() && error.is::<driver::EnqueueStopped>()
 }
 
+pub(super) fn handle_driver_options_with_cancellation(
+    driver: &DriverHandle,
+    options: &waku_protocol::WireSessionOptions,
+    cancellation: &crate::server::RuntimeCancellation,
+) -> anyhow::Result<ResponsePayload> {
+    Ok(ResponsePayload::OptionsApplied {
+        applied: driver.apply_options_with_cancellation(
+            SessionOptions {
+                mode: decode_enum(&options.mode)?,
+                model: options.model.clone(),
+                reasoning_effort: options.reasoning_effort.clone(),
+                service_tier: options.service_tier.clone(),
+                context_window: options.context_window.clone(),
+            },
+            &|| cancellation.is_cancelled(),
+        ),
+    })
+}
+
 pub(super) fn handle_driver_command(
     driver: &DriverHandle,
     command: Command,
@@ -113,7 +132,8 @@ pub(super) fn handle_driver_command(
             let cursor = Some(serde_json::to_value(driver.fork(turns_to_remove)?)?);
             return Ok(ResponsePayload::Cursor { cursor });
         }
-        Command::SetTaskView { .. }
+        Command::PromptWithConfiguration { .. }
+        | Command::SetTaskView { .. }
         | Command::AttachSession
         | Command::ClaimManagedGoalTurn { .. }
         | Command::Start { .. }

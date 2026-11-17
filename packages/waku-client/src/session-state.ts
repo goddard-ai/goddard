@@ -1,4 +1,4 @@
-import type { AgentSession, QueuedMessage } from './generated'
+import type { AgentSession, PromptConfiguration, QueuedMessage } from './generated'
 
 /** Adopt acknowledged metadata without replacing a loaded transcript with a list row. */
 export function reconcileSavedSession(local: AgentSession, saved?: AgentSession): AgentSession {
@@ -8,6 +8,14 @@ export function reconcileSavedSession(local: AgentSession, saved?: AgentSession)
   return {
     ...(saved.detail_loaded === false ? local : saved),
     metadata_revision: metadata.metadata_revision,
+    provider: metadata.provider,
+    runtime_mode: metadata.runtime_mode,
+    model: metadata.model,
+    reasoning_effort: metadata.reasoning_effort,
+    service_tier: metadata.service_tier,
+    context_window: metadata.context_window,
+    auto_route: metadata.auto_route,
+    route_decision: metadata.route_decision,
     title: metadata.title,
     auto_title: metadata.auto_title,
     auto_title_is_prompt: metadata.detail_loaded !== false
@@ -19,6 +27,20 @@ export function reconcileSavedSession(local: AgentSession, saved?: AgentSession)
     dormant_at: metadata.dormant_at,
     dormant_exempt_until: metadata.dormant_exempt_until,
     updated_at: metadata.updated_at,
+  }
+}
+
+/** Snapshot the user-selected settings when a prompt is admitted. */
+export function promptConfigurationForSession(session: AgentSession): PromptConfiguration {
+  return {
+    provider: session.provider,
+    options: {
+      mode: session.runtime_mode,
+      model: session.model ?? null,
+      reasoningEffort: session.reasoning_effort ?? null,
+      serviceTier: session.service_tier ?? null,
+      contextWindow: session.context_window ?? null,
+    },
   }
 }
 

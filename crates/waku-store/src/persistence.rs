@@ -1889,7 +1889,7 @@ impl StateStore {
                         created_at, updated_at, last_reply_at, archived_at, pinned_at,
                         dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of,
                         agent_rename_allowed, boss_managed, planning, runtime_event_cursor,
-                        friend_peer_id, friend_peer_name, reasoning_effort, config_activation, metadata_revision, history_generation
+                        friend_peer_id, friend_peer_name, reasoning_effort, config_activation, metadata_revision, history_generation, task_configuration
                  FROM sessions ORDER BY updated_at",
             )
             .map_err(to_io_error)?;
@@ -1924,6 +1924,7 @@ impl StateStore {
                     row.get::<_, Option<String>>(24)?,
                     row.get::<_, i64>(25)?,
                     row.get::<_, i64>(26)?,
+                    row.get::<_, Option<String>>(27)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -2852,6 +2853,7 @@ type SessionColumns = (
     Option<String>,
     i64,
     i64,
+    Option<String>,
 );
 
 /// Builds a list-only session from its columns. `messages`,
@@ -2888,6 +2890,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         config_activation,
         metadata_revision,
         history_generation,
+        task_configuration,
     ) = row;
     // The column duplicates the detail blob's workspace so list rows can show
     // it. Rows migrated before the column existed or whose JSON fails to parse
@@ -2904,7 +2907,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
     // planning rows from the column without hydrating the session.
     let planning =
         planning.and_then(|planning| serde_json::from_str::<SessionPlanning>(&planning).ok());
-    Some(AgentSession {
+    let mut session = AgentSession {
         id: Uuid::parse_str(&id).ok()?,
         metadata_revision: u64::try_from(metadata_revision).ok()?,
         history_generation: u64::try_from(history_generation).ok()?,
@@ -2975,7 +2978,21 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         // Stored rows are always ordinary sessions — incognito ones never
         // reach the store, so nothing persisted can deserialize as one.
         incognito: false,
-    })
+    };
+    if let Some(configuration) = task_configuration
+        .and_then(|value| {
+            serde_json::from_str::<waku_protocol::task_metadata::TaskMetadataEdit>(&value).ok()
+        })
+        .filter(|edit| {
+            matches!(
+                edit,
+                waku_protocol::task_metadata::TaskMetadataEdit::Configuration { .. }
+            )
+        })
+    {
+        configuration.apply(&mut session);
+    }
+    Some(session)
 }
 
 /// Moves a stored detail row's fields into `session`, keeping the live
@@ -2985,6 +3002,14 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
 /// place so a session loaded on a background thread and one hydrated in place
 /// cannot drift apart.
 pub fn apply_session_detail(session: &mut AgentSession, stored: AgentSession) {
+    let configuration = waku_protocol::task_metadata::TaskMetadataEdit::capture(
+        waku_protocol::task_metadata::TaskMetadataField::Configuration,
+        if stored.metadata_revision > session.metadata_revision {
+            &stored
+        } else {
+            session
+        },
+    );
     // Resolved before the field moves — `environment()` borrows `stored`.
     let stored_environment = stored.environment();
     session.auto_title_is_prompt =
@@ -3036,6 +3061,7 @@ pub fn apply_session_detail(session: &mut AgentSession, stored: AgentSession) {
     });
     session.details_pruned = stored.details_pruned;
     session.detail_loaded = true;
+    configuration.apply(session);
 }
 
 /// Everything one save writes, snapshotted by [`StateStore::save_batch`] while
@@ -3708,8 +3734,8 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          created_at, updated_at, last_reply_at, archived_at, pinned_at,
          dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of,
          agent_rename_allowed, boss_managed, planning, runtime_event_cursor,
-         friend_peer_id, friend_peer_name, reasoning_effort, config_activation, metadata_revision, history_generation
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)
+         friend_peer_id, friend_peer_name, reasoning_effort, config_activation, metadata_revision, history_generation, task_configuration
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)
      ON CONFLICT(id) DO UPDATE SET
          project_id    = excluded.project_id,
          title         = CASE WHEN excluded.metadata_revision >= sessions.metadata_revision THEN excluded.title ELSE sessions.title END,
@@ -3735,6 +3761,7 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          friend_peer_name = excluded.friend_peer_name,
          reasoning_effort = excluded.reasoning_effort,
          config_activation = excluded.config_activation,
+         task_configuration = CASE WHEN excluded.metadata_revision >= sessions.metadata_revision THEN excluded.task_configuration ELSE sessions.task_configuration END,
          metadata_revision = MAX(sessions.metadata_revision, excluded.metadata_revision),
          history_generation = MAX(sessions.history_generation, excluded.history_generation)";
 
@@ -3850,6 +3877,11 @@ fn session_params(session: &AgentSession) -> Vec<rusqlite::types::Value> {
         Value::Integer(
             i64::try_from(session.history_generation).expect("history generation fits SQLite"),
         ),
+        serde_json::to_string(&waku_protocol::task_metadata::TaskMetadataEdit::capture(
+            waku_protocol::task_metadata::TaskMetadataField::Configuration,
+            session,
+        ))
+        .map_or(Value::Null, Value::Text),
     ]
 }
 
@@ -4819,6 +4851,22 @@ mod tests {
         let mut stale_view = state.clone();
         state.sessions[0].title = "Confirmed name".into();
         state.sessions[0].pinned_at = Some(10);
+        let configuration = waku_protocol::PromptConfiguration {
+            provider: ProviderKind::Codex,
+            options: waku_protocol::model::SessionOptions {
+                mode: RuntimeMode::Ask,
+                model: Some("selected-model".into()),
+                reasoning_effort: Some("high".into()),
+                service_tier: Some("fast".into()),
+                context_window: Some("long".into()),
+            },
+        };
+        waku_protocol::task_metadata::TaskMetadataEdit::Configuration {
+            configuration: configuration.clone(),
+            auto_route: false,
+            route_decision: None,
+        }
+        .apply(&mut state.sessions[0]);
         state.sessions[0].metadata_revision = 1;
         state.mark_session_dirty(id);
         store.save(&mut state).unwrap();
@@ -4829,11 +4877,91 @@ mod tests {
         assert_eq!(session.metadata_revision, 1);
         assert_eq!(session.title, "Confirmed name");
         assert_eq!(session.pinned_at, Some(10));
+        assert_eq!(
+            waku_protocol::PromptConfiguration::for_session(session),
+            configuration
+        );
+        assert_eq!(session.model.as_deref(), Some("selected-model"));
+        assert_eq!(session.runtime_mode, RuntimeMode::Ask);
         store.hydrate(session).unwrap();
         assert_eq!(session.metadata_revision, 1);
         assert_eq!(session.title, "Confirmed name");
         assert_eq!(session.pinned_at, Some(10));
+        assert_eq!(
+            waku_protocol::PromptConfiguration::for_session(session),
+            configuration
+        );
+        assert_eq!(session.model.as_deref(), Some("selected-model"));
+        assert_eq!(session.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(session.service_tier.as_deref(), Some("fast"));
+        assert_eq!(session.context_window.as_deref(), Some("long"));
+        assert_eq!(session.runtime_mode, RuntimeMode::Ask);
         fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn configuration_migration_preserves_legacy_permission_and_model_choices() {
+        let connection = Connection::open_in_memory().unwrap();
+        let migration = MIGRATIONS
+            .iter()
+            .position(|(tag, _)| *tag == "0036_gorgeous_cardiac")
+            .unwrap();
+        for (_, sql) in &MIGRATIONS[..migration] {
+            connection.execute_batch(sql).unwrap();
+        }
+        let mut legacy = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        legacy.runtime_mode = RuntimeMode::FullAccess;
+        legacy.model = Some("selected-model".into());
+        legacy.reasoning_effort = Some("high".into());
+        legacy.service_tier = Some("fast".into());
+        legacy.context_window = Some("long".into());
+        legacy.auto_route = true;
+        legacy.history_generation = 1;
+        connection.execute(
+            "INSERT INTO sessions(id, project_id, title, provider, model, reasoning_effort, status,
+                created_at, updated_at, metadata_revision, history_generation) VALUES (?1, ?2, 'Legacy', 'codex', ?3, ?4, 'idle', 1, 1, 7, 1)",
+            params![legacy.id.to_string(), legacy.project_id.to_string(), legacy.model, legacy.reasoning_effort],
+        ).unwrap();
+        connection
+            .execute(
+                "INSERT INTO session_details(session_id, data) VALUES (?1, ?2)",
+                params![
+                    legacy.id.to_string(),
+                    serde_json::to_string(&legacy).unwrap()
+                ],
+            )
+            .unwrap();
+        connection.execute_batch(MIGRATIONS[migration].1).unwrap();
+        let encoded: String = connection
+            .query_row(
+                "SELECT task_configuration FROM sessions WHERE id = ?1",
+                params![legacy.id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let edit: waku_protocol::task_metadata::TaskMetadataEdit =
+            serde_json::from_str(&encoded).unwrap();
+        let mut restored = AgentSession::new(legacy.project_id, ProviderKind::Claude);
+        edit.apply(&mut restored);
+        assert_eq!(
+            waku_protocol::PromptConfiguration::for_session(&restored),
+            waku_protocol::PromptConfiguration::for_session(&legacy)
+        );
+        assert!(restored.auto_route);
+        assert_eq!(
+            connection
+                .query_row("SELECT history_generation FROM sessions", [], |row| row
+                    .get::<_, u64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT metadata_revision FROM sessions", [], |row| row
+                    .get::<_, u64>(0))
+                .unwrap(),
+            7
+        );
     }
 
     #[test]

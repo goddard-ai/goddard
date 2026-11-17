@@ -362,6 +362,30 @@ impl DriverControl for RemoteDriverControl {
         Some(self.runtime_id)
     }
 
+    fn prompt_with_configuration(
+        &self,
+        prompt: String,
+        configuration: waku_client::PromptConfiguration,
+        turn_id: Option<uuid::Uuid>,
+        message_id: Option<uuid::Uuid>,
+        hidden: bool,
+        attachments: Vec<waku_protocol::model::MessageAttachment>,
+    ) -> anyhow::Result<waku_client::PendingRequest> {
+        let client = self.client.lock().clone();
+        client.begin_request(
+            self.session_id,
+            self.runtime_id,
+            waku_client::Command::PromptWithConfiguration {
+                prompt,
+                configuration,
+                turn_id,
+                message_id,
+                hidden,
+                attachments,
+            },
+        )
+    }
+
     fn prompt(
         &self,
         prompt: String,

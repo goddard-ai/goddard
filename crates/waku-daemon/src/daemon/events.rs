@@ -1096,13 +1096,9 @@ pub(super) fn forward_driver_events(
                 model,
                 reasoning_effort,
             } => {
-                // The runtime's confirmed configuration is daemon-owned
-                // truth: write it inside this event's application so the
-                // applied marker that follows proves it durable. The
-                // activation mark rejects a stale or foreign-generation
-                // redelivery before its fields can resurrect a superseded
-                // selection.
-                record_effective_config(
+                // Preserve the effective event verbatim, and persist only
+                // its replay mark. User metadata owns the selected settings.
+                record_config_activation(
                     &task_state,
                     &task_store,
                     session_id,
@@ -1110,9 +1106,6 @@ pub(super) fn forward_driver_events(
                         generation,
                         revision,
                     },
-                    provider.as_deref(),
-                    model.as_deref(),
-                    reasoning_effort.as_deref(),
                 );
                 DriverEvent::ConfigActivated {
                     generation,

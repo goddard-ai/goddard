@@ -864,6 +864,7 @@ impl Waku {
         });
         session.messages.push(marker);
         session.updated_at = unix_time();
+        self.record_selected_configuration(session_id);
         self.reset_session_runtime(session_id);
         self.refresh_composer_sources(cx);
         // A switch is a model choice too — mirror the resolved combo into

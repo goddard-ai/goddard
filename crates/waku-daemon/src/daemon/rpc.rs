@@ -362,6 +362,39 @@ impl Backend for WakuBackend {
         agent: Option<Uuid>,
         cancellation: &crate::server::RuntimeCancellation,
     ) -> anyhow::Result<ResponsePayload> {
+        let Request {
+            request_id,
+            session_id,
+            runtime_id,
+            command,
+        } = request;
+        let (command, prompt_configuration) = match command {
+            Command::PromptWithConfiguration {
+                configuration,
+                prompt,
+                turn_id,
+                message_id,
+                hidden,
+                attachments,
+            } => (
+                Command::Prompt {
+                    runtime_mode: Some(configuration.options.mode),
+                    prompt,
+                    turn_id,
+                    message_id,
+                    hidden,
+                    attachments,
+                },
+                Some(configuration),
+            ),
+            command => (command, None),
+        };
+        let request = Request {
+            request_id,
+            session_id,
+            runtime_id,
+            command,
+        };
         let _admission = self.idle_shutdown.enter()?;
         if agent.is_some_and(|id| self.boss.is_counsel(id)) {
             anyhow::ensure!(
@@ -424,6 +457,7 @@ impl Backend for WakuBackend {
             } = &request.command
         {
             let mut queued = crate::model::QueuedMessage::new(prompt);
+            queued.configuration = prompt_configuration.clone();
             queued.id = message_id.unwrap_or(request.request_id);
             anyhow::ensure!(!queued.id.is_nil(), "coordinator input identity missing");
             queued.attachments = attachments.clone();
@@ -443,7 +477,8 @@ impl Backend for WakuBackend {
                 anyhow::ensure!(
                     existing.content == queued.content
                         && existing.attachments == queued.attachments
-                        && existing.hidden == queued.hidden,
+                        && existing.hidden == queued.hidden
+                        && existing.configuration == queued.configuration,
                     "coordinator input identity conflict"
                 );
             } else if let Some(existing) = session.messages.iter().find(|m| m.id == queued.id) {
@@ -1286,6 +1321,14 @@ impl Backend for WakuBackend {
                     }
                     _ => unreachable!(),
                 };
+                anyhow::ensure!(
+                    agent.is_none()
+                        || !metadata_updates.iter().any(|update| matches!(
+                            update.edit,
+                            waku_protocol::task_metadata::TaskMetadataEdit::Configuration { .. }
+                        )),
+                    "configuration edits require user authority"
+                );
                 let active_runtimes = self
                     .sessions
                     .lock()
@@ -1590,17 +1633,8 @@ impl Backend for WakuBackend {
                             preserve_daemon_checkpoints(existing, &mut session);
                             preserve_daemon_queued_messages(existing, &mut session);
                             honor_details_pruned(existing, &mut session);
-                            // A wholesale client save predating the
-                            // confirmed activation cannot own the effective
-                            // fields — the daemon's stay, and its mark
-                            // merges forward only.
-                            if session.config_activation < existing.config_activation {
-                                session.provider = existing.provider;
-                                session.model.clone_from(&existing.model);
-                                session
-                                    .reasoning_effort
-                                    .clone_from(&existing.reasoning_effort);
-                            }
+                            // Selected settings are user metadata; only the
+                            // provider activation mark merges independently.
                             session.config_activation =
                                 existing.config_activation.max(session.config_activation);
                             *existing = session;
@@ -2902,22 +2936,48 @@ impl Backend for WakuBackend {
                     // operation. Retirement grants no authority over a replacement.
                     return Ok(ResponsePayload::Ack);
                 }
-                let (driver, immediate_cancel) = {
+                let (driver, immediate_cancel, stable) = {
                     let mut sessions = self.sessions.lock();
-                    let entry = sessions
-                        .get_mut(&session_id)
-                        .ok_or_else(|| anyhow!("daemon session {session_id} is not running"))?;
+                    let entry = sessions.get_mut(&session_id).ok_or_else(|| {
+                        let message = format!("daemon session {session_id} is not running");
+                        if prompt_configuration.is_some() {
+                            anyhow::Error::new(waku_protocol::RpcError::configuration_rejected(
+                                message,
+                            ))
+                        } else {
+                            anyhow!(message)
+                        }
+                    })?;
                     if entry.runtime_id != runtime_id {
+                        if prompt_configuration.is_some() {
+                            return Err(waku_protocol::RpcError::configuration_rejected(
+                                "the selected runtime was replaced before this prompt could start",
+                            )
+                            .into());
+                        }
                         bail!(
                             "daemon session {session_id} belongs to runtime {}, not {runtime_id}",
                             entry.runtime_id
                         );
+                    }
+                    if let Some(configuration) = &prompt_configuration
+                        && entry.provider != configuration.provider
+                    {
+                        return Err(waku_protocol::RpcError::configuration_rejected(
+                            "the prompt's selected provider no longer owns this runtime",
+                        )
+                        .into());
                     }
                     if let Command::Prompt {
                         runtime_mode: Some(mode),
                         ..
                     } = &command
                     {
+                        if entry.mode != *mode && prompt_configuration.is_some() {
+                            return Err(waku_protocol::RpcError::configuration_rejected(
+                                "permission mode is still changing; retry after the runtime restarts",
+                            ).into());
+                        }
                         anyhow::ensure!(
                             entry.mode == *mode,
                             "permission mode is still changing; retry after the runtime restarts"
@@ -2933,17 +2993,57 @@ impl Backend for WakuBackend {
                         entry.driver.clone(),
                         entry.stable.is_none()
                             && matches!(entry.provider, ProviderKind::Codex | ProviderKind::Claude),
+                        entry.stable.clone(),
                     )
                 };
-                // These native controls only enqueue the interrupt. Stable
-                // control performs synchronous IPC and keeps its ordered path.
-                if immediate_cancel && !matches!(command, Command::Cancel) {
+                if !matches!(command, Command::Cancel) {
                     let owner = driver.clone();
-                    cancellation.bind_runtime(runtime_id, move || owner.cancel_from_user());
+                    if immediate_cancel {
+                        cancellation.bind_runtime(runtime_id, move || owner.cancel_from_user());
+                    } else if let Some(stable) = stable {
+                        // Admission only wakes the waiter. Synchronous host
+                        // cancellation and terminal persistence stay ordered.
+                        cancellation.bind_runtime(runtime_id, move || {
+                            owner.note_user_cancel();
+                            stable.wake_configuration_wait();
+                        });
+                    }
+                }
+                // Hold settings stable through prompt delivery, without the
+                // global session lock. Stop can abort provider confirmation.
+                let mut prompt_stopped = false;
+                let _prompt_options = if let Some(configuration) = &prompt_configuration {
+                    match driver.prepare_prompt_options_with_cancellation(
+                        configuration.options.clone(),
+                        &|| cancellation.is_cancelled(),
+                    ) {
+                        Ok(guard) => Some(guard),
+                        Err(error) if user_stopped_enqueue(&error, cancellation) => {
+                            prompt_stopped = true;
+                            None
+                        }
+                        Err(error) => return Err(error),
+                    }
+                } else {
+                    None
+                };
+                if prompt_configuration.is_some() {
+                    if !self
+                        .sessions
+                        .lock()
+                        .get(&session_id)
+                        .is_some_and(|entry| entry.runtime_id == runtime_id)
+                    {
+                        return Err(waku_protocol::RpcError::configuration_rejected(
+                            "the runtime changed while applying the prompt settings",
+                        )
+                        .into());
+                    }
                 }
                 if let Command::ApplyOptions { options } = &command {
                     let mode = decode_enum(&options.mode)?;
-                    let result = handle_driver_command(&driver, command)?;
+                    let result =
+                        handle_driver_options_with_cancellation(&driver, options, cancellation)?;
                     if matches!(result, ResponsePayload::OptionsApplied { applied: true }) {
                         if let Some(entry) = self.sessions.lock().get_mut(&session_id)
                             && entry.runtime_id == runtime_id
@@ -3064,6 +3164,11 @@ impl Backend for WakuBackend {
                         driver.trace_submission(*turn_id, *message_id);
                     }
                     events.send(event_to_wire(submitted)?)?;
+                    if prompt_stopped {
+                        // Retain accepted input, then let the ordered Stop close
+                        // it. Do not route or execute the cancelled instruction.
+                        return Ok(ResponsePayload::Ack);
+                    }
                     if !*hidden && self.boss.is_boss_principal(session_id) {
                         // A boss op reaching back to the user — a `terminal`
                         // intent — is owed to the client this prompt came

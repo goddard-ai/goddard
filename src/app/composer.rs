@@ -508,6 +508,7 @@ pub(super) fn undelivered_turn_resend(
         turn.id,
         message.id,
         ComposerSubmission {
+            configuration: None,
             prompt: message.content.clone(),
             display_content: message.display_content.clone(),
             human_content: None,
@@ -4116,6 +4117,7 @@ impl Waku {
         // outside-Enter aim at — the last place a message actually went out.
         self.last_sent_composer = None;
         Some(ComposerSubmission {
+            configuration: None,
             prompt: submission,
             display_content,
             human_content,
@@ -4458,6 +4460,7 @@ impl Waku {
         // at — the last place a message actually went out.
         self.last_sent_composer = Some(session_id);
         Some(ComposerSubmission {
+            configuration: None,
             prompt: submission,
             display_content,
             human_content,

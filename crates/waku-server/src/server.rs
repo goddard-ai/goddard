@@ -3485,6 +3485,7 @@ fn command_targets_runtime(command: &Command) -> bool {
         command,
         Command::AttachSession
             | Command::Start { .. }
+            | Command::PromptWithConfiguration { .. }
             | Command::Prompt { .. }
             | Command::Steer { .. }
             | Command::Cancel
@@ -3886,6 +3887,7 @@ fn command_kind(command: &Command) -> &'static str {
         Command::SetTaskView { .. } => "setTaskView",
         Command::AttachSession => "attachSession",
         Command::Start { .. } => "start",
+        Command::PromptWithConfiguration { .. } => "promptWithConfiguration",
         Command::Prompt { .. } => "prompt",
         Command::Steer { .. } => "steer",
         Command::Compact => "compact",

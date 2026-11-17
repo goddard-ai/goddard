@@ -523,6 +523,11 @@ pub struct PendingRequestSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct SessionInventory {
     pub session: SessionRef,
+    /// Immutable adapter admission material. Private controller reconciliation
+    /// uses this to verify launch policy; never project it to product clients.
+    /// Missing on an older host means that policy cannot be verified.
+    #[serde(default)]
+    pub launch: Value,
     /// The registered owner and accepted configuration are reconciliation
     /// truth even before the provider confirms an activation boundary.
     #[serde(default)]

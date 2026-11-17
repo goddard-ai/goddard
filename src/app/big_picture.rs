@@ -2271,6 +2271,7 @@ impl Waku {
                     self.cancel_session_turn(session_id, cx);
                     self.big_picture.rush_resumes.insert(session_id, generation);
                 }
+                self.record_selected_configuration(session_id);
                 self.apply_session_options_with_rush_resume(session_id, resume, cx);
                 self.save();
             }

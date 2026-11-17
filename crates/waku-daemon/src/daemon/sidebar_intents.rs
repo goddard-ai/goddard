@@ -91,6 +91,9 @@ fn same_value(left: &SidebarEdit, right: &SidebarEdit) -> bool {
                 TaskMetadataEdit::Rename { title: left },
                 TaskMetadataEdit::Rename { title: right },
             ) => left.trim() == right.trim(),
+            (TaskMetadataEdit::Configuration { .. }, TaskMetadataEdit::Configuration { .. }) => {
+                left == right
+            }
             _ => false,
         },
         _ => left == right,

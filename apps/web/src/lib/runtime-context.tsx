@@ -4,6 +4,7 @@ import type {
   DaemonSettings,
   GoalOperation,
   MessageAttachment,
+  PromptConfiguration,
   PlanUsage,
   Project,
   ProviderProbe,
@@ -23,6 +24,7 @@ import {
   queuedMessageIsManagedGoal,
   sessionAcceptsImmediateSteer,
   sameSessionRuntimeOptions,
+  promptConfigurationForSession,
 } from '@waku/client'
 import {
   createContext,
@@ -138,6 +140,7 @@ interface RuntimeContextValue {
     attachments?: MessageAttachment[],
     providerPromptOverride?: string,
     hidden?: boolean,
+    configuration?: PromptConfiguration,
   ) => Promise<void>
   steerPrompt: (
     session: AgentSession,
@@ -198,6 +201,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         displayContent: string
         attachments: MessageAttachment[]
         queuedId?: string
+        configuration: PromptConfiguration
       }>
     >(),
   )
@@ -485,6 +489,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             nextQueued.attachments ?? [],
             nextQueued.content,
             nextQueued.hidden,
+            nextQueued.configuration ?? undefined,
           )
         })
         .catch((error) => toast.error(errorMessage(error)))
@@ -590,6 +595,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
                     pending.providerPrompt,
                     pending.attachments,
                     pending.queuedId,
+                    pending.configuration,
                   )
                 : queueSubmission(
                     current,
@@ -598,6 +604,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
                     pending.attachments,
                     false,
                     pending.queuedId,
+                    pending.configuration,
                   )
               cacheSession(current)
               if (!settledCleanly) {
@@ -745,6 +752,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       attachments: MessageAttachment[] = [],
       providerPromptOverride?: string,
       hidden = false,
+      submittedConfiguration?: PromptConfiguration,
     ) => {
       if (!client || !config || phase !== 'connected') {
         throw new Error(translate(localeRef.current, 'errors.daemon_disconnected'))
@@ -762,6 +770,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       let currentSession = queryClient.getQueryData<AgentSession>(
         daemonKeys.session(config.address, inputSession.id),
       ) ?? inputSession
+      const configuration = submittedConfiguration ?? promptConfigurationForSession(currentSession)
       const cachedRuntime = entries.current.get(currentSession.id)
       if (cachedRuntime) {
         const previous = queryClient.getQueryData<AgentSession>(
@@ -808,7 +817,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         currentSession.status === 'waiting' ||
         checkpointCaptures.current.get(currentSession.id)?.historyGeneration === (currentSession.history_generation ?? 0)
       ) {
-        const queued = queueSubmission(currentSession, prompt, providerPrompt, attachments, hidden)
+        const queued = queueSubmission(currentSession, prompt, providerPrompt, attachments, hidden, undefined, configuration)
         cacheSession(queued)
         await persistOrdered(queued)
         return
@@ -951,7 +960,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         }
         await client.request(
           {
-            type: 'prompt',
+            type: 'promptWithConfiguration',
+            configuration,
             prompt: providerPrompt,
             turnId: submittedTurn?.id ?? null,
             messageId: submittedMessage?.id ?? null,
@@ -962,9 +972,17 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           runtime.runtimeId,
         )
       } catch (error) {
+        const latest = queryClient.getQueryData<AgentSession>(
+          daemonKeys.session(config.address, session.id),
+        ) ?? session
+        // The old reply cannot settle a turn created after Stop or rewind.
+        if (entries.current.get(session.id) !== runtime
+          || (latest.history_generation ?? 0) !== (session.history_generation ?? 0)
+          || latest.turns.at(-1)?.id !== submittedTurn?.id
+          || latest.turns.at(-1)?.status !== 'running') throw error
         removeRuntime(session.id)
         const failed = reduceRuntimeEvent(
-          session,
+          latest,
           syntheticEvent(session.id, runtime?.runtimeId ?? '', 'turnFinished', {
             success: false,
             summary: errorMessage(error),
@@ -1322,7 +1340,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         ? queueSteerSubmission(current, prompt, providerPrompt, attachments, queuedId)
         : undefined
       if (queued) cacheSession(queued)
-      const submission = { providerPrompt, displayContent: prompt, attachments, queuedId }
+      const submission = { providerPrompt, displayContent: prompt, attachments, queuedId,
+        configuration: promptConfigurationForSession(current) }
       pending.push(submission)
       pendingSteers.current.set(session.id, pending)
       try {
@@ -1684,6 +1703,7 @@ function queueSubmission(
   attachments: MessageAttachment[],
   hidden = false,
   queuedId?: string,
+  configuration?: PromptConfiguration,
 ): AgentSession {
   return {
     ...session,
@@ -1698,6 +1718,7 @@ function queueSubmission(
       {
         id: queuedId ?? crypto.randomUUID(),
         content: providerPrompt,
+        configuration: configuration ?? promptConfigurationForSession(session),
         display_content: attachments.length || providerPrompt !== displayContent
           ? displayContent
           : null,
@@ -1719,8 +1740,9 @@ function queueSteerSubmission(
   providerPrompt: string,
   attachments: MessageAttachment[],
   queuedId?: string,
+  configuration?: PromptConfiguration,
 ): AgentSession {
-  const queued = queueSubmission(session, displayContent, providerPrompt, attachments, false, queuedId)
+  const queued = queueSubmission(session, displayContent, providerPrompt, attachments, false, queuedId, configuration)
   const entry = queued.queued_messages?.at(-1)
   return entry ? appendQueuedSteerPreview(queued, entry) : queued
 }

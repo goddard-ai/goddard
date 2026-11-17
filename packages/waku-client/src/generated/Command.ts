@@ -20,6 +20,7 @@ import type { InferenceProvider } from "./InferenceProvider";
 import type { MessageAttachment } from "./MessageAttachment";
 import type { Project } from "./Project";
 import type { ProjectMapIntent } from "./ProjectMapIntent";
+import type { PromptConfiguration } from "./PromptConfiguration";
 import type { ProviderKind } from "./ProviderKind";
 import type { ProviderResumeCursor } from "./ProviderResumeCursor";
 import type { ProviderSessionForkRequest } from "./ProviderSessionForkRequest";
@@ -54,7 +55,7 @@ export type Command = { "type": "transcribe", pcm: Array<number>, language?: str
  * range-reads expanded payloads instead. Absent (`All`) preserves
  * full delivery for older clients.
  */
-payloads: TaskViewPayloadInterest, } | { "type": "start", options: WireDriverStartOptions, } | { "type": "prompt", prompt: string,
+payloads: TaskViewPayloadInterest, } | { "type": "start", options: WireDriverStartOptions, } | { "type": "promptWithConfiguration", configuration: PromptConfiguration, prompt: string, turnId?: string | null, messageId?: string | null, hidden?: boolean, attachments?: Array<MessageAttachment>, } | { "type": "prompt", prompt: string,
 /**
  * Permission mode required by this turn, including hidden Resume
  * prompts. A stale runtime must be rejected before accepting input.

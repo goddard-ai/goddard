@@ -528,7 +528,6 @@ impl Waku {
         &mut self,
         session_id: Uuid,
         decision: TurnRouteDecision,
-        driver: &waku_client::driver::DriverHandle,
         cx: &mut Context<Self>,
     ) {
         let Some(session) = self
@@ -582,24 +581,9 @@ impl Waku {
         } else if let Some(effort) = effort {
             session.reasoning_effort = Some(effort);
         }
-        let applied = self
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-            .map(|session| self.session_options(session))
-            .is_some_and(|options| driver.apply_options(options));
-        if !applied {
-            if let Some(session) = self.state.session_mut(session_id) {
-                (
-                    session.model,
-                    session.reasoning_effort,
-                    session.service_tier,
-                    session.context_window,
-                ) = previous;
-            }
-            return;
-        }
+        // The configured-prompt command validates this selection before
+        // provider execution. Applying it here would block the UI on IPC
+        // and could silently fall back to settings the prompt did not select.
         let mut class_record = None;
         if let Some(session) = self.state.session_mut(session_id) {
             session.updated_at = unix_time();
@@ -623,6 +607,7 @@ impl Waku {
                 }
             }
         }
+        self.record_selected_configuration(session_id);
         self.state.mark_session_dirty(session_id);
         if let Some((class, provider_map, target)) = class_record {
             self.record_route_class(session_id, class, provider_map, target, cx);

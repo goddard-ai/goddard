@@ -78,6 +78,7 @@ impl PendingTaskMetadata {
             TaskMetadataField::Title,
             TaskMetadataField::Placement,
             TaskMetadataField::Archive,
+            TaskMetadataField::Configuration,
         ] {
             if let Some(request) = self.edits.get_mut(&(session.id, field))
                 && request
@@ -106,6 +107,7 @@ impl PendingTaskMetadata {
             TaskMetadataField::Title,
             TaskMetadataField::Placement,
             TaskMetadataField::Archive,
+            TaskMetadataField::Configuration,
         ] {
             if let Some(request) = self.edits.get(&(session.id, field)) {
                 request.edit.apply(session);
@@ -176,6 +178,64 @@ impl Waku {
 mod tests {
     use super::*;
     use crate::app::runtime::merge_remote_session_catalog;
+
+    #[test]
+    fn configuration_edits_release_to_a_newer_choice_from_another_client() {
+        fn select(session: &mut AgentSession, model: &str) {
+            let configuration = waku_protocol::PromptConfiguration {
+                provider: ProviderKind::Codex,
+                options: waku_protocol::model::SessionOptions {
+                    mode: RuntimeMode::Ask,
+                    model: Some(model.into()),
+                    reasoning_effort: Some("high".into()),
+                    service_tier: None,
+                    context_window: Some("long".into()),
+                },
+            };
+            TaskMetadataEdit::Configuration {
+                configuration,
+                auto_route: false,
+                route_decision: None,
+            }
+            .apply(session);
+        }
+        let mut local = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        local.begin_turn("Keep each selected configuration");
+        let mut pending = PendingTaskMetadata::default();
+        select(&mut local, "middle");
+        let first = pending.record(&local, TaskMetadataField::Configuration);
+        let mut first_saved = local.list_projection();
+        first_saved.metadata_revision = 1;
+        select(&mut local, "latest-local");
+        let second = pending.record(&local, TaskMetadataField::Configuration);
+        let mut second_saved = local.list_projection();
+        second_saved.metadata_revision = 2;
+        let mut newer = local.list_projection();
+        select(&mut newer, "newer-from-another-client");
+        newer.metadata_revision = 3;
+        pending.observe_raw(&newer);
+        pending.acknowledge(&first, &first_saved, &mut local);
+        assert_eq!(local.model.as_deref(), Some("latest-local"));
+        pending.acknowledge(&second, &second_saved, &mut local);
+        assert_eq!(local.model.as_deref(), Some("newer-from-another-client"));
+        assert_eq!(local.runtime_mode, RuntimeMode::Ask);
+        assert_eq!(local.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(local.context_window.as_deref(), Some("long"));
+        let mut catalog = vec![local];
+        merge_remote_session_catalog(
+            &mut catalog,
+            vec![second_saved],
+            |_| true,
+            |_| false,
+            false,
+            &HashSet::new(),
+        );
+        assert_eq!(
+            catalog[0].model.as_deref(),
+            Some("newer-from-another-client")
+        );
+        assert_eq!(catalog[0].metadata_revision, 3);
+    }
 
     #[test]
     fn task_metadata_waits_for_the_latest_acknowledgement_and_rejects_old_catalogs() {

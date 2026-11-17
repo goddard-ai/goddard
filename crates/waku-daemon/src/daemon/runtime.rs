@@ -413,6 +413,13 @@ impl WakuBackend {
         // A launch that never came up keeps no credential.
         let sandboxed_launch = options.sandbox.is_some();
         let mode = options.mode;
+        let initial_options = SessionOptions {
+            mode,
+            model: options.model.clone(),
+            reasoning_effort: options.reasoning_effort.clone(),
+            service_tier: options.service_tier.clone(),
+            context_window: options.context_window.clone(),
+        };
         let (handle, stable) = self.start_runtime_driver(
             session_id,
             runtime_id,
@@ -446,6 +453,16 @@ impl WakuBackend {
         let handle = self
             .boss_driver_boundary(session_id, runtime_id, handle)
             .with_timeline(timeline);
+        // Fresh admission or matching confirmed inventory can seed wrappers
+        // that deliberately prohibit retuning (such as a frozen plan).
+        let handle = if stable
+            .as_ref()
+            .is_none_or(|link| link.initial_configuration_confirmed())
+        {
+            handle.with_initial_options(initial_options)
+        } else {
+            handle
+        };
         handle.trace(driver::timeline::Event::RuntimeCreated);
         let computer_use_available = handle.computer_use_available();
         if let Some(error) = computer_use_start_error {

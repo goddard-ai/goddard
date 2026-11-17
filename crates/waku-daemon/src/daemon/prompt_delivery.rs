@@ -885,21 +885,13 @@ pub(super) fn record_provider_cursor(
 /// activation cannot supersede the confirmed fields. The activation mark
 /// itself is durable: a redelivery from an older generation, or a lower
 /// revision of the same one, is rejected before any field can move back.
-pub(super) fn record_effective_config(
+/// Record replay progress without turning a provider fact into a user edit.
+pub(super) fn record_config_activation(
     task_state: &Mutex<PersistedState>,
     task_store: &StateStore,
     session_id: Uuid,
     activation: ConfigActivation,
-    provider: Option<&str>,
-    model: Option<&str>,
-    reasoning_effort: Option<&str>,
 ) {
-    let provider = provider.and_then(|id| {
-        ProviderKind::ALL
-            .iter()
-            .copied()
-            .find(|kind| kind.id() == id)
-    });
     let mut state = task_state.lock();
     let Some(session) = state
         .sessions
@@ -910,37 +902,19 @@ pub(super) fn record_effective_config(
     };
     if session
         .config_activation
-        .is_some_and(|current| current > activation)
+        .is_some_and(|current| current >= activation)
     {
         return;
     }
     if task_store.hydrate(session).is_err() {
         return;
     }
-    let mut changed = session.config_activation != Some(activation);
     session.config_activation = Some(activation);
-    if let Some(provider) = provider.filter(|provider| *provider != session.provider) {
-        session.provider = provider;
-        changed = true;
-    }
-    if let Some(model) = model.filter(|model| session.model.as_deref() != Some(*model)) {
-        session.model = Some(model.to_owned());
-        changed = true;
-    }
-    if let Some(effort) =
-        reasoning_effort.filter(|effort| session.reasoning_effort.as_deref() != Some(*effort))
-    {
-        session.reasoning_effort = Some(effort.to_owned());
-        changed = true;
-    }
-    if !changed {
-        return;
-    }
     session.updated_at = crate::model::unix_time();
     state.mark_session_dirty(session_id);
     if let Err(error) = task_store.save(&mut state) {
         eprintln!(
-            "goddard-daemon could not persist the effective configuration for task {session_id}: {error:#}"
+            "goddard-daemon could not persist the activation for task {session_id}: {error:#}"
         );
     }
 }

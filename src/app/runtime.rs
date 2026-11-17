@@ -692,6 +692,10 @@ pub(super) fn merge_session_catalog_row(
         waku_protocol::task_metadata::TaskMetadata::capture(local).apply(&mut remote);
         remote.updated_at = remote.updated_at.max(local.updated_at);
     }
+    let configuration = waku_protocol::task_metadata::TaskMetadataEdit::capture(
+        waku_protocol::task_metadata::TaskMetadataField::Configuration,
+        &remote,
+    );
     local.metadata_revision = local.metadata_revision.max(remote.metadata_revision);
     local.agent_rename_allowed = remote.agent_rename_allowed;
     local.title = remote.title;
@@ -703,16 +707,6 @@ pub(super) fn merge_session_catalog_row(
     };
     local.auto_title = remote.auto_title;
     local.project_id = remote.project_id;
-    // A snapshot that predates the confirmed activation cannot own
-    // the effective fields — its provider/model/effort are
-    // pre-activation requested state. The mark itself merges
-    // forward only, so the snapshot cannot lower the local
-    // high-water and reopen stale redeliveries either.
-    if remote.config_activation >= local.config_activation {
-        local.provider = remote.provider;
-        local.model = remote.model;
-        local.reasoning_effort = remote.reasoning_effort;
-    }
     local.config_activation = local.config_activation.max(remote.config_activation);
     local.created_at = remote.created_at;
     local.last_reply_at = remote.last_reply_at;
@@ -731,6 +725,7 @@ pub(super) fn merge_session_catalog_row(
         local.status = remote.status;
         local.updated_at = remote.updated_at;
     }
+    configuration.apply(local);
 }
 
 #[derive(Debug)]
@@ -2759,6 +2754,8 @@ impl Waku {
             SessionRuntime {
                 driver: handle,
                 options_generation: Uuid::nil(),
+                options_in_flight: None,
+                options_deferred: false,
                 events,
                 pending_events: VecDeque::new(),
                 pending_steers: VecDeque::new(),
@@ -4509,12 +4506,37 @@ impl Waku {
         if let Some(runtime) = self.runtimes.get(&session_id) {
             runtime.driver.cancel();
         }
+        self.fail_unstarted_turn(session_id, turn_id, tr!("session.prompt_not_delivered"), cx);
+    }
+
+    fn fail_unstarted_turn(
+        &mut self,
+        session_id: Uuid,
+        turn_id: Uuid,
+        message: String,
+        cx: &mut Context<Self>,
+    ) {
+        if !self
+            .state
+            .sessions
+            .iter()
+            .find(|s| s.id == session_id)
+            .is_some_and(|session| {
+                session.turns.last().is_some_and(|turn| {
+                    turn.id == turn_id
+                        && turn.status == TurnStatus::Running
+                        && !turn.provider_turn_started
+                })
+            })
+        {
+            return;
+        }
         // The notice lands while the turn is still active so it reads as the
         // turn's answer — the message it was opened for never arrived.
         if let Some(session) = self.state.session_mut(session_id) {
             session.push_notice_message(
                 MessageRole::Assistant,
-                tr!("session.prompt_not_delivered"),
+                message,
                 TranscriptNotice::Status {
                     kind: TranscriptNoticeStatus::Error,
                 },
@@ -6126,6 +6148,7 @@ impl Waku {
         self.start_message_rewind(
             edit.clone(),
             ComposerSubmission {
+                configuration: None,
                 prompt: provider_prompt,
                 display_content,
                 human_content: None,
@@ -6601,6 +6624,45 @@ impl Waku {
         }
     }
 
+    fn prompt_configuration(&self, session: &AgentSession) -> waku_client::PromptConfiguration {
+        let mut options = self.session_options(session);
+        if session.reasoning_effort.is_some() {
+            options
+                .reasoning_effort
+                .clone_from(&session.reasoning_effort);
+        }
+        if session.service_tier.is_some() {
+            options.service_tier.clone_from(&session.service_tier);
+        }
+        if session.context_window.is_some() {
+            options.context_window.clone_from(&session.context_window);
+        }
+        waku_client::PromptConfiguration {
+            provider: session.provider,
+            options,
+        }
+    }
+
+    pub(super) fn record_selected_configuration(&mut self, session_id: Uuid) {
+        self.record_task_metadata(
+            session_id,
+            waku_protocol::task_metadata::TaskMetadataField::Configuration,
+        );
+    }
+
+    fn capture_submission_configuration(
+        &self,
+        session_id: Uuid,
+        submission: &mut ComposerSubmission,
+    ) {
+        if submission.configuration.is_none()
+            && let Some(session) = self.state.sessions.iter().find(|s| s.id == session_id)
+            && !session.auto_route
+        {
+            submission.configuration = Some(self.prompt_configuration(session));
+        }
+    }
+
     pub(super) fn agent_preset_for_session(&self, session: &AgentSession) -> Option<String> {
         if session.provider != ProviderKind::DeepSeek {
             return None;
@@ -6667,6 +6729,7 @@ impl Waku {
     /// that carry these per turn absorb the change and keep running; the rest
     /// are torn down so the next prompt starts with the new options.
     pub(super) fn apply_session_options(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        self.record_selected_configuration(session_id);
         let resume = self.pending_rush_resume(session_id);
         self.apply_session_options_with_rush_resume(session_id, resume, cx);
     }
@@ -6697,6 +6760,18 @@ impl Waku {
         };
         runtime.options_generation = Uuid::new_v4();
         let generation = runtime.options_generation;
+        runtime.options_deferred = true;
+        if runtime.options_in_flight.is_some()
+            || self
+                .state
+                .sessions
+                .iter()
+                .any(|s| s.id == session_id && s.status.is_busy())
+        {
+            return;
+        }
+        runtime.options_in_flight = Some(generation);
+        runtime.options_deferred = false;
         let driver = runtime.driver.clone();
         cx.spawn(async move |waku, cx| {
             let applied = cx
@@ -6704,20 +6779,29 @@ impl Waku {
                 .spawn(async move { driver.apply_options(options) })
                 .await;
             let _ = waku.update(cx, |waku, cx| {
-                let is_current = waku
+                let Some(runtime) = waku
                     .runtimes
-                    .get(&session_id)
-                    .is_some_and(|runtime| runtime.options_generation == generation);
-                if is_current && !applied {
+                    .get_mut(&session_id)
+                    .filter(|runtime| runtime.options_in_flight == Some(generation))
+                else {
+                    return;
+                };
+                runtime.options_in_flight = None;
+                if runtime.options_generation != generation {
+                    let resume = waku.pending_rush_resume(session_id);
+                    waku.apply_session_options_with_rush_resume(session_id, resume, cx);
+                    return;
+                }
+                if !applied {
                     waku.reset_session_runtime(session_id);
                     cx.notify();
                 }
-                if is_current
-                    && let Some(resume) = resume
+                if let Some(resume) = resume
                     && waku.take_rush_resume(session_id, resume)
                 {
                     waku.resume_rushed_session(session_id, cx);
                 }
+                waku.drain_queued_message(session_id, cx);
             });
         })
         .detach();
@@ -7060,6 +7144,8 @@ impl Waku {
             SessionRuntime {
                 driver: prepared.handle,
                 options_generation: Uuid::nil(),
+                options_in_flight: None,
+                options_deferred: false,
                 events: prepared.events,
                 pending_events: VecDeque::new(),
                 pending_steers: VecDeque::new(),
@@ -7837,6 +7923,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         let session_id = self.resolve_boss_chat_session(session_id);
+        self.capture_submission_configuration(session_id, &mut submission);
         submission.prompt = submission.prompt.trim().to_owned();
         if submission.prompt.is_empty() {
             return;
@@ -8088,6 +8175,19 @@ impl Waku {
         if self.response_fork_preparations.contains_key(&session_id) {
             return;
         }
+        if self
+            .runtimes
+            .get(&session_id)
+            .is_some_and(|runtime| runtime.options_deferred)
+            && self
+                .state
+                .sessions
+                .iter()
+                .any(|s| s.id == session_id && !s.status.is_busy())
+        {
+            self.apply_session_options(session_id, cx);
+            return;
+        }
         let Some(session) = self
             .state
             .sessions
@@ -8116,6 +8216,7 @@ impl Waku {
             // Messages parked behind a control-initiated provider start stay
             // queued until that runtime installs.
             || self.control_runtime_starts.contains(&session_id)
+            || self.runtimes.get(&session_id).is_some_and(|runtime| runtime.options_in_flight.is_some())
             // Messages submitted while the session moved into a worktree
             // wait for the rebind, then start in the new directory.
             || self.worktree_move_pending.contains(&session_id)
@@ -8420,6 +8521,7 @@ impl Waku {
             cx.notify();
             return;
         }
+        self.capture_submission_configuration(session_id, &mut submission);
         if self.response_fork_preparations.contains_key(&session_id) {
             return;
         }
@@ -8560,6 +8662,15 @@ impl Waku {
             self.defer_queue_drain(session_id);
             return;
         }
+        if self
+            .runtimes
+            .get(&session_id)
+            .is_some_and(|runtime| runtime.options_in_flight.is_some() || runtime.options_deferred)
+        {
+            self.enqueue_follow_up_submission(session_id, submission, cx);
+            self.defer_queue_drain(session_id);
+            return;
+        }
         if session.status.is_busy() {
             self.enqueue_follow_up_submission(session_id, submission, cx);
             return;
@@ -8662,7 +8773,31 @@ impl Waku {
                 })
             } else {
                 routing::SessionStartPlan::Direct(
-                    self.driver_start_request_for_session(session, provisional_cwd),
+                    self.driver_start_request_for_session(session, provisional_cwd)
+                        .and_then(|mut request| {
+                            if let Some(configuration) = &submission.configuration {
+                                anyhow::ensure!(
+                                    request.provider == configuration.provider,
+                                    "the prompt's selected provider changed before startup"
+                                );
+                                let options = &configuration.options;
+                                request.options.mode = options.mode;
+                                request.options.model.clone_from(&options.model);
+                                request
+                                    .options
+                                    .reasoning_effort
+                                    .clone_from(&options.reasoning_effort);
+                                request
+                                    .options
+                                    .service_tier
+                                    .clone_from(&options.service_tier);
+                                request
+                                    .options
+                                    .context_window
+                                    .clone_from(&options.context_window);
+                            }
+                            Ok(request)
+                        }),
                 )
             }
         });
@@ -9205,8 +9340,24 @@ impl Waku {
         let mut failed_to_start = false;
         match driver {
             Ok(driver) => {
+                let mut configuration = submission.configuration.clone();
                 if let Some(decision) = turn_route {
-                    self.apply_turn_route_decision(session_id, decision, &driver, cx);
+                    let previous = self
+                        .state
+                        .sessions
+                        .iter()
+                        .find(|s| s.id == session_id)
+                        .map(|session| self.session_options(session));
+                    self.apply_turn_route_decision(session_id, decision, cx);
+                    let routed = self
+                        .state
+                        .sessions
+                        .iter()
+                        .find(|s| s.id == session_id)
+                        .map(|session| self.session_options(session));
+                    if previous != routed {
+                        configuration = None;
+                    }
                 }
                 // A provider switch stages the compacted context the new
                 // provider needs; it precedes every other one-shot note so
@@ -9267,22 +9418,114 @@ impl Waku {
                     Some(intro) => format!("{intro}\n\n{driver_prompt}"),
                     None => driver_prompt,
                 };
-                let mode = self
-                    .state
-                    .sessions
-                    .iter()
-                    .find(|session| session.id == session_id)
-                    .expect("submitted session still exists")
-                    .runtime_mode;
-                driver.prompt(
-                    driver_prompt,
-                    mode,
-                    turn_id,
-                    message_id,
-                    submission.hidden,
-                    submission.attachments.clone(),
-                );
-                self.watch_unstarted_turn(session_id, turn_id, cx);
+                let configuration = configuration.map(Ok).unwrap_or_else(|| {
+                    self.state
+                        .sessions
+                        .iter()
+                        .find(|s| s.id == session_id)
+                        .ok_or_else(|| anyhow::anyhow!("the submitted task no longer exists"))
+                        .map(|session| self.prompt_configuration(session))
+                });
+                let sent_configuration = configuration.as_ref().ok().cloned();
+                let hidden = submission.hidden;
+                let attachments = submission.attachments.clone();
+                let owner = driver.clone();
+                // Enqueue on the caller's turn so a later Stop or Close
+                // cannot be overtaken by a delayed background send.
+                let admitted = configuration.and_then(|configuration| {
+                    driver.prompt_with_configuration(
+                        driver_prompt,
+                        configuration,
+                        turn_id,
+                        message_id,
+                        hidden,
+                        attachments,
+                    )
+                });
+                cx.spawn(async move |waku, cx| {
+                    let delivered = cx
+                        .background_executor()
+                        .spawn(async move {
+                            match admitted?.wait()? {
+                                waku_client::ResponsePayload::Ack => Ok(()),
+                                _ => anyhow::bail!(
+                                    "Goddard daemon returned an invalid prompt response"
+                                ),
+                            }
+                        })
+                        .await;
+                    let _ = waku.update(cx, |waku, cx| {
+                        if !waku
+                            .runtimes
+                            .get(&session_id)
+                            .is_some_and(|runtime| runtime.driver.same_control(&owner))
+                        {
+                            return;
+                        }
+                        let current_turn = waku
+                            .state
+                            .sessions
+                            .iter()
+                            .find(|s| s.id == session_id)
+                            .is_some_and(|session| session.active_turn_id() == turn_id);
+                        match delivered {
+                            Ok(()) => {
+                                let desired = waku
+                                    .state
+                                    .sessions
+                                    .iter()
+                                    .find(|s| s.id == session_id)
+                                    .map(|session| waku.prompt_configuration(session));
+                                if sent_configuration != desired
+                                    && let Some(runtime) = waku.runtimes.get_mut(&session_id)
+                                {
+                                    runtime.options_deferred = true;
+                                }
+                                if current_turn {
+                                    waku.watch_unstarted_turn(session_id, turn_id, cx);
+                                }
+                            }
+                            Err(error) if current_turn => {
+                                let refused = error
+                                    .downcast_ref::<waku_client::RpcError>()
+                                    .is_some_and(|rpc| {
+                                        rpc.code
+                                            == Some(
+                                                waku_client::RpcErrorCode::ConfigurationRejected,
+                                            )
+                                    });
+                                if refused && let Some(turn_id) = turn_id {
+                                    waku.fail_unstarted_turn(
+                                        session_id,
+                                        turn_id,
+                                        error.to_string(),
+                                        cx,
+                                    );
+                                } else if let Some(runtime) = waku.runtimes.get_mut(&session_id) {
+                                    runtime.pending_events.push_back(DriverEvent::Error(format!(
+                                        "Could not confirm prompt delivery: {error}"
+                                    )));
+                                    signal_event_pump(&waku.event_wake_tx);
+                                    waku.watch_unstarted_turn(session_id, turn_id, cx);
+                                }
+                            }
+                            Err(_) => {}
+                        }
+                        if waku
+                            .runtimes
+                            .get(&session_id)
+                            .is_some_and(|runtime| runtime.options_deferred)
+                            && waku
+                                .state
+                                .sessions
+                                .iter()
+                                .any(|s| s.id == session_id && !s.status.is_busy())
+                        {
+                            waku.apply_session_options(session_id, cx);
+                        }
+                    });
+                })
+                .detach();
             }
             Err(error) => {
                 // The sandbox sign-in gate: the provider's shared guest
@@ -9662,6 +9905,16 @@ impl Waku {
             runtime.stream_remeasure_pending = markdown_changed;
             if keep_runtime {
                 self.runtimes.insert(session_id, runtime);
+                if self.runtimes.get(&session_id).is_some_and(|runtime| {
+                    runtime.options_deferred && runtime.options_in_flight.is_none()
+                }) && self
+                    .state
+                    .sessions
+                    .iter()
+                    .any(|s| s.id == session_id && !s.status.is_busy())
+                {
+                    self.apply_session_options(session_id, cx);
+                }
                 if runtime_changed {
                     self.retry_deferred_steers(session_id, cx);
                 }

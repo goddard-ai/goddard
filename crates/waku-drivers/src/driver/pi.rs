@@ -157,7 +157,7 @@ enum CommandMessage {
     Steer(String),
     Cancel,
     CancelExtensionRequest(String),
-    Options(SessionOptions),
+    Options(SessionOptions, Sender<bool>),
     Rollback {
         turns: usize,
         response: Sender<Result<ProviderResumeCursor, String>>,
@@ -197,8 +197,8 @@ impl PiDriver {
             mode,
             model,
             reasoning_effort,
-            service_tier: _,
-            context_window: _,
+            service_tier,
+            context_window,
             agent_preset: _,
             computer_use_enabled,
             computer_use_runtime,
@@ -213,6 +213,16 @@ impl PiDriver {
             allow_model_fallback: _,
             ephemeral: _,
         } = options;
+        anyhow::ensure!(
+            service_tier.is_none(),
+            "service tier selection is not supported for {}",
+            flavor.display_name()
+        );
+        anyhow::ensure!(
+            context_window.is_none(),
+            "context window selection is not supported for {}",
+            flavor.display_name()
+        );
         if mode != RuntimeMode::FullAccess {
             return Err(anyhow!(
                 "{} currently supports Full access only",
@@ -634,71 +644,45 @@ impl PiDriver {
                                     )));
                             }
                         }
-                        CommandMessage::Options(options) => {
-                            if options.model != current_model {
-                                match options.model.as_deref().map(parse_model_slug).transpose() {
-                                    Ok(Some((provider, model_id))) => {
-                                        match send_request(
-                                            &mut stdin,
-                                            &writer_pending,
-                                            &mut next_request_id,
-                                            json!({
-                                                "type": "set_model",
-                                                "provider": provider,
-                                                "modelId": model_id
-                                            }),
-                                        ) {
-                                            Ok(response) => {
-                                                if let Some(window) = response
-                                                    .pointer("/data/contextWindow")
-                                                    .and_then(Value::as_u64)
-                                                    .filter(|window| *window > 0)
-                                                {
-                                                    let _ = writer_events.send(
-                                                        DriverEvent::UsageUpdated {
-                                                            context_tokens: None,
-                                                            context_window: Some(window),
-                                                        },
-                                                    );
-                                                }
-                                            }
-                                            Err(error) => {
-                                                let _ = writer_events.send(
-                                                    DriverEvent::localized_error(localized!(
-                                                        "errors.switch_provider_model",
-                                                        provider = flavor.display_name(),
-                                                        error = error
-                                                    )),
-                                                );
-                                            }
-                                        }
-                                    }
-                                    Ok(None) => {}
-                                    Err(error) => {
-                                        let _ = writer_events
-                                            .send(DriverEvent::Error(error.to_string()));
+                        CommandMessage::Options(options, reply) => {
+                            let applied = (|| -> Result<(), String> {
+                                if options.model != current_model {
+                                    let model = options.model.as_deref().ok_or_else(||
+                                        "returning to the default model requires a restart".to_owned())?;
+                                    let (provider, model_id) = parse_model_slug(model)
+                                        .map_err(|error| error.to_string())?;
+                                    let response = send_request(
+                                        &mut stdin, &writer_pending, &mut next_request_id,
+                                        json!({"type": "set_model", "provider": provider, "modelId": model_id}),
+                                    )?;
+                                    current_model = options.model.clone();
+                                    if let Some(window) = response.pointer("/data/contextWindow")
+                                        .and_then(Value::as_u64).filter(|window| *window > 0)
+                                    {
+                                        let _ = writer_events.send(DriverEvent::UsageUpdated {
+                                            context_tokens: None, context_window: Some(window),
+                                        });
                                     }
                                 }
-                                current_model = options.model;
-                            }
-                            if options.reasoning_effort != current_effort {
-                                if let Some(level) = options.reasoning_effort.as_deref()
-                                    && let Err(error) = send_request(
-                                        &mut stdin,
-                                        &writer_pending,
-                                        &mut next_request_id,
+                                if options.reasoning_effort != current_effort {
+                                    let level = options.reasoning_effort.as_deref().ok_or_else(||
+                                        "returning to default thinking requires a restart".to_owned())?;
+                                    send_request(
+                                        &mut stdin, &writer_pending, &mut next_request_id,
                                         json!({"type": "set_thinking_level", "level": level}),
-                                    )
-                                {
-                                    let _ = writer_events.send(DriverEvent::localized_error(
-                                        localized!(
-                                            "errors.change_provider_thinking",
-                                            provider = flavor.display_name(),
-                                            error = error
-                                        ),
-                                    ));
+                                    )?;
+                                    current_effort = options.reasoning_effort;
                                 }
-                                current_effort = options.reasoning_effort;
+                                Ok(())
+                            })();
+                            let _ = reply.send(applied.is_ok());
+                            if let Err(error) = applied {
+                                let _ = writer_events.send(DriverEvent::localized_error(localized!(
+                                    "errors.switch_provider_model", provider = flavor.display_name(), error = error
+                                )));
+                                // A failed or unanswered multi-write cannot
+                                // fall through to the next queued prompt.
+                                break;
                             }
                         }
                         CommandMessage::CancelExtensionRequest(id) => {
@@ -848,10 +832,27 @@ impl DriverControl for PiDriver {
         // apply to the live session. Neither exposes one for permissions — and
         // Goddard only runs them with Full access anyway, so a mode change asks
         // for a fresh start, which is where that is reported.
-        if options.mode != RuntimeMode::FullAccess {
+        if options.mode != RuntimeMode::FullAccess
+            || options.service_tier.is_some()
+            || options.context_window.is_some()
+        {
             return false;
         }
-        self.commands.send(CommandMessage::Options(options)).is_ok()
+        let (reply, response) = bounded(1);
+        if self
+            .commands
+            .send(CommandMessage::Options(options, reply))
+            .is_err()
+        {
+            return false;
+        }
+        match response.recv_timeout(RPC_TIMEOUT.saturating_mul(3)) {
+            Ok(applied) => applied,
+            Err(_) => {
+                self.begin_shutdown();
+                false
+            }
+        }
     }
 
     fn delete_provider_session(&self) {
@@ -1981,11 +1982,15 @@ mod tests {
             context_window: None,
         };
 
-        assert!(driver.apply_options(options(RuntimeMode::FullAccess)));
-        assert!(matches!(
-            command_rx.try_recv(),
-            Ok(CommandMessage::Options(_))
-        ));
+        std::thread::scope(|scope| {
+            scope.spawn(|| match command_rx.recv().unwrap() {
+                CommandMessage::Options(_, reply) => {
+                    reply.send(true).unwrap();
+                }
+                _ => panic!("expected options"),
+            });
+            assert!(driver.apply_options(options(RuntimeMode::FullAccess)));
+        });
 
         // Pi has no permission setter and only runs with Full access.
         assert!(!driver.apply_options(options(RuntimeMode::Ask)));

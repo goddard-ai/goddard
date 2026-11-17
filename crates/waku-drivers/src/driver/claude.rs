@@ -28,7 +28,7 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context as _, anyhow};
-use crossbeam_channel::{Sender, unbounded};
+use crossbeam_channel::{Sender, bounded, unbounded};
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -57,7 +57,10 @@ enum CommandMessage {
         input: Value,
         answers: Vec<UserInputAnswer>,
     },
-    Options(SessionOptions),
+    Options {
+        options: SessionOptions,
+        request_id: String,
+    },
     StopBackgroundWork {
         key: BackgroundWorkKey,
         control_id: String,
@@ -88,10 +91,12 @@ fn stop_task_request(request_id: u64, task_id: &str) -> Value {
 pub struct ClaudeDriver {
     commands: Sender<CommandMessage>,
     pending_user_inputs: Arc<Mutex<HashMap<String, Value>>>,
+    pending_options: Arc<Mutex<HashMap<String, Sender<bool>>>>,
     /// The caller-chosen session id — Claude accepts `--session-id`, so the
     /// driver knows which transcript file a headless teardown should remove.
     session_id: String,
     mode: RuntimeMode,
+    reasoning_effort: Option<String>,
     announced_agent_surface: bool,
     computer_use: Option<super::computer_use::ComputerUseRuntime>,
 }
@@ -180,7 +185,7 @@ impl ClaudeDriver {
             mode,
             model,
             reasoning_effort,
-            service_tier: _,
+            service_tier,
             context_window,
             agent_preset: _,
             computer_use_enabled,
@@ -196,6 +201,10 @@ impl ClaudeDriver {
             allow_model_fallback: _,
             ephemeral: _,
         } = options;
+        anyhow::ensure!(
+            service_tier.is_none(),
+            "service tier selection is not supported for Claude"
+        );
         let (resume_session_id, resume_at) = match provider_cursor {
             Some(ProviderResumeCursor::Claude {
                 session_id,
@@ -330,6 +339,7 @@ impl ClaudeDriver {
         let turn_active = Arc::new(Mutex::new(false));
         let pending_task_stops = Arc::new(Mutex::new(HashMap::<String, BackgroundWorkKey>::new()));
         let pending_user_inputs = Arc::new(Mutex::new(HashMap::<String, Value>::new()));
+        let pending_options = Arc::new(Mutex::new(HashMap::<String, Sender<bool>>::new()));
 
         let reader_events = events.clone();
         let reader_commands = commands.clone();
@@ -337,12 +347,14 @@ impl ClaudeDriver {
         let reader_session = session_id.clone();
         let reader_pending_task_stops = pending_task_stops.clone();
         let reader_pending_user_inputs = pending_user_inputs.clone();
+        let reader_pending_options = pending_options.clone();
         let reader_thread = thread::Builder::new()
             .name("waku-claude-reader".into())
             .spawn(move || {
                 let mut state = ClaudeStreamState {
                     pending_task_stops: reader_pending_task_stops,
                     pending_user_inputs: reader_pending_user_inputs,
+                    pending_options: reader_pending_options,
                     ..ClaudeStreamState::default()
                 };
                 for line in BufReader::new(stdout).lines().map_while(Result::ok) {
@@ -362,11 +374,14 @@ impl ClaudeDriver {
                         &mut state,
                     );
                 }
+                // A dead original pipe cannot confirm any settings write.
+                state.pending_options.lock().clear();
             })?;
 
         let writer_events = events.clone();
         let writer_turn = turn_active;
         let writer_pending_task_stops = pending_task_stops;
+        let writer_pending_options = pending_options.clone();
         let writer_title_refresh = super::title_refresh::NativeTitleRefresh::default();
         let title_session_id = session_id.clone();
         thread::Builder::new()
@@ -374,7 +389,6 @@ impl ClaudeDriver {
             .spawn(move || {
                 let mut stdin = stdin;
                 let mut next_request_id = 0_u64;
-                let mut current_model = launch_model;
                 while let Ok(message) = command_rx.recv() {
                     let written = match message {
                         CommandMessage::Prompt(text) => {
@@ -505,27 +519,25 @@ impl ClaudeDriver {
                                 }),
                             )
                         }
-                        CommandMessage::Options(options) => {
+                        CommandMessage::Options { options, request_id } => {
                             // The window rides on the model id, so switching it
                             // is the same `set_model` round trip as switching
                             // models — verified accepted by the CLI (2.1.228).
-                            let next_model = wire_model(
+                            let model = wire_model(
                                 options.model.as_deref(),
                                 options.context_window.as_deref(),
                             );
-                            if next_model == current_model {
-                                continue;
-                            }
-                            current_model = next_model;
-                            let Some(model) = current_model.as_deref() else {
+                            let Some(model) = model else {
+                                if let Some(reply) = writer_pending_options.lock().remove(&request_id) {
+                                    let _ = reply.send(false);
+                                }
                                 continue;
                             };
-                            next_request_id += 1;
                             write_line(
                                 &mut stdin,
                                 &json!({
                                     "type": "control_request",
-                                    "request_id": format!("waku-{next_request_id}"),
+                                    "request_id": request_id,
                                     "request": {"subtype": "set_model", "model": model}
                                 }),
                             )
@@ -601,8 +613,10 @@ impl ClaudeDriver {
         Ok(Self {
             commands,
             pending_user_inputs,
+            pending_options,
             session_id,
             mode,
+            reasoning_effort,
             announced_agent_surface: agent.is_some(),
             computer_use,
         })
@@ -677,10 +691,40 @@ impl DriverControl for ClaudeDriver {
     fn apply_options(&self, options: SessionOptions) -> bool {
         // The model has a setter; the permission posture is a launch flag, and
         // changing what a running agent may touch deserves a fresh session.
-        if options.mode != self.mode {
+        // Effort is also a launch flag; set_model cannot change it.
+        if options.mode != self.mode
+            || options.reasoning_effort != self.reasoning_effort
+            || options.service_tier.is_some()
+        {
             return false;
         }
-        self.commands.send(CommandMessage::Options(options)).is_ok()
+        let request_id = format!("waku-options-{}", Uuid::new_v4());
+        let (reply, response) = bounded(1);
+        self.pending_options
+            .lock()
+            .insert(request_id.clone(), reply);
+        let enqueued = self
+            .commands
+            .send(CommandMessage::Options {
+                options,
+                request_id: request_id.clone(),
+            })
+            .is_ok();
+        let applied = if enqueued {
+            match response.recv_timeout(Duration::from_secs(10)) {
+                Ok(applied) => applied,
+                Err(_) => {
+                    // An unanswered write can activate late. End this pipe
+                    // before another selection or prompt can follow it.
+                    self.begin_shutdown();
+                    false
+                }
+            }
+        } else {
+            false
+        };
+        self.pending_options.lock().remove(&request_id);
+        applied
     }
 
     fn delete_provider_session(&self) {
@@ -742,6 +786,7 @@ struct ClaudeStreamState {
     task_output_tails: ClaudeTaskOutputTails,
     pending_task_stops: Arc<Mutex<HashMap<String, BackgroundWorkKey>>>,
     pending_user_inputs: Arc<Mutex<HashMap<String, Value>>>,
+    pending_options: Arc<Mutex<HashMap<String, Sender<bool>>>>,
     /// Model of the latest main-thread assistant message, so the settled
     /// turn's `modelUsage` map can be read for that model's context window
     /// rather than a subagent's.
@@ -1454,6 +1499,12 @@ fn handle_message(
             else {
                 return;
             };
+            if let Some(reply) = state.pending_options.lock().remove(request_id) {
+                let accepted =
+                    value.pointer("/response/subtype").and_then(Value::as_str) == Some("success");
+                let _ = reply.send(accepted);
+                return;
+            }
             let Some(key) = state.pending_task_stops.lock().remove(request_id) else {
                 return;
             };
@@ -2203,8 +2254,10 @@ mod tests {
         let driver = ClaudeDriver {
             commands,
             pending_user_inputs: Arc::new(Mutex::new(HashMap::new())),
+            pending_options: Arc::new(Mutex::new(HashMap::new())),
             session_id: Uuid::new_v4().to_string(),
             mode: RuntimeMode::FullAccess,
+            reasoning_effort: None,
             announced_agent_surface: false,
             computer_use: None,
         };

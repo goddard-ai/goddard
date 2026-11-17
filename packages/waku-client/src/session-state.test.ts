@@ -41,6 +41,28 @@ test("list-only save replies retain loaded detail and advance metadata without a
   expect(older.pinned_at).toBe(10);
 });
 
+test("older save replies cannot replace the latest selected configuration", () => {
+  const local = session({
+    metadata_revision: 2, provider: "claude", model: "latest-model",
+    runtime_mode: "ask", reasoning_effort: "high", service_tier: null,
+    context_window: "long", auto_route: false, route_decision: null,
+  });
+  const saved = session({
+    metadata_revision: 1, provider: "claude", model: "old-model",
+    runtime_mode: "fullAccess", reasoning_effort: null, service_tier: "fast",
+    context_window: null, auto_route: true, route_decision: null,
+  });
+  const merged = reconcileSavedSession(local, saved);
+  expect(merged).toMatchObject({
+    metadata_revision: 2, model: "latest-model", runtime_mode: "ask",
+    reasoning_effort: "high", service_tier: null, context_window: "long",
+    auto_route: false,
+  });
+  const newer = reconcileSavedSession(merged, { ...saved, detail_loaded: false, metadata_revision: 3 });
+  expect(newer.model).toBe("old-model");
+  expect(newer.runtime_mode).toBe("fullAccess");
+});
+
 test("a newer history generation only travels with its authoritative detail", () => {
   const local = session({
     history_generation: 0, metadata_revision: 2,

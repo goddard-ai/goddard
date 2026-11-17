@@ -288,6 +288,7 @@ impl SidebarIntents {
             waku_protocol::task_metadata::TaskMetadataField::Title,
             waku_protocol::task_metadata::TaskMetadataField::Placement,
             waku_protocol::task_metadata::TaskMetadataField::Archive,
+            waku_protocol::task_metadata::TaskMetadataField::Configuration,
         ] {
             let edit = SidebarEdit::Task {
                 id: session.id,

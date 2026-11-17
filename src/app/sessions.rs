@@ -6400,6 +6400,7 @@ impl Waku {
             // A different provider is a different binary and protocol; only a
             // model change within one provider can be applied in session.
             if provider_changed {
+                self.record_selected_configuration(session_id);
                 self.reset_session_runtime(session_id);
                 // A different provider is also a different command registry.
                 self.refresh_composer_sources(cx);

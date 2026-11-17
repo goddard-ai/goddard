@@ -555,6 +555,8 @@ enum RemoteImageState {
 /// mentions out of the user bubble.
 #[derive(Clone, Debug)]
 struct ComposerSubmission {
+    /// The provider/options selected when this prompt was admitted.
+    configuration: Option<waku_client::PromptConfiguration>,
     prompt: String,
     display_content: Option<String>,
     /// The user's own words for titles and a restored draft, kept apart from
@@ -618,6 +620,7 @@ impl ComposerSubmission {
 
     fn plain(prompt: String) -> Self {
         Self {
+            configuration: None,
             prompt,
             display_content: None,
             human_content: None,
@@ -648,6 +651,7 @@ impl ComposerSubmission {
             QueuedMessage::with_presentation(self.prompt, self.display_content, self.attachments);
         message.atoms = self.message_atoms;
         message.hidden = self.hidden;
+        message.configuration = self.configuration;
         // A re-parked submission keeps the chip it came from: the stored
         // queue entry stays the same row delivery will later consume.
         if let Some(queued_id) = self.queued_id {
@@ -661,6 +665,7 @@ impl ComposerSubmission {
         // only a client-owned entry follows this submission's send.
         let queued_id = (!message.is_agent_owned()).then_some(message.id);
         Self {
+            configuration: message.configuration,
             prompt: message.content,
             display_content: message.display_content,
             human_content: None,
@@ -1742,6 +1747,10 @@ struct SessionRuntime {
     /// this runtime is replaced while the RPC is in flight. A unique token
     /// cannot collide with a replacement runtime's first options update.
     options_generation: Uuid,
+    /// The one settings RPC currently owned by this runtime attachment.
+    options_in_flight: Option<Uuid>,
+    /// Desired settings waiting for an earlier update or active turn.
+    options_deferred: bool,
     events: Receiver<driver::DriverEventBatch>,
     pending_events: VecDeque<DriverEvent>,
     /// Presentation metadata for steering messages awaiting the provider's

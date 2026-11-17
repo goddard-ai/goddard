@@ -253,6 +253,13 @@
       "when": 1794489388169,
       "tag": "0035_wealthy_genesis",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1794554089219,
+      "tag": "0036_gorgeous_cardiac",
+      "breakpoints": true
     }
   ]
 }

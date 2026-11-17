@@ -2,6 +2,7 @@
 import type { MessageAtom } from "./MessageAtom";
 import type { MessageAttachment } from "./MessageAttachment";
 import type { OutcomeReminderTask } from "./OutcomeReminderTask";
+import type { PromptConfiguration } from "./PromptConfiguration";
 import type { QueuedMessageSource } from "./QueuedMessageSource";
 import type { ReportTrigger } from "./ReportTrigger";
 
@@ -10,6 +11,11 @@ import type { ReportTrigger } from "./ReportTrigger";
  * turn once the current turn settles successfully.
  */
 export type QueuedMessage = { id: string, content: string,
+/**
+ * Settings selected when this user prompt was admitted. Legacy entries
+ * and daemon-owned deliveries resolve their configuration at dispatch.
+ */
+configuration?: PromptConfiguration | null,
 /**
  * The text typed before Goddard appended provider-facing attachment
  * mentions. `None` is the legacy/plain-message representation.

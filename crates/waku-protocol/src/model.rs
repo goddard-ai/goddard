@@ -646,6 +646,18 @@ pub enum RuntimeMode {
     FullAccess,
 }
 
+/// Settings selected for a turn. Client snapshots and native drivers share
+/// this shape so a queued prompt retains every selected option.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionOptions {
+    pub mode: RuntimeMode,
+    pub model: Option<String>,
+    pub reasoning_effort: Option<String>,
+    pub service_tier: Option<String>,
+    pub context_window: Option<String>,
+}
+
 impl<'de> Deserialize<'de> for RuntimeMode {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -1417,6 +1429,10 @@ pub struct OutcomeReminderTask {
 pub struct QueuedMessage {
     pub id: Uuid,
     pub content: String,
+    /// Settings selected when this user prompt was admitted. Legacy entries
+    /// and daemon-owned deliveries resolve their configuration at dispatch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub configuration: Option<crate::protocol::PromptConfiguration>,
     /// The text typed before Goddard appended provider-facing attachment
     /// mentions. `None` is the legacy/plain-message representation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1458,6 +1474,7 @@ impl QueuedMessage {
         Self {
             id: Uuid::new_v4(),
             content: content.into(),
+            configuration: None,
             display_content: None,
             attachments: Vec::new(),
             atoms: Vec::new(),
@@ -1740,9 +1757,9 @@ pub struct RuntimeEventCursor {
     pub sequence: u64,
 }
 
-/// The provider generation and configuration revision a session's
-/// provider/model/effort fields were last confirmed under — the durable
-/// high-water mark that rejects a stale or foreign-generation
+/// The latest observed provider generation and configuration revision —
+/// independent of the task's selected settings. This durable high-water
+/// mark rejects a stale or foreign-generation
 /// `ConfigActivated` redelivery. Ordered by generation first, then
 /// revision: a replacement provider's first activation supersedes every
 /// activation its generation could still emit.
@@ -1883,11 +1900,10 @@ pub struct AgentSession {
     /// Selected context window, when the provider exposes more than one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window: Option<String>,
-    /// The runtime-confirmed activation the `provider`/`model`/
-    /// `reasoning_effort` fields reflect, once a stable-runtime
-    /// `ConfigActivated` fact has been applied. Daemon-owned and merged
-    /// forward only: a stale activation or a client save that never saw it
-    /// cannot resurrect a superseded selection or lower the mark.
+    /// The latest runtime-confirmed activation applied from stable replay.
+    /// Selected provider/options remain user-owned metadata. This separate
+    /// daemon-owned mark merges forward only for replay deduplication;
+    /// provider facts cannot replace the selected settings.
     /// `None` for sessions no runtime has confirmed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_activation: Option<ConfigActivation>,
@@ -2196,12 +2212,12 @@ impl AgentSession {
             provider: self.provider,
             model: self.model.clone(),
             pending_model_switch: self.pending_model_switch.clone(),
-            runtime_mode: RuntimeMode::default(),
+            runtime_mode: self.runtime_mode,
             environment: self.environment(),
             sandboxed: false,
             reasoning_effort: self.reasoning_effort.clone(),
-            service_tier: None,
-            context_window: None,
+            service_tier: self.service_tier.clone(),
+            context_window: self.context_window.clone(),
             // A list column, like `runtime_event_cursor`: catalog merges and
             // replay dedup need the activation mark without hydrating.
             config_activation: self.config_activation,
@@ -8503,6 +8519,17 @@ mod tests {
         session
             .queued_messages
             .push(QueuedMessage::new("second follow-up"));
+        let configuration = crate::protocol::PromptConfiguration {
+            provider: ProviderKind::Codex,
+            options: SessionOptions {
+                mode: RuntimeMode::FullAccess,
+                model: Some("selected-model".into()),
+                reasoning_effort: Some("high".into()),
+                service_tier: Some("fast".into()),
+                context_window: Some("long".into()),
+            },
+        };
+        session.queued_messages[0].configuration = Some(configuration.clone());
 
         let value = serde_json::to_value(&session).unwrap();
         assert!(value["queued_messages"].is_array());
@@ -8510,6 +8537,11 @@ mod tests {
         assert_eq!(restored.queued_messages.len(), 2);
         assert_eq!(restored.queued_messages[0].content, "first follow-up");
         assert_eq!(restored.queued_messages[1].content, "second follow-up");
+        assert_eq!(
+            restored.queued_messages[0].configuration,
+            Some(configuration)
+        );
+        assert!(restored.queued_messages[1].configuration.is_none());
         assert_ne!(
             restored.queued_messages[0].id,
             restored.queued_messages[1].id

@@ -172,6 +172,7 @@ pub struct DriverHandle {
     inner: Arc<dyn DriverControl>,
     timeline: Option<timeline::RuntimeTimeline>,
     pending_user_cancel: Arc<AtomicBool>,
+    applied_options: Arc<parking_lot::Mutex<Option<SessionOptions>>>,
 }
 
 impl DriverHandle {
@@ -180,7 +181,76 @@ impl DriverHandle {
             inner: control,
             timeline: None,
             pending_user_cancel: Arc::new(AtomicBool::new(false)),
+            applied_options: Arc::new(parking_lot::Mutex::new(None)),
         }
+    }
+
+    /// Record the configuration of a confirmed fresh provider launch.
+    pub fn with_initial_options(self, options: SessionOptions) -> Self {
+        *self.applied_options.lock() = Some(options);
+        self
+    }
+
+    /// Keep settings stable until this guard is dropped after prompt delivery.
+    /// Cancellation does not acquire this per-runtime configuration guard.
+    pub fn prepare_prompt_options(
+        &self,
+        options: SessionOptions,
+    ) -> anyhow::Result<impl Sized + '_> {
+        self.prepare_prompt_options_with_cancellation(options, &|| false)
+    }
+
+    fn lock_options_until_cancelled(
+        &self,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Option<parking_lot::MutexGuard<'_, Option<SessionOptions>>> {
+        // A direct control call can own settings outside the ordered mailbox.
+        // Let the mailbox's stopped waiter leave without waiting for that owner.
+        while !cancelled() {
+            if let Some(guard) = self
+                .applied_options
+                .try_lock_for(std::time::Duration::from_millis(5))
+            {
+                return Some(guard);
+            }
+        }
+        None
+    }
+
+    pub fn prepare_prompt_options_with_cancellation<'a>(
+        &'a self,
+        options: SessionOptions,
+        cancelled: &dyn Fn() -> bool,
+    ) -> anyhow::Result<impl Sized + 'a + use<'a>> {
+        if cancelled() {
+            return Err(EnqueueStopped.into());
+        }
+        let mut applied = self
+            .lock_options_until_cancelled(cancelled)
+            .ok_or(EnqueueStopped)?;
+        if cancelled() {
+            return Err(EnqueueStopped.into());
+        }
+        if applied.as_ref() != Some(&options) {
+            if !self
+                .inner
+                .apply_options_with_cancellation(options.clone(), cancelled)
+            {
+                // A failed update may have partially changed the provider.
+                *applied = None;
+                if cancelled() {
+                    return Err(EnqueueStopped.into());
+                }
+                return Err(waku_protocol::RpcError::configuration_rejected(
+                    "the selected settings could not be applied; restart the task runtime and try again",
+                ).into());
+            }
+            *applied = Some(options);
+        }
+        if cancelled() {
+            return Err(EnqueueStopped.into());
+        }
+        Ok(applied)
     }
 
     pub fn with_timeline(mut self, timeline: Option<timeline::RuntimeTimeline>) -> Self {
@@ -250,8 +320,13 @@ impl DriverHandle {
     /// Carry the user's intent with this driver owner until its forwarder or
     /// ordered Cancel handler records it. Set it before the provider can settle.
     pub fn cancel_from_user(&self) {
-        self.pending_user_cancel.store(true, Ordering::Release);
+        self.note_user_cancel();
         self.cancel();
+    }
+
+    /// Record intent without doing provider I/O at request admission.
+    pub fn note_user_cancel(&self) {
+        self.pending_user_cancel.store(true, Ordering::Release);
     }
 
     pub fn take_user_cancel(&self) -> bool {
@@ -339,7 +414,31 @@ impl DriverHandle {
     }
 
     pub fn apply_options(&self, options: SessionOptions) -> bool {
-        self.inner.apply_options(options)
+        self.apply_options_with_cancellation(options, &|| false)
+    }
+
+    pub fn apply_options_with_cancellation(
+        &self,
+        options: SessionOptions,
+        cancelled: &dyn Fn() -> bool,
+    ) -> bool {
+        if cancelled() {
+            return false;
+        }
+        let Some(mut applied) = self.lock_options_until_cancelled(cancelled) else {
+            return false;
+        };
+        if cancelled() {
+            return false;
+        }
+        if applied.as_ref() == Some(&options) {
+            return true;
+        }
+        let success = self
+            .inner
+            .apply_options_with_cancellation(options.clone(), cancelled);
+        *applied = success.then_some(options);
+        success
     }
 
     pub fn rollback(&self, turns: usize) -> anyhow::Result<Option<ProviderResumeCursor>> {
@@ -513,6 +612,14 @@ pub trait DriverControl: Send + Sync {
     fn apply_options(&self, _options: SessionOptions) -> bool {
         false
     }
+    /// Adapters with confirmation waits can wake and abort them on Stop.
+    fn apply_options_with_cancellation(
+        &self,
+        options: SessionOptions,
+        cancelled: &dyn Fn() -> bool,
+    ) -> bool {
+        !cancelled() && self.apply_options(options)
+    }
     fn rollback(&self, turns: usize) -> anyhow::Result<Option<ProviderResumeCursor>>;
     fn fork(&self, _turns_to_remove: usize) -> anyhow::Result<ProviderResumeCursor> {
         anyhow::bail!("conversation forking is not supported by this provider transport")
@@ -582,14 +689,7 @@ pub struct DriverStartOptions {
 /// The subset of `DriverStartOptions` a user can change without starting a new
 /// task. Transports that carry these per turn can absorb a change in place;
 /// the rest have to be restarted.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SessionOptions {
-    pub mode: RuntimeMode,
-    pub model: Option<String>,
-    pub reasoning_effort: Option<String>,
-    pub service_tier: Option<String>,
-    pub context_window: Option<String>,
-}
+pub use waku_protocol::model::SessionOptions;
 
 /// A cloud-environment session: no local process, no VM — the driver owns
 /// a remote task's lifecycle through the provider's hosted API or CLI.
@@ -654,6 +754,10 @@ pub fn start_local(
     Ok(DriverHandle::from_control(inner))
 }
 
+#[cfg(all(test, unix))]
+#[path = "tests/configured_options.rs"]
+mod configured_options_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -673,5 +777,88 @@ mod tests {
         ));
         assert!(matches!(received.try_recv(), Ok(DriverEvent::TextDelta(text)) if text == "one"));
         assert!(matches!(received.try_recv(), Ok(DriverEvent::TextDelta(text)) if text == "two"));
+    }
+    #[test]
+    fn configured_options_guard_wait_can_be_stopped_before_its_owner_releases() {
+        struct Control(Arc<std::sync::atomic::AtomicUsize>);
+        impl DriverControl for Control {
+            fn prompt(&self, _: String) {
+                panic!("no provider input expected");
+            }
+            fn cancel(&self) {}
+            fn respond(&self, _: String, _: String) {}
+            fn rollback(&self, _: usize) -> anyhow::Result<Option<ProviderResumeCursor>> {
+                Ok(None)
+            }
+            fn apply_options(&self, _: SessionOptions) -> bool {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                true
+            }
+        }
+        for prompt in [true, false] {
+            let updates = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let options = SessionOptions {
+                mode: RuntimeMode::Ask,
+                model: Some("initial".into()),
+                reasoning_effort: None,
+                service_tier: None,
+                context_window: None,
+            };
+            let driver = DriverHandle::from_control(Arc::new(Control(updates.clone())))
+                .with_initial_options(options.clone());
+            let held = driver.prepare_prompt_options(options.clone()).unwrap();
+            let contender = driver.clone();
+            let cancelled = AtomicBool::new(false);
+            let (entered, entering) = crossbeam_channel::bounded(1);
+            let (finished, completion) = crossbeam_channel::bounded(1);
+            let (early, stopped) = std::thread::scope(|scope| {
+                let cancelled = &cancelled;
+                let attempt = scope.spawn(move || {
+                    let checks = std::sync::atomic::AtomicUsize::new(0);
+                    let is_cancelled = || {
+                        if checks.fetch_add(1, Ordering::Relaxed) == 0 {
+                            entered.send(()).unwrap();
+                            // Force entry into lock admission even if the test
+                            // thread signals Stop before this callback returns.
+                            false
+                        } else {
+                            cancelled.load(Ordering::Acquire)
+                        }
+                    };
+                    let mut selected = options;
+                    selected.model = Some("next".into());
+                    let stopped = if prompt {
+                        contender
+                            .prepare_prompt_options_with_cancellation(selected, &is_cancelled)
+                            .is_err_and(|error| error.is::<EnqueueStopped>())
+                    } else {
+                        !contender.apply_options_with_cancellation(selected, &is_cancelled)
+                    };
+                    finished.send(stopped).unwrap();
+                });
+                entering
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .unwrap();
+                cancelled.store(true, Ordering::Release);
+                let early = completion
+                    .recv_timeout(std::time::Duration::from_millis(250))
+                    .ok();
+                // Always release and join before asserting, also on regression.
+                drop(held);
+                let stopped = early.unwrap_or_else(|| {
+                    completion
+                        .recv_timeout(std::time::Duration::from_secs(5))
+                        .unwrap()
+                });
+                attempt.join().unwrap();
+                (early.is_some(), stopped)
+            });
+            assert!(
+                early,
+                "Stop waited for the configuration guard owner (prompt={prompt})"
+            );
+            assert!(stopped);
+            assert_eq!(updates.load(Ordering::Relaxed), 0);
+        }
     }
 }

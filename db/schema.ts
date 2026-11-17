@@ -124,6 +124,7 @@ export const sessions = sqliteTable(
      * confirmed.
      */
     configActivation: text("config_activation"),
+    taskConfiguration: text("task_configuration"),
     metadataRevision: integer("metadata_revision").notNull().default(0),
     historyGeneration: integer("history_generation").notNull().default(0),
   },
