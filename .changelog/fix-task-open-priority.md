@@ -1,0 +1,1 @@
+- Opening a desktop task no longer waits for unrelated background task loads to free a slot.

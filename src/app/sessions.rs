@@ -3,7 +3,7 @@ use super::*;
 const SESSION_NAVIGATION_WAIT: Duration = Duration::from_millis(100);
 
 /// One shared queue for navigation, runtime attachment and panel hydration.
-/// A visible task can overtake queued warmup, without duplicating an active read.
+/// Reserve one of the two read slots for the current selection.
 #[derive(Default)]
 pub(super) struct SessionHydrations {
     queued: VecDeque<Uuid>,
@@ -30,15 +30,12 @@ impl SessionHydrations {
         self.started.get(&session_id).copied()
     }
 
-    fn enqueue(&mut self, session_id: Uuid, visible: bool) {
+    fn enqueue(&mut self, session_id: Uuid) {
         if self.running.contains(&session_id) || self.retrying.contains(&session_id) {
             return;
         }
         self.started.entry(session_id).or_insert_with(Instant::now);
-        if visible {
-            self.queued.retain(|id| *id != session_id);
-            self.queued.push_front(session_id);
-        } else if !self.queued.contains(&session_id) {
+        if !self.queued.contains(&session_id) {
             self.queued.push_back(session_id);
         }
     }
@@ -61,11 +58,20 @@ impl SessionHydrations {
         delay
     }
 
-    fn next(&mut self) -> Option<Uuid> {
+    fn next(&mut self, visible: Option<Uuid>) -> Option<Uuid> {
         if self.running.len() >= 2 {
             return None;
         }
-        let id = self.queued.pop_front()?;
+        let visible_position =
+            visible.and_then(|id| self.queued.iter().position(|queued| *queued == id));
+        let id = if let Some(position) = visible_position {
+            self.queued.remove(position)?
+        } else if self.running.is_empty() || visible.is_some_and(|id| self.running.contains(&id)) {
+            self.queued.pop_front()?
+        } else {
+            // A background read already owns the warmup slot.
+            return None;
+        };
         self.running.insert(id);
         Some(id)
     }
@@ -205,28 +211,28 @@ mod startup_hydration_tests {
         let task = Uuid::new_v4();
         let other = Uuid::new_v4();
         let mut queue = SessionHydrations::default();
-        queue.enqueue(task, true);
+        queue.enqueue(task);
         let started = queue.since(task);
-        assert_eq!(queue.next(), Some(task));
+        assert_eq!(queue.next(Some(task)), Some(task));
         for millis in [250, 500, 1000, 2000, 4000, 8000, 8000] {
             assert_eq!(queue.retry(task), Duration::from_millis(millis));
             assert!(queue.contains(task));
             assert_eq!(queue.since(task), started);
-            queue.enqueue(task, true);
-            assert_eq!(queue.next(), None);
+            queue.enqueue(task);
+            assert_eq!(queue.next(Some(task)), None);
             // Waiting retries leave capacity for unrelated reads.
-            queue.enqueue(other, false);
-            assert_eq!(queue.next(), Some(other));
+            queue.enqueue(other);
+            assert_eq!(queue.next(Some(task)), Some(other));
             queue.complete(other);
             queue.retrying.remove(&task);
-            queue.enqueue(task, true);
-            assert_eq!(queue.next(), Some(task));
+            queue.enqueue(task);
+            assert_eq!(queue.next(Some(task)), Some(task));
         }
         queue.complete(task);
         assert!(!queue.contains(task));
         assert_eq!(queue.since(task), None);
-        queue.enqueue(task, true);
-        assert_eq!(queue.next(), Some(task));
+        queue.enqueue(task);
+        assert_eq!(queue.next(Some(task)), Some(task));
         assert_eq!(queue.retry(task), Duration::from_millis(250));
     }
 
@@ -240,29 +246,24 @@ mod startup_hydration_tests {
         ];
         let mut queue = SessionHydrations::default();
         for id in ids {
-            queue.enqueue(id, false);
+            queue.enqueue(id);
         }
-        assert_eq!(queue.next(), Some(ids[0]));
-        assert_eq!(queue.next(), Some(ids[1]));
-        assert_eq!(queue.next(), None);
+        assert_eq!(queue.next(None), Some(ids[0]));
+        assert_eq!(queue.next(None), None, "reserve a slot while warming up");
+        assert_eq!(queue.next(Some(ids[2])), Some(ids[2]));
+        assert_eq!(queue.next(Some(ids[3])), None, "bound concurrent reads");
 
-        // A click overtakes queued warmup. Repeated clicks on active and
-        // queued tasks still produce exactly one read per task.
-        queue.enqueue(ids[3], true);
-        queue.enqueue(ids[3], true);
-        queue.enqueue(ids[0], true);
-        queue.running.remove(&ids[0]);
-        assert_eq!(queue.next(), Some(ids[3]));
-        assert_eq!(queue.next(), None);
-        queue.running.remove(&ids[1]);
-        assert_eq!(queue.next(), Some(ids[2]));
-        queue.running.clear();
-        assert_eq!(queue.next(), None);
+        queue.enqueue(ids[0]);
+        queue.enqueue(ids[3]);
+        queue.complete(ids[2]);
+        assert_eq!(queue.next(Some(ids[3])), Some(ids[3]));
+        assert_eq!(queue.next(Some(ids[3])), None);
+        queue.complete(ids[0]);
+        assert_eq!(queue.next(Some(ids[3])), Some(ids[1]));
+        queue.complete(ids[1]);
+        queue.complete(ids[3]);
+        assert_eq!(queue.next(None), None, "no duplicate reads");
         assert!(!queue.contains(ids[0]));
-
-        // A completed or failed request can be explicitly retried.
-        queue.enqueue(ids[0], true);
-        assert_eq!(queue.next(), Some(ids[0]));
     }
 }
 
@@ -1149,19 +1150,17 @@ impl Waku {
             session.id == session_id
                 && (!session.detail_loaded || self.stale_task_details.contains(&session_id))
         }) {
-            self.session_hydrations.enqueue(
-                session_id,
-                self.state.selected_session == Some(session_id)
-                    || self
-                        .pending_session_activation
-                        .is_some_and(|pending| pending.session_id == session_id),
-            );
+            self.session_hydrations.enqueue(session_id);
             self.start_pending_session_hydrations(cx);
         }
     }
 
     fn start_pending_session_hydrations(&mut self, cx: &mut Context<Self>) {
-        while let Some(session_id) = self.session_hydrations.next() {
+        let visible = self
+            .pending_session_activation
+            .map(|pending| pending.session_id)
+            .or(self.state.selected_session);
+        while let Some(session_id) = self.session_hydrations.next(visible) {
             if !self.state.sessions.iter().any(|session| {
                 session.id == session_id
                     && (!session.detail_loaded || self.stale_task_details.contains(&session_id))
@@ -1206,6 +1205,7 @@ impl Waku {
                         Ok((mut session, interrupted_turn)) => {
                             waku.session_hydrations.complete(session_id);
                             if waku.sidebar_intents.task_removed(session_id) {
+                                waku.start_pending_session_hydrations(cx);
                                 return;
                             }
                             waku.pending_task_metadata.observe_raw(&session);
@@ -1365,13 +1365,7 @@ impl Waku {
                     .iter()
                     .any(|session| session.id == session_id && !session.detail_loaded)
                 {
-                    waku.session_hydrations.enqueue(
-                        session_id,
-                        waku.state.selected_session == Some(session_id)
-                            || waku
-                                .pending_session_activation
-                                .is_some_and(|pending| pending.session_id == session_id),
-                    );
+                    waku.session_hydrations.enqueue(session_id);
                 } else {
                     // A live snapshot or removal overtook the failed read.
                     waku.session_hydrations.complete(session_id);
