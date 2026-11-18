@@ -11289,6 +11289,53 @@ mod live_employee_approvals {
         });
     }
 
+    #[gpui::test]
+    fn rush_waits_for_queued_prompts_and_active_goals(cx: &mut gpui::TestAppContext) {
+        let (_env, _daemon, view, vcx, supervisor, ids) = two_employee_app(cx);
+        update_app(vcx, &view, |waku, window, cx| {
+            waku.state.selected_session = Some(ids.first);
+            waku.state.session_mut(ids.second).unwrap().service_tier = Some("fast".into());
+            waku.toggle_rush(ids.second, cx);
+            let mut runtime = attach_runtime(waku, &supervisor, ids.second, ids.second_runtime);
+            for step in 0..3 {
+                let session = waku.state.session_mut(ids.second).unwrap();
+                if session.active_turn_id().is_none() {
+                    session.begin_turn("Work");
+                }
+                session.status = SessionStatus::Working;
+                session.queued_messages.clear();
+                session.thread_goal = None;
+                if step == 0 {
+                    session.queued_messages.push(QueuedMessage::new("Follow up"));
+                } else if step == 1 {
+                    session.thread_goal = Some(crate::model::ThreadGoal {
+                        objective: "Finish the work".into(),
+                        status: crate::model::ThreadGoalStatus::Active,
+                        managed_since_message: None,
+                        managed_id: None,
+                        managed_last_turn: None,
+                        token_budget: None,
+                        tokens_used: 0,
+                        time_used_seconds: 0,
+                    });
+                }
+                assert!(waku.handle_driver_event(
+                    ids.second,
+                    &mut runtime,
+                    crate::model::DriverEvent::TurnFinished {
+                        success: true,
+                        summary: None,
+                        summary_i18n: None,
+                    },
+                    true,
+                    cx,
+                ));
+                waku.show_pending_rush(window, cx);
+                assert_eq!(waku.big_picture.rush_session_id(), (step == 2).then_some(ids.second));
+            }
+        });
+    }
+
     /// Two employees pinned atop the boss transcript: each card's click
     /// resolves its own session's request on its own runtime — the same
     /// named request id on a sibling is never touched.

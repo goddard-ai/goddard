@@ -1169,6 +1169,17 @@ impl Waku {
                 } else {
                     self.goal_observed_at.remove(&session_id);
                 }
+                let goal_stopped = self.state.sessions.iter().any(|session| {
+                    session.id == session_id
+                        && session.active_turn_id().is_none()
+                        && session.queued_messages.is_empty()
+                        && session.thread_goal.as_ref().is_some_and(|previous| {
+                            previous.status == crate::model::ThreadGoalStatus::Active
+                        })
+                        && goal.as_ref().is_some_and(|updated| {
+                            updated.status != crate::model::ThreadGoalStatus::Active
+                        })
+                });
                 if let Some(session) = self.state.session_mut(session_id) {
                     if let Some(goal) = &goal
                         && session.messages.is_empty()
@@ -1181,6 +1192,9 @@ impl Waku {
                         session.thread_goal = goal;
                         self.state.mark_session_dirty(session_id);
                     }
+                }
+                if goal_stopped {
+                    self.queue_rush_attention(session_id);
                 }
             }
             DriverEvent::UsageUpdated {
@@ -1397,12 +1411,18 @@ impl Waku {
                                     .is_some_and(|turn_id| Some(turn_id) == goal.managed_last_turn))
                     })
                 });
+                let continuing = success && finished.is_some_and(|session| {
+                    !session.queued_messages.is_empty()
+                        || session.thread_goal.as_ref().is_some_and(|goal| {
+                            goal.status == crate::model::ThreadGoalStatus::Active
+                        })
+                });
                 if !managed_goal_turn {
                     self.play_attention_sound(session_id);
                 }
                 // A turn settling off screen is an away-completion
                 // candidate; on screen it is simply read.
-                if allow_queue_drain {
+                if allow_queue_drain && !continuing {
                     self.queue_rush_attention(session_id);
                 }
                 self.note_voice_briefing_completion(session_id, cx);

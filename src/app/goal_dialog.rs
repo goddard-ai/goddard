@@ -476,6 +476,8 @@ impl Waku {
                 ComposerSubmission::hidden_prompt(prompt),
                 cx,
             );
+        } else {
+            self.queue_rush_attention(session_id);
         }
     }
 
