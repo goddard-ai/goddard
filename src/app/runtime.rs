@@ -8172,7 +8172,9 @@ impl Waku {
     /// Start the next queued follow-up as a fresh turn. Only called once a
     /// settled turn has been fully closed, so the session is Idle.
     pub(super) fn drain_queued_message(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        if self.response_fork_preparations.contains_key(&session_id) {
+        if self.response_fork_preparations.contains_key(&session_id)
+            || self.provider_switch_in_flight.contains(&session_id)
+        {
             return;
         }
         if self

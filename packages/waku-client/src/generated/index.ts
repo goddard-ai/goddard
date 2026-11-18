@@ -284,6 +284,7 @@ export type { ProviderSessionForkRequest } from "./ProviderSessionForkRequest";
 export type { ProviderSessionHistory } from "./ProviderSessionHistory";
 export type { ProviderSessionSummary } from "./ProviderSessionSummary";
 export type { ProviderSlice } from "./ProviderSlice";
+export type { ProviderSwitchRequest } from "./ProviderSwitchRequest";
 export type { PullOutcome } from "./PullOutcome";
 export type { PullRequestCheck } from "./PullRequestCheck";
 export type { PullRequestCheckStatus } from "./PullRequestCheckStatus";

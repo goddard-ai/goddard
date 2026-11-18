@@ -390,6 +390,26 @@ pub(super) fn deliver_agent_prompt(
     Ok(())
 }
 
+pub(super) fn latest_provider_switch(session: &AgentSession) -> Option<(Uuid, ProviderKind)> {
+    session
+        .messages
+        .iter()
+        .rev()
+        .find_map(|message| match &message.notice {
+            Some(crate::model::TranscriptNotice::ProviderSwitched { to, .. }) => {
+                Some((message.id, *to))
+            }
+            _ => None,
+        })
+}
+
+/// The desktop also sends the envelope for compatibility. Keep it staged on
+/// the daemon until the destination confirms its first turn.
+pub(super) fn has_provider_switch_handoff(session: &AgentSession) -> bool {
+    !session.boss_managed
+        && latest_provider_switch(session).is_some_and(|(_, provider)| provider == session.provider)
+}
+
 /// Mark daemon-owned context so submitted-prompt mirrors can keep it out of
 /// the human transcript while sending the complete text to the provider.
 pub(super) fn provider_context_block(context: &str) -> String {

@@ -429,6 +429,7 @@ impl Backend for WakuBackend {
             &request.command,
             Command::ApplySidebarIntent { .. }
                 | Command::UpdateTaskMetadata { .. }
+                | Command::SwitchSessionProvider { .. }
                 | Command::SaveTaskState { .. }
                 | Command::Boss {
                     operation: waku_protocol::boss::BossOperation::ArchiveDeliverable { .. }
@@ -1565,6 +1566,18 @@ impl Backend for WakuBackend {
                         // A delayed transcript save cannot undo a confirmed edit.
                         use waku_protocol::task_metadata::TaskMetadata;
                         if session.metadata_revision < existing.metadata_revision {
+                            let crossed_switch = session.detail_loaded
+                                && super::prompt_delivery::latest_provider_switch(existing)
+                                    .is_some_and(|committed| {
+                                        super::prompt_delivery::latest_provider_switch(&session)
+                                            != Some(committed)
+                                    });
+                            if session.provider != existing.provider || crossed_switch {
+                                // Keep the resume state that belongs to the committed switch.
+                                continue;
+                            }
+                        }
+                        if session.metadata_revision < existing.metadata_revision {
                             // Preparation assigns a draft's first worktree using
                             // a snapshot captured before unrelated metadata edits.
                             // That assignment is still valid; a delayed draft
@@ -1614,6 +1627,16 @@ impl Backend for WakuBackend {
                             session
                                 .reasoning_effort
                                 .clone_from(&existing.reasoning_effort);
+                        }
+                        if session.detail_loaded
+                            && session.provider == existing.provider
+                            && (session.pending_provider_context.is_some()
+                                || existing.pending_provider_context.is_some())
+                            && super::prompt_delivery::has_provider_switch_handoff(existing)
+                        {
+                            session
+                                .pending_provider_context
+                                .clone_from(&existing.pending_provider_context);
                         }
                         if events.task_views_enabled()
                             && session.detail_loaded
@@ -1968,6 +1991,13 @@ impl Backend for WakuBackend {
             Command::FindTranscript { request } => {
                 let result = self.find_transcript(request)?;
                 Ok(ResponsePayload::TranscriptFind { result })
+            }
+            Command::SwitchSessionProvider { request } => {
+                anyhow::ensure!(agent.is_none(), "provider switches require user authority");
+                let session = self.switch_session_provider(session_id, request, &events)?;
+                Ok(ResponsePayload::Session {
+                    session: Some(session),
+                })
             }
             Command::IndexSession => Ok(ResponsePayload::Ack),
             Command::SearchSessionMessages {
@@ -3249,6 +3279,17 @@ impl Backend for WakuBackend {
                     }
                 }
                 let mut command = command;
+                if let Command::Prompt { prompt, .. } = &mut command {
+                    let state = self.task_state.lock();
+                    if let Some(session) =
+                        state.sessions.iter().find(|entry| entry.id == session_id)
+                        && let Some(context) = session.pending_provider_context.as_deref()
+                        && super::prompt_delivery::has_provider_switch_handoff(session)
+                        && !prompt.starts_with(context)
+                    {
+                        *prompt = format!("{context}\n\n{prompt}");
+                    }
+                }
                 if let Command::Prompt { prompt, hidden, .. } = &mut command
                     && !*hidden
                 {

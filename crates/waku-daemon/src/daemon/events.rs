@@ -138,6 +138,11 @@ pub(super) fn record_event_with_prompt(
             }
         }
         DriverEvent::TurnStarted => {
+            if session.pending_provider_context.is_some()
+                && super::prompt_delivery::has_provider_switch_handoff(session)
+            {
+                session.pending_provider_context = None;
+            }
             if session.active_turn_id().is_none() {
                 session.begin_provider_turn();
             }

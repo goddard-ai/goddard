@@ -71,6 +71,16 @@ impl WakuBackend {
                 !self.removed_session_ids.lock().contains(&session_id),
                 "task {session_id} was removed"
             );
+            // Older saves could pair a new provider with the outgoing
+            // provider's cursor. Open a fresh thread with transcript access.
+            if options
+                .provider_cursor
+                .as_ref()
+                .is_some_and(|cursor| cursor.provider() != provider)
+            {
+                options.provider_cursor = None;
+                options.read_own_transcript = true;
+            }
             if provider == ProviderKind::Codex {
                 let mut state = self.task_state.lock();
                 if let Some(session) = state.sessions.iter_mut().find(|s| s.id == session_id)

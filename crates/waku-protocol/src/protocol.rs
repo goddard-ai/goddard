@@ -439,6 +439,9 @@ pub enum Command {
     UpdateTaskMetadata {
         updates: Vec<crate::task_metadata::TaskMetadataUpdate>,
     },
+    SwitchSessionProvider {
+        request: ProviderSwitchRequest,
+    },
     SaveTaskState {
         projects: Vec<Project>,
         live_session_ids: Vec<Uuid>,
@@ -1208,6 +1211,18 @@ pub struct WireSessionOptions {
 pub struct PromptConfiguration {
     pub provider: ProviderKind,
     pub options: crate::model::SessionOptions,
+}
+
+/// Commit a desktop handoff against the transcript used to prepare it.
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderSwitchRequest {
+    pub source: ProviderKind,
+    pub history_generation: u64,
+    pub boundary: crate::model::TranscriptBoundary,
+    pub configuration: PromptConfiguration,
+    pub resume_cursor: Option<ProviderResumeCursor>,
+    pub handoff: String,
 }
 
 /// The user's transcript text and inline presentation, when the provider

@@ -1,6 +1,155 @@
+use anyhow::ensure;
+
 use super::*;
 
 impl WakuBackend {
+    pub(super) fn switch_session_provider(
+        &self,
+        session_id: Uuid,
+        request: waku_protocol::ProviderSwitchRequest,
+        events: &EventSink,
+    ) -> anyhow::Result<AgentSession> {
+        let lifecycle = self.runtime_lifecycles.session(session_id);
+        let _owner = lifecycle.lock();
+        ensure!(
+            self.boss.employee_including_retired(session_id).is_none(),
+            "employee provider changes are handled by the Boss"
+        );
+        let mut state = self.task_state.lock();
+        let index = state
+            .sessions
+            .iter()
+            .position(|session| session.id == session_id)
+            .context("the task is unavailable")?;
+        let existing = &mut state.sessions[index];
+        self.task_store.hydrate(existing)?;
+        ensure!(!existing.is_busy(), "the task is busy");
+        ensure!(existing.archived_at.is_none(), "the task is archived");
+        ensure!(
+            existing.provider == request.source
+                && existing.history_generation == request.history_generation
+                && existing.transcript_boundary() == request.boundary,
+            "the task changed while the provider handoff was prepared"
+        );
+        let target = request.configuration.provider;
+        ensure!(
+            target != request.source,
+            "the task already uses this provider"
+        );
+        let mut switched = existing.clone();
+        let suspended = &mut switched.suspended_provider_sessions;
+        let target_entry = suspended.iter().find(|entry| entry.provider == target);
+        if let Some(cursor) = &request.resume_cursor {
+            ensure!(
+                cursor.provider() == target
+                    && target_entry.is_some_and(|entry| &entry.cursor == cursor),
+                "the target provider's resume cursor changed"
+            );
+        }
+        let restarted = target_entry.is_some() && request.resume_cursor.is_none();
+        suspended.retain(|entry| entry.provider != target);
+        if let Some(cursor) = switched.provider_cursor.take()
+            && cursor.provider() != target
+        {
+            let provider = cursor.provider();
+            suspended.retain(|entry| entry.provider != provider);
+            suspended.push(crate::model::SuspendedProviderSession {
+                provider,
+                cursor,
+                boundary: request.boundary,
+            });
+        }
+        switched.preserve_title_for_provider_switch();
+        waku_protocol::task_metadata::TaskMetadataEdit::Configuration {
+            configuration: request.configuration,
+            auto_route: false,
+            route_decision: None,
+        }
+        .apply(&mut switched);
+        switched.provider_cursor = request.resume_cursor;
+        switched.provider_session_id = None;
+        switched.pending_model_switch = None;
+        switched.agent_preset = None;
+        switched.available_commands.clear();
+        switched.context_usage = None;
+        switched.runtime_event_cursor = None;
+        switched.pending_provider_context = Some(request.handoff);
+        for message in &mut switched.queued_messages {
+            if !message.is_agent_owned() {
+                message.configuration = None;
+            }
+        }
+        let from = request.source.display_name();
+        let to = target.display_name();
+        switched.push_notice_message(
+            crate::model::MessageRole::System,
+            if restarted {
+                tr!(
+                    "transcript.provider_switched_restarted",
+                    from = from,
+                    to = to
+                )
+            } else {
+                tr!("transcript.provider_switched", from = from, to = to)
+            },
+            crate::model::TranscriptNotice::ProviderSwitched {
+                from: request.source,
+                to: target,
+                restarted,
+            },
+        );
+        switched.updated_at = switched.updated_at.max(crate::model::unix_time());
+        switched.metadata_revision = switched
+            .metadata_revision
+            .checked_add(1)
+            .filter(|revision| *revision <= i64::MAX as u64)
+            .context("task metadata revision exhausted")?;
+
+        // A surviving provider host needs a confirmed stop before it can
+        // admit a different provider under the same task.
+        if self.task_store.stable_link(session_id)?.is_some() {
+            let driver = self
+                .sessions
+                .lock()
+                .get(&session_id)
+                .filter(|entry| entry.stable.is_some())
+                .map(|entry| entry.driver.clone())
+                .context("the surviving provider runtime must be attached before switching")?;
+            driver.delete_provider_session();
+            ensure!(
+                self.task_store.stable_link(session_id)?.is_none(),
+                "the provider runtime did not confirm it stopped"
+            );
+        }
+
+        let previous = std::mem::replace(existing, switched);
+        state.mark_session_dirty(session_id);
+        if let Err(error) = self.task_store.save(&mut state) {
+            state.sessions[index] = previous;
+            return Err(error).context("could not save the provider switch");
+        }
+        let switched = &state.sessions[index];
+        let mut reply = switched.list_projection();
+        reply.provider_cursor.clone_from(&switched.provider_cursor);
+        reply
+            .suspended_provider_sessions
+            .clone_from(&switched.suspended_provider_sessions);
+        reply
+            .pending_provider_context
+            .clone_from(&switched.pending_provider_context);
+        reply.messages.extend(switched.messages.last().cloned());
+        drop(state);
+
+        let removed = self.remove_runtime(session_id, None, false);
+        if let Some(entry) = &removed {
+            let sink = events.for_session(session_id, entry.runtime_id);
+            sink.notify_runtime_ended();
+            sink.end_session_runtime();
+        }
+        drop_detached(removed);
+        Ok(reply)
+    }
+
     /// Fork a response using only daemon-host state.
     ///
     /// A browser must never reconstruct or persist this operation itself:

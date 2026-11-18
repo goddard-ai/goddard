@@ -79,6 +79,175 @@ fn configured(session_id: Uuid, runtime_id: Uuid, model: &str) -> Request {
 }
 
 #[test]
+fn provider_switch_survives_reload_stale_saves_and_return_to_devin() {
+    let root = std::env::temp_dir().join(format!("provider-switch-{}", Uuid::new_v4()));
+    let (backend, session_id) = surface_test_backend(&root);
+    let devin = ProviderResumeCursor::Devin {
+        session_id: "devin-conversation".into(),
+    };
+    let source = {
+        let mut state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter_mut()
+            .find(|s| s.id == session_id)
+            .unwrap();
+        backend.task_store.hydrate(session).unwrap();
+        session.provider = ProviderKind::Devin;
+        session.provider_cursor = Some(devin.clone());
+        state.mark_session_dirty(session_id);
+        backend.task_store.save(&mut state).unwrap();
+        state
+            .sessions
+            .iter()
+            .find(|s| s.id == session_id)
+            .unwrap()
+            .clone()
+    };
+    let outgoing = Arc::new(CaptureDriver::default());
+    backend.sessions.lock().insert(
+        session_id,
+        runtime_generation_entry(Uuid::new_v4(), outgoing.clone(), &root),
+    );
+    let request = |backend: &WakuBackend, command| {
+        backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id,
+                    runtime_id: Uuid::nil(),
+                    command,
+                },
+                EventSink::detached(),
+                None,
+            )
+            .unwrap()
+    };
+    let switch = |backend: &WakuBackend, source: &AgentSession, provider, resume_cursor| {
+        request(
+            backend,
+            Command::SwitchSessionProvider {
+                request: waku_protocol::ProviderSwitchRequest {
+                    source: source.provider,
+                    history_generation: source.history_generation,
+                    boundary: source.transcript_boundary(),
+                    configuration: waku_protocol::PromptConfiguration {
+                        provider,
+                        options: options("selected"),
+                    },
+                    resume_cursor,
+                    handoff: "previous conversation".into(),
+                },
+            },
+        )
+    };
+    let ResponsePayload::Session {
+        session: Some(reply),
+    } = switch(&backend, &source, ProviderKind::Codex, None)
+    else {
+        panic!("expected committed switch");
+    };
+    assert!(reply.provider_cursor.is_none());
+    assert_eq!(*outgoing.shutdowns.lock(), 1);
+    assert_eq!(
+        reply.messages.len(),
+        1,
+        "switch reply carries only the notice"
+    );
+
+    for stale in [source.list_projection(), source.clone()] {
+        request(
+            &backend,
+            Command::SaveTaskState {
+                projects: Vec::new(),
+                live_session_ids: vec![session_id],
+                sessions: vec![stale],
+                session_tails: Vec::new(),
+            },
+        );
+    }
+    drop(backend);
+
+    let mut reopened = WakuBackend::new(
+        DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+        StateStore::daemon(root.join("app.db")),
+    )
+    .unwrap();
+    let hydrate = |backend: &WakuBackend| {
+        let ResponsePayload::Session {
+            session: Some(session),
+        } = request(backend, Command::HydrateSession { session_id })
+        else {
+            panic!("expected saved session");
+        };
+        session
+    };
+    let codex = hydrate(&reopened);
+    assert_eq!(codex.provider, ProviderKind::Codex);
+    assert!(codex.provider_cursor.is_none());
+    assert_eq!(codex.messages.len(), source.messages.len() + 1);
+    assert_eq!(codex.suspended_provider_sessions[0].cursor, devin);
+    assert_eq!(
+        codex.suspended_provider_sessions[0].boundary,
+        source.transcript_boundary()
+    );
+    assert_eq!(
+        codex.pending_provider_context.as_deref(),
+        Some("previous conversation")
+    );
+
+    runtime_generation_configure_launch(&mut reopened, &root);
+    let capture = Arc::new(CaptureDriver::default());
+    let launched = capture.clone();
+    reopened.runtime_test_start = Some(Arc::new(move |provider, options, _| {
+        assert_eq!(provider, ProviderKind::Codex);
+        assert!(options.provider_cursor.is_none());
+        Ok(DriverHandle::from_control(launched.clone()))
+    }));
+    let events = EventSink::detached();
+    let (runtime_id, _) = reopened.ensure_agent_runtime(session_id, &events).unwrap();
+    let mut prompt = configured(session_id, runtime_id, "selected");
+    let Command::PromptWithConfiguration { configuration, .. } = &mut prompt.command else {
+        unreachable!();
+    };
+    *configuration = waku_protocol::PromptConfiguration::for_session(&codex);
+    reopened.handle(prompt, events.clone(), None).unwrap();
+    assert_eq!(
+        *capture.prompts.lock(),
+        ["previous conversation\n\nuse the selected settings"]
+    );
+    for event in [
+        DriverEvent::TurnStarted,
+        DriverEvent::TurnFinished {
+            success: true,
+            summary: None,
+            summary_i18n: None,
+        },
+    ] {
+        record_boss_event(
+            &reopened.task_state,
+            &reopened.task_store,
+            session_id,
+            &event,
+        )
+        .unwrap();
+    }
+    let codex = hydrate(&reopened);
+    assert!(codex.pending_provider_context.is_none());
+
+    let ResponsePayload::Session {
+        session: Some(reply),
+    } = switch(&reopened, &codex, ProviderKind::Devin, Some(devin.clone()))
+    else {
+        panic!("expected committed return switch");
+    };
+    assert_eq!(reply.provider_cursor, Some(devin));
+    assert!(hydrate(&reopened).suspended_provider_sessions.is_empty());
+    drop(reopened);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn configured_prompts_validate_settings_and_reject_partial_updates_before_execution() {
     let root = std::env::temp_dir().join(format!("configured-prompts-{}", Uuid::new_v4()));
     let (mut backend, session_id) = surface_test_backend(&root);

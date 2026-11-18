@@ -1,0 +1,1 @@
+- Fixed a startup error when switching providers in an existing task, and preserved the prior conversation so you can switch back after reopening the task.

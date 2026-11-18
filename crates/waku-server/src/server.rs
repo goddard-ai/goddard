@@ -3728,6 +3728,7 @@ fn command_targets_runtime(command: &Command) -> bool {
             | Command::Rollback { .. }
             | Command::Fork { .. }
             | Command::ForkSessionFromResponse { .. }
+            | Command::SwitchSessionProvider { .. }
             | Command::RewindSessionToMessage { .. }
             | Command::OpenTerminal { .. }
             | Command::OpenCommandTerminal { .. }
@@ -3856,9 +3857,16 @@ fn run_runtime_mailbox(
         );
         let closes_runtime = matches!(
             &dispatched.request.command,
-            Command::CloseSession | Command::CloseTerminal | Command::RemoveSession
+            Command::CloseSession
+                | Command::CloseTerminal
+                | Command::RemoveSession
+                | Command::SwitchSessionProvider { .. }
         );
         let removes_session = matches!(&dispatched.request.command, Command::RemoveSession);
+        let switches_provider = matches!(
+            &dispatched.request.command,
+            Command::SwitchSessionProvider { .. }
+        );
         let cancellation = Arc::new(RuntimeCancellation {
             signalled_operation: dispatched.signalled_operation,
             ..RuntimeCancellation::default()
@@ -3891,11 +3899,14 @@ fn run_runtime_mailbox(
                 // that survived its previous actor worker.
                 active_runtime_id = Some(*attached_runtime_id);
             } else if closes_runtime {
-                if (removes_session || active_runtime_id == Some(runtime_id))
-                    && matches!(&handled.outcome, ResponseOutcome::Ok { .. })
-                {
-                    hub.end_runtime(session_id, (!removes_session).then_some(runtime_id));
-                    active_runtime_id = None;
+                if matches!(&handled.outcome, ResponseOutcome::Ok { .. }) {
+                    if switches_provider {
+                        // The backend already retired the old runtime under its lifecycle lock.
+                        active_runtime_id = None;
+                    } else if removes_session || active_runtime_id == Some(runtime_id) {
+                        hub.end_runtime(session_id, (!removes_session).then_some(runtime_id));
+                        active_runtime_id = None;
+                    }
                 }
             } else if active_runtime_id.is_none()
                 && !matches!(
@@ -4155,6 +4166,7 @@ fn command_kind(command: &Command) -> &'static str {
         Command::SaveTaskState { .. } => "saveTaskState",
         Command::ApplySidebarIntent { .. } => "applySidebarIntent",
         Command::UpdateTaskMetadata { .. } => "updateTaskMetadata",
+        Command::SwitchSessionProvider { .. } => "switchSessionProvider",
         Command::RemoveSession => "removeSession",
         Command::RemoveProject { .. } => "removeProject",
         Command::RefreshSessionHistory => "refreshSessionHistory",
@@ -4418,6 +4430,7 @@ fn task_catalog_action(command: &Command) -> TaskCatalogAction {
             | waku_protocol::boss::BossOperation::Rename { .. } }
         | Command::ApplySidebarIntent { .. }
         | Command::UpdateTaskMetadata { .. }
+        | Command::SwitchSessionProvider { .. }
         | Command::RemoveSession
         | Command::ForkSessionFromResponse { .. }
         | Command::RewindSessionToMessage { .. }
