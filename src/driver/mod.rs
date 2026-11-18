@@ -370,6 +370,7 @@ impl DriverControl for RemoteDriverControl {
         message_id: Option<uuid::Uuid>,
         hidden: bool,
         attachments: Vec<waku_protocol::model::MessageAttachment>,
+        presentation: Option<waku_protocol::PromptPresentation>,
     ) -> anyhow::Result<waku_client::PendingRequest> {
         let client = self.client.lock().clone();
         client.begin_request(
@@ -382,6 +383,7 @@ impl DriverControl for RemoteDriverControl {
                 message_id,
                 hidden,
                 attachments,
+                presentation,
             },
         )
     }

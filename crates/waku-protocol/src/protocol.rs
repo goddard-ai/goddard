@@ -239,6 +239,8 @@ pub enum Command {
         hidden: bool,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         attachments: Vec<MessageAttachment>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        presentation: Option<PromptPresentation>,
     },
     Prompt {
         prompt: String,
@@ -1206,6 +1208,19 @@ pub struct WireSessionOptions {
 pub struct PromptConfiguration {
     pub provider: ProviderKind,
     pub options: crate::model::SessionOptions,
+}
+
+/// The user's transcript text and inline presentation, when the provider
+/// receives expanded text or the composer displays rich content.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptPresentation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_content: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub atoms: Vec<crate::model::MessageAtom>,
 }
 
 impl PromptConfiguration {

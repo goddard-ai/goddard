@@ -1,0 +1,1 @@
+- Reopening a task preserves how your prompt was written, including pasted-text chips and task references, when the provider received an expanded version.

@@ -368,7 +368,7 @@ impl Backend for WakuBackend {
             runtime_id,
             command,
         } = request;
-        let (command, prompt_configuration) = match command {
+        let (command, prompt_configuration, prompt_presentation) = match command {
             Command::PromptWithConfiguration {
                 configuration,
                 prompt,
@@ -376,6 +376,7 @@ impl Backend for WakuBackend {
                 message_id,
                 hidden,
                 attachments,
+                presentation,
             } => (
                 Command::Prompt {
                     runtime_mode: Some(configuration.options.mode),
@@ -386,8 +387,9 @@ impl Backend for WakuBackend {
                     attachments,
                 },
                 Some(configuration),
+                if hidden { None } else { presentation },
             ),
-            command => (command, None),
+            command => (command, None, None),
         };
         let request = Request {
             request_id,
@@ -3139,8 +3141,12 @@ impl Backend for WakuBackend {
                         "Boss coordination is fenced while an ownership transition is reconciled"
                     );
                     let submitted_message_id = message_id.unwrap_or_else(Uuid::new_v4);
+                    let transcript_prompt = prompt_presentation
+                        .as_ref()
+                        .and_then(|presentation| presentation.content.as_ref())
+                        .unwrap_or(prompt);
                     let submitted = DriverEvent::PromptSubmitted {
-                        message: prompt.clone(),
+                        message: transcript_prompt.clone(),
                         turn_id: turn_id.unwrap_or_else(Uuid::new_v4),
                         message_id: submitted_message_id,
                         sent_by_task: None,
@@ -3148,12 +3154,13 @@ impl Backend for WakuBackend {
                         report_trigger: None,
                         reference_context: None,
                     };
-                    record_event_with_attachments(
+                    record_event_with_prompt(
                         &self.task_state,
                         &self.task_store,
                         session_id,
                         &submitted,
                         attachments,
+                        prompt_presentation.as_ref(),
                     )?;
                     if let DriverEvent::PromptSubmitted {
                         turn_id,

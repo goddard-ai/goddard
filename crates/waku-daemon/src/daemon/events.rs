@@ -15,17 +15,17 @@ pub(super) fn record_boss_event(
     session_id: Uuid,
     event: &DriverEvent,
 ) -> anyhow::Result<()> {
-    record_event_with_attachments(task_state, task_store, session_id, event, &[])
+    record_event_with_prompt(task_state, task_store, session_id, event, &[], None)
 }
 
-/// Persist composer attachments with the submission, before publishing it.
-/// A client save may never arrive, and a provider echo carries only text.
-pub(super) fn record_event_with_attachments(
+/// Persist composer presentation with the submission, before publishing it.
+pub(super) fn record_event_with_prompt(
     task_state: &Mutex<PersistedState>,
     task_store: &StateStore,
     session_id: Uuid,
     event: &DriverEvent,
     attachments: &[crate::model::MessageAttachment],
+    presentation: Option<&waku_protocol::PromptPresentation>,
 ) -> anyhow::Result<()> {
     use crate::model::{ActivityItem, MessageRole, ReasoningBlock, TranscriptBlock};
     let mut state = task_state.lock();
@@ -108,6 +108,12 @@ pub(super) fn record_event_with_attachments(
                 .find(|message| message.id == *message_id)
             {
                 prompt.reference_context = reference_context.clone();
+                if let Some(presentation) = presentation {
+                    prompt
+                        .display_content
+                        .clone_from(&presentation.display_content);
+                    prompt.atoms.clone_from(&presentation.atoms);
+                }
                 if !attachments.is_empty() {
                     prompt.attachments = attachments.to_vec();
                     // The composer appends exact mention strings. Strip only
@@ -1525,12 +1531,13 @@ mod attachment_tests {
             report_trigger: None,
             reference_context: None,
         };
-        record_event_with_attachments(
+        record_event_with_prompt(
             &backend.task_state,
             &backend.task_store,
             session_id,
             &submitted,
             std::slice::from_ref(&attachment),
+            None,
         )
         .unwrap();
         // A later text-only echo must keep the durable attachment record.

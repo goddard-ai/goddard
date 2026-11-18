@@ -110,6 +110,7 @@ impl DriverHandle {
         message_id: Option<Uuid>,
         hidden: bool,
         attachments: Vec<MessageAttachment>,
+        presentation: Option<waku_protocol::PromptPresentation>,
     ) -> anyhow::Result<crate::PendingRequest> {
         self.inner.prompt_with_configuration(
             prompt,
@@ -118,6 +119,7 @@ impl DriverHandle {
             message_id,
             hidden,
             attachments,
+            presentation,
         )
     }
 
@@ -241,6 +243,7 @@ pub trait DriverControl: Send + Sync {
         _message_id: Option<Uuid>,
         _hidden: bool,
         _attachments: Vec<MessageAttachment>,
+        _presentation: Option<waku_protocol::PromptPresentation>,
     ) -> anyhow::Result<crate::PendingRequest> {
         anyhow::bail!("this transport cannot enforce the selected prompt settings")
     }

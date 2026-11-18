@@ -206,6 +206,7 @@ fn probe(configured_prompt: bool, same_connection: bool) -> Observation {
             message_id: Some(Uuid::new_v4()),
             hidden: false,
             attachments: Vec::new(),
+            presentation: None,
         }
     } else {
         Command::ApplyOptions {

@@ -9429,6 +9429,16 @@ impl Waku {
                 let sent_configuration = configuration.as_ref().ok().cloned();
                 let hidden = submission.hidden;
                 let attachments = submission.attachments.clone();
+                let presentation = (!hidden
+                    && (driver_prompt != submission.prompt
+                        || submission.display_content.is_some()
+                        || !submission.message_atoms.is_empty()))
+                .then(|| waku_client::PromptPresentation {
+                    content: (driver_prompt != submission.prompt)
+                        .then(|| submission.prompt.clone()),
+                    display_content: submission.display_content.clone(),
+                    atoms: submission.message_atoms.clone(),
+                });
                 let owner = driver.clone();
                 // Enqueue on the caller's turn so a later Stop or Close
                 // cannot be overtaken by a delayed background send.
@@ -9440,6 +9450,7 @@ impl Waku {
                         message_id,
                         hidden,
                         attachments,
+                        presentation,
                     )
                 });
                 cx.spawn(async move |waku, cx| {

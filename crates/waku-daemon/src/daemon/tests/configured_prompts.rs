@@ -73,6 +73,7 @@ fn configured(session_id: Uuid, runtime_id: Uuid, model: &str) -> Request {
             message_id: None,
             hidden: false,
             attachments: Vec::new(),
+            presentation: None,
         },
     }
 }
@@ -164,6 +165,60 @@ fn configured_prompts_validate_settings_and_reject_partial_updates_before_execut
         [Some("initial".into()), Some("latest".into())]
     );
     assert_eq!(capture.applications.load(Ordering::Relaxed), 3);
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn configured_prompt_presentation_survives_reload_without_a_desktop_save() {
+    let root = std::env::temp_dir().join(format!("prompt-presentation-{}", Uuid::new_v4()));
+    let (backend, session_id) = surface_test_backend(&root);
+    backend.task_state.lock().sessions[0].provider = ProviderKind::Claude;
+    let runtime_id = Uuid::new_v4();
+    let capture = Arc::new(CaptureDriver::default());
+    let mut entry = runtime_generation_entry(runtime_id, capture.clone(), &root);
+    entry.provider = ProviderKind::Claude;
+    entry.mode = RuntimeMode::FullAccess;
+    entry.driver =
+        DriverHandle::from_control(capture.clone()).with_initial_options(options("initial"));
+    backend.sessions.lock().insert(session_id, entry);
+
+    let mut request = configured(session_id, runtime_id, "initial");
+    let message = Uuid::new_v4();
+    let atoms = vec![crate::model::MessageAtom {
+        label: "pasted text".into(),
+        payload: "original material".into(),
+        session_id: None,
+    }];
+    let Command::PromptWithConfiguration {
+        prompt,
+        message_id,
+        presentation,
+        ..
+    } = &mut request.command
+    else {
+        unreachable!()
+    };
+    *message_id = Some(message);
+    *prompt = "expanded provider input".into();
+    *presentation = Some(waku_protocol::PromptPresentation {
+        content: Some("typed transcript text".into()),
+        display_content: Some("displayed text".into()),
+        atoms: atoms.clone(),
+    });
+    assert!(matches!(
+        backend
+            .handle(request, EventSink::detached(), None)
+            .unwrap(),
+        ResponsePayload::Ack
+    ));
+    assert_eq!(&*capture.prompts.lock(), &["expanded provider input"]);
+    let reopened = StateStore::daemon(root.join("app.db"));
+    let session = reopened.load_session_detail(session_id).unwrap().unwrap();
+    let submitted = session.messages.iter().find(|m| m.id == message).unwrap();
+    assert_eq!(submitted.content, "typed transcript text");
+    assert_eq!(submitted.visible_content(), "displayed text");
+    assert_eq!(submitted.atoms, atoms);
     drop(backend);
     std::fs::remove_dir_all(root).unwrap();
 }

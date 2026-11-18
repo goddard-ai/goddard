@@ -270,6 +270,7 @@ export type { ProjectSelector } from "./ProjectSelector";
 export type { ProjectSelectorFields } from "./ProjectSelectorFields";
 export type { ProjectSlice } from "./ProjectSlice";
 export type { PromptConfiguration } from "./PromptConfiguration";
+export type { PromptPresentation } from "./PromptPresentation";
 export type { ProviderAgentPreset } from "./ProviderAgentPreset";
 export type { ProviderDay } from "./ProviderDay";
 export type { ProviderKind } from "./ProviderKind";
