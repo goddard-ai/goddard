@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 use uuid::Uuid;
-use waku_protocol::{Command, ResponsePayload, resources::*};
+use waku_protocol::{Command, ResponsePayload, RpcError, RpcErrorCode, resources::*};
 
 static INTERRUPTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 #[cfg(unix)]
@@ -45,6 +45,13 @@ fn request(operation: ResourceOperation) -> Result<ResourceStatus> {
         other => bail!("unexpected resource response: {other:?}"),
     }
 }
+
+fn is_admission_busy(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<RpcError>()
+        .is_some_and(|rpc| rpc.code == Some(RpcErrorCode::AdmissionBusy))
+}
+
 fn reservation(status: &ResourceStatus, id: Uuid) -> Result<&Reservation> {
     status
         .reservations
@@ -108,7 +115,13 @@ fn acquire(mut payload: Acquire, holder_pid: u32) -> Result<(Uuid, bool)> {
             bail!("resource wait timed out [request {id}]");
         }
         std::thread::sleep(Duration::from_millis(500));
-        status = request(ResourceOperation::Status { id: Some(id) })?;
+        match request(ResourceOperation::Status { id: Some(id) }) {
+            Ok(next) => status = next,
+            // The poll never ran. Keep waiting on the same reservation
+            // and let the usual interruption and timeout checks cancel it.
+            Err(error) if is_admission_busy(&error) => continue,
+            Err(error) => return Err(error),
+        }
     }
 }
 
@@ -220,7 +233,6 @@ fn run(id: Uuid, borrowed: bool, argv: Vec<String>) -> Result<()> {
         os::unix::{fs::DirBuilderExt, process::CommandExt},
         process::Command,
     };
-    use waku_protocol::{RpcError, RpcErrorCode};
     if borrowed {
         // The outer process group and supervisor already cover the nested command.
         let status = Command::new(&argv[0]).args(&argv[1..]).status()?;
@@ -275,9 +287,7 @@ fn run(id: Uuid, borrowed: bool, argv: Vec<String>) -> Result<()> {
                 Err(error)
                     if !interrupted()
                         && Instant::now() < admission_deadline
-                        && error
-                            .downcast_ref::<RpcError>()
-                            .is_some_and(|rpc| rpc.code == Some(RpcErrorCode::AdmissionBusy)) =>
+                        && is_admission_busy(&error) =>
                 {
                     // A pre-execution refusal is not loss of ownership. Keep
                     // the old admission tolerance while checking completion

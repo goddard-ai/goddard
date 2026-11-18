@@ -23,6 +23,7 @@ struct State {
     actions: Vec<String>,
     cancel: bool,
     deny_attach: bool,
+    park_acquire: bool,
     status_errors: VecDeque<RpcError>,
 }
 struct Daemon {
@@ -105,6 +106,7 @@ impl Daemon {
                         } else {
                             let next = Uuid::new_v4();
                             id = Some(next);
+                            let granted_at = (!state.park_acquire).then_some(1);
                             state.reservations.push(Reservation {
                                 id: next,
                                 task: request.session_id,
@@ -119,7 +121,7 @@ impl Daemon {
                                 requested_at: 1,
                                 duration_seconds: 0,
                                 deadline: u64::from(wait_seconds),
-                                granted_at: Some(1),
+                                granted_at,
                                 cancelled: false,
                                 released: false,
                                 admission: None,
@@ -159,6 +161,13 @@ impl Daemon {
                         state.actions.push("status".into());
                         status_error = state.status_errors.pop_front();
                         id = requested;
+                        if state.park_acquire
+                            && status_error.is_none()
+                            && let Some(r) =
+                                state.reservations.iter_mut().find(|r| Some(r.id) == id)
+                        {
+                            r.granted_at = Some(2);
+                        }
                         if state.cancel {
                             for r in &mut state.reservations {
                                 r.cancelled = true;
@@ -222,6 +231,41 @@ impl Drop for Daemon {
         self.stop.store(true, Ordering::Release);
         let _ = self.thread.take().unwrap().join();
     }
+}
+
+#[test]
+fn acquire_keeps_polling_the_same_reservation_after_admission_busy() {
+    let daemon = Daemon::start();
+    {
+        let mut state = daemon.state.lock().unwrap();
+        state.park_acquire = true;
+        state
+            .status_errors
+            .push_back(RpcError::admission_busy("test overload"));
+    }
+    let output = daemon
+        .cli()
+        .args([
+            "resource",
+            "acquire",
+            "--output",
+            "json",
+            "--json",
+            r#"{"resources":{"native_builds":1},"purpose":"queued test","wait_seconds":10}"#,
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let reply: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let state = daemon.state.lock().unwrap();
+    assert_eq!(state.actions, ["acquire", "status", "status"]);
+    assert_eq!(state.reservations.len(), 1);
+    assert_eq!(reply["id"], state.reservations[0].id.to_string());
+    assert_eq!(state.reservations[0].granted_at, Some(2));
 }
 const PAYLOAD: &str = r#"{"resources":{"native_builds":1},"purpose":"simulated native build"}"#;
 

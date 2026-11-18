@@ -22,6 +22,7 @@ use uuid::Uuid;
 use waku_base::request_timing::PhaseCapture;
 
 use waku_protocol::event_to_wire;
+use waku_protocol::resources::ResourceOperation;
 use waku_protocol::workspace::WorkspaceOperation;
 
 use waku_protocol::MAX_WIRE_MESSAGE_BYTES;
@@ -64,6 +65,9 @@ const HEAVY_REQUEST_WORKERS: usize = 3;
 const HEAVY_REQUEST_QUEUE: usize = 24;
 const FILE_TREE_REQUEST_WORKERS: usize = 1;
 const FILE_TREE_REQUEST_QUEUE: usize = 8;
+const RESOURCE_REQUEST_WORKERS: usize = 2;
+const RESOURCE_REQUEST_QUEUE: usize = 24;
+const RESOURCE_CLEANUP_REQUEST_QUEUE: usize = 24;
 /// A request may wait this long for bounded pool capacity before receiving a
 /// busy response. While it waits, its connection keeps reading other requests.
 const POOL_SUBMIT_WAIT: Duration = Duration::from_secs(5);
@@ -551,16 +555,20 @@ impl Drop for DeferredAdmissionSlot {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum RequestPoolKind {
-    Heavy,
+    Heavy = 0,
     Control,
     LongControl,
     Health,
     Navigation,
     FileTree,
     TaskSave,
+    Resource,
+    ResourceCleanup,
 }
 
 impl RequestPoolKind {
+    const COUNT: usize = Self::ResourceCleanup as usize + 1;
+
     fn pool(self, dispatcher: &RequestDispatcher) -> &IndependentRequestPool {
         match self {
             Self::Heavy => &dispatcher.heavy_requests,
@@ -570,24 +578,22 @@ impl RequestPoolKind {
             Self::Navigation => &dispatcher.navigation_requests,
             Self::FileTree => &dispatcher.file_tree_requests,
             Self::TaskSave => &dispatcher.task_save_requests,
+            Self::Resource => &dispatcher.resource_requests,
+            Self::ResourceCleanup => &dispatcher.resource_cleanup_requests,
         }
     }
 
     const fn index(self) -> usize {
-        match self {
-            Self::Heavy => 0,
-            Self::Control => 1,
-            Self::LongControl => 2,
-            Self::Health => 3,
-            Self::Navigation => 4,
-            Self::FileTree => 5,
-            Self::TaskSave => 6,
-        }
+        self as usize
     }
 
     fn busy_message(self) -> &'static str {
         match self {
             Self::Heavy => "daemon is busy with subprocess-heavy work; retry shortly",
+            Self::Resource => "daemon is busy processing resource reservations; retry shortly",
+            Self::ResourceCleanup => {
+                "daemon is busy releasing resource reservations; retry shortly"
+            }
             _ => "daemon is busy processing requests; retry shortly",
         }
     }
@@ -724,7 +730,7 @@ impl ConnectionDispatchState {
         deliver_errors: bool,
     ) -> bool {
         let attempts = self.pending.len();
-        let mut blocked = [false; RequestPoolKind::TaskSave.index() + 1];
+        let mut blocked = [false; RequestPoolKind::COUNT];
         let mut can_continue = true;
 
         for _ in 0..attempts {
@@ -1601,6 +1607,8 @@ struct RequestDispatcher {
     navigation_requests: IndependentRequestPool,
     file_tree_requests: IndependentRequestPool,
     task_save_requests: IndependentRequestPool,
+    resource_requests: IndependentRequestPool,
+    resource_cleanup_requests: IndependentRequestPool,
     /// The runtime-controlled non-loopback listener, installed by `serve`
     /// once this dispatcher is shared so an exposure request arriving on
     /// any listener can rebind it.
@@ -2298,6 +2306,18 @@ impl RequestDispatcher {
                 1,
                 TASK_SAVE_REQUEST_QUEUE,
             ),
+            resource_requests: IndependentRequestPool::new(
+                "resource",
+                RESOURCE_REQUEST_WORKERS,
+                RESOURCE_REQUEST_QUEUE,
+            ),
+            // Keep cleanup admissible even if inventory probes occupy the
+            // resource workers. Both pools still transact through the host lock.
+            resource_cleanup_requests: IndependentRequestPool::new(
+                "resource-cleanup",
+                1,
+                RESOURCE_CLEANUP_REQUEST_QUEUE,
+            ),
             exposure: OnceLock::new(),
         }
     }
@@ -2577,6 +2597,18 @@ impl RequestDispatcher {
             (RequestPoolKind::FileTree, &self.file_tree_requests)
         } else if matches!(&request.command, Command::SaveTaskState { .. }) {
             (RequestPoolKind::TaskSave, &self.task_save_requests)
+        } else if let Command::AgentResources { operation } = &request.command {
+            if matches!(
+                operation,
+                ResourceOperation::Release { .. } | ResourceOperation::Cancel { .. }
+            ) {
+                (
+                    RequestPoolKind::ResourceCleanup,
+                    &self.resource_cleanup_requests,
+                )
+            } else {
+                (RequestPoolKind::Resource, &self.resource_requests)
+            }
         } else if long_control {
             (RequestPoolKind::LongControl, &self.long_control_requests)
         } else if heavy {
@@ -3747,7 +3779,6 @@ fn is_subprocess_heavy(command: &Command) -> bool {
             | Command::AgentCreateSession { .. }
             | Command::AgentPrompt { .. }
             | Command::AgentAsk { .. }
-            | Command::AgentResources { .. }
             | Command::AgentMergeSubmit
             | Command::AgentProjectMap { .. }
             | Command::AgentWireframe { .. }
@@ -6432,6 +6463,131 @@ mod tests {
             assert!(saves.remove(&request_id));
         }
         assert!(saves.is_empty());
+    }
+
+    #[test]
+    fn resource_cleanup_and_heavy_requests_bypass_saturated_resource_workers() {
+        struct BlockedResourceBackend {
+            entered: Sender<()>,
+            unblock: Receiver<()>,
+        }
+
+        impl Backend for BlockedResourceBackend {
+            fn handle(
+                &self,
+                request: Request,
+                _: EventSink,
+                _: Option<Uuid>,
+            ) -> anyhow::Result<ResponsePayload> {
+                if matches!(
+                    request.command,
+                    Command::AgentResources {
+                        operation: ResourceOperation::Acquire { .. }
+                            | ResourceOperation::Status { .. }
+                    }
+                ) {
+                    let _ = self.entered.send(());
+                    let _ = self.unblock.recv();
+                }
+                Ok(ResponsePayload::Ack)
+            }
+        }
+
+        let (entered, entered_rx) = unbounded();
+        let (unblock, unblock_rx) = unbounded();
+        let hub = Arc::new(Hub::default());
+        let dispatcher = RequestDispatcher::new(
+            Arc::new(BlockedResourceBackend {
+                entered,
+                unblock: unblock_rx,
+            }),
+            hub.clone(),
+        );
+        let (outgoing, responses) = unbounded();
+        let mut connection = ConnectionDispatchState::default();
+        let task = Uuid::new_v4();
+        let id = Uuid::new_v4();
+        let dispatch = |connection: &mut ConnectionDispatchState, command| {
+            let request_id = Uuid::new_v4();
+            assert!(dispatcher.dispatch_from_connection(
+                Request {
+                    request_id,
+                    session_id: task,
+                    runtime_id: Uuid::nil(),
+                    command,
+                },
+                outgoing.clone(),
+                0,
+                Some(task),
+                connection,
+                256,
+            ));
+            request_id
+        };
+        dispatch(
+            &mut connection,
+            Command::AgentResources {
+                operation: ResourceOperation::Acquire {
+                    resources: Default::default(),
+                    purpose: "test".into(),
+                    holder_pid: std::process::id(),
+                    wait_seconds: 60,
+                    parent: None,
+                },
+            },
+        );
+        let poll = || Command::AgentResources {
+            operation: ResourceOperation::Status { id: Some(id) },
+        };
+        for _ in 1..RESOURCE_REQUEST_WORKERS {
+            dispatch(&mut connection, poll());
+        }
+        for _ in 0..RESOURCE_REQUEST_WORKERS {
+            entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        }
+        for _ in 0..=RESOURCE_REQUEST_QUEUE {
+            dispatch(&mut connection, poll());
+        }
+        assert_eq!(connection.pending.len(), 1);
+        assert!(connection.retry_pending(&dispatcher, &hub, true));
+        assert_eq!(connection.pending.len(), 1);
+
+        let mut expected = HashSet::from([
+            dispatch(
+                &mut connection,
+                Command::AgentResources {
+                    operation: ResourceOperation::Release { id },
+                },
+            ),
+            dispatch(
+                &mut connection,
+                Command::AgentResources {
+                    operation: ResourceOperation::Cancel { id },
+                },
+            ),
+            dispatch(
+                &mut connection,
+                Command::AgentProjectMap {
+                    query: "test".into(),
+                    path: None,
+                    max_tokens: None,
+                    intent: Default::default(),
+                    anchors: Vec::new(),
+                    known_paths: Vec::new(),
+                },
+            ),
+        ]);
+        for _ in 0..expected.len() {
+            let ServerMessage::Response {
+                request_id,
+                outcome: ResponseOutcome::Ok { .. },
+            } = responses.recv_timeout(Duration::from_secs(2)).unwrap()
+            else {
+                panic!("expected successful reply");
+            };
+            assert!(expected.remove(&request_id));
+        }
+        drop(unblock);
     }
 
     /// File browsing and task opening each keep capacity while bulk work waits.

@@ -1,1 +1,1 @@
-- Slow operations waiting for daemon capacity no longer stall later actions on the same app connection. `goddard-agent resource run` survives brief overload and stops its whole process group when cancelled.
+- Slow operations waiting for daemon capacity no longer stall later actions on the same app connection. Resource release and cancellation have a dedicated worker. `goddard-agent resource acquire` keeps its place in line through brief polling overload. `goddard-agent resource run` survives brief overload and stops its whole process group when cancelled.
