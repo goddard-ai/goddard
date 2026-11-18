@@ -7,12 +7,22 @@ use waku_protocol::counsel::{
 
 const REVIEW: &str = "Review my recent sessions and current priorities. Check the relevant transcript endings, including recently archived work. Offer the clearest useful next action with supporting session links, or say there is no clear next step. Respect my previous Later and Dismiss choices, and check results of instructions already sent to Boss.";
 
-/// The prompt that opens the separate recommendation turn after Jev judges a
-/// settled Counsel answer `answered`. Hidden and agent-owned, so the turn it
-/// produces can never claim another recommendation pass for itself.
-const RECOMMEND: &str = "Your last answer settled the human's question. Now act on your own initiative: review my recent sessions and current priorities, including recently archived work. Offer the clearest useful next action — propose it with `goddard-agent boss counsel propose` when it is actionable — or say there is no clear next step. Respect my previous Later and Dismiss choices, and check results of instructions already sent to Boss.";
+// Older daemons parked this exact text in the durable queue.
+const LEGACY_RECOMMEND: &str = "Your last answer settled the human's question. Now act on your own initiative: review my recent sessions and current priorities, including recently archived work. Offer the clearest useful next action — propose it with `goddard-agent boss counsel propose` when it is actionable — or say there is no clear next step. Respect my previous Later and Dismiss choices, and check results of instructions already sent to Boss.";
+
+/// After Jev judges an answer settled, a hidden follow-up reviews recent work.
+const RECOMMEND: &str = "Your last answer settled the human's question. Review my recent sessions and current priorities, including recently archived work. Offer the clearest useful next action, using a recommendation card if it would help, or say there is no clear next step. Respect my previous Later and Dismiss choices, and check results of instructions already sent to Boss.";
 
 const FEATURE: &str = "counsel-recommendation";
+
+pub(super) const DIRECT_HANDOFF_PREFIX: &str =
+    "Direct instruction from the human, relayed by Counsel:\n\n";
+
+pub(super) fn is_automatic_counsel_prompt(entry: &crate::agent::AgentPrompt) -> bool {
+    entry.hidden
+        && entry.sender.is_none()
+        && matches!(entry.prompt.as_str(), REVIEW | RECOMMEND | LEGACY_RECOMMEND)
+}
 
 fn counsel_identity_seed() -> waku_protocol::boss::BossIdentity {
     let id = Uuid::new_v4();
@@ -104,7 +114,10 @@ impl WakuBackend {
                         state.sessions[index].queued_messages.iter().any(|message| {
                             message.is_agent_owned() && message.hidden && message.content == REVIEW
                         });
-                    let review = if changed && !review_pending {
+                    let review = if changed
+                        && !review_pending
+                        && !counsel.has_outstanding_recommendation()
+                    {
                         let mut message = crate::model::QueuedMessage::agent(REVIEW, None);
                         message.hidden = true;
                         Some(message)
@@ -112,7 +125,7 @@ impl WakuBackend {
                         None
                     };
                     if created
-                        || changed
+                        || review.is_some()
                         || seeded_identity
                         || state.sessions[index].archived_at.is_some()
                     {
@@ -120,8 +133,8 @@ impl WakuBackend {
                         state.sessions[index].archived_at = None;
                         if let Some(message) = &review {
                             state.sessions[index].queued_messages.push(message.clone());
+                            counsel.reviewed_activity = Some(activity);
                         }
-                        counsel.reviewed_activity = Some(activity);
                         state.mark_session_dirty(id);
                         if let Err(error) =
                             self.save_counsel_sessions(&mut state, expected, counsel)
@@ -198,13 +211,18 @@ impl WakuBackend {
                 self.boss.with_operation_lock(|| {
                     let mut counsel = self.boss.document().counsel;
                     let expected = counsel.revision;
-                    let state = self.task_state.lock();
+                    let mut state = self.task_state.lock();
                     // The card anchors after Counsel's latest message — its
                     // originating position in history.
                     let anchor = counsel
                         .session_id
-                        .and_then(|id| state.sessions.iter().find(|s| s.id == id))
-                        .and_then(|session| session.messages.last().map(|m| m.id));
+                        .and_then(|id| state.sessions.iter_mut().find(|s| s.id == id))
+                        .map(|session| {
+                            self.task_store.hydrate(session)?;
+                            Ok::<_, std::io::Error>(session.messages.last().map(|message| message.id))
+                        })
+                        .transpose()?
+                        .flatten();
                     let sources: Vec<_> = sources.iter().map(|id| {
                         anyhow::ensure!(Some(*id) != counsel.session_id, "Counsel's own suggestions are not source evidence");
                         let session = state.sessions.iter().find(|session| session.id == *id)
@@ -377,8 +395,49 @@ impl WakuBackend {
             CounselOperation::Send {
                 id,
                 expected_revision,
-            } => {
-                self.send_counsel_recommendation(caller, id, expected_revision, events)
+            } => self.send_counsel_recommendation(caller, id, expected_revision, events),
+            CounselOperation::Handoff { instruction } => {
+                let counsel =
+                    caller.ok_or_else(|| anyhow!("only Counsel can hand off an instruction"))?;
+                let (provider, model, mode) = self.require_counsel_human_turn(counsel)?;
+                anyhow::ensure!(
+                    !instruction.trim().is_empty(),
+                    "Boss handoff requires an instruction"
+                );
+                if self.boss.document().session_id.is_none() {
+                    self.handle_boss_operation(
+                        None,
+                        BossOperation::Open {
+                            provider,
+                            model,
+                            mode,
+                        },
+                        events,
+                    )?;
+                }
+                let prompt = format!("{DIRECT_HANDOFF_PREFIX}{instruction}");
+                let message = crate::model::QueuedMessage::agent(&prompt, Some(counsel));
+                let boss = self.boss.with_operation_lock(|| {
+                    let boss = self
+                        .boss
+                        .document()
+                        .session_id
+                        .ok_or_else(|| anyhow!("Boss chat is unavailable"))?;
+                    anyhow::ensure!(
+                        !self.boss_incident_fenced(boss) && !self.session_quarantined(boss),
+                        "Boss is not accepting instructions right now"
+                    );
+                    mirror_agent_queued_message(
+                        &self.task_state,
+                        &self.task_store,
+                        boss,
+                        message.clone(),
+                    )?;
+                    Ok::<_, anyhow::Error>(boss)
+                })?;
+                self.deliver_counsel_instruction(boss, counsel, message.id, prompt, events)
+                    .context("could not deliver the handoff to Boss; it remains queued")?;
+                Ok(BossResult::Saved)
             }
             CounselOperation::Rename { name } => {
                 anyhow::ensure!(caller.is_none(), "only the human can rename Counsel");
@@ -453,7 +512,47 @@ impl WakuBackend {
         }
     }
 
-    /// Counsel's one authorized write to Boss. The durable mirror carries the
+    /// Outbound messages require the authenticated Counsel session to be
+    /// answering a human prompt. The persona determines whether that prompt
+    /// actually instructs a send. Hidden reviews and agent prompts carry no
+    /// authority, even if they contain text that looks like an instruction.
+    pub(super) fn require_counsel_human_turn(
+        &self,
+        session_id: Uuid,
+    ) -> anyhow::Result<(ProviderKind, Option<String>, crate::model::RuntimeMode)> {
+        anyhow::ensure!(
+            self.boss.is_counsel(session_id) && !self.agent.user_stopped(session_id),
+            "only active Counsel can relay this instruction"
+        );
+        let mut state = self.task_state.lock();
+        let session = state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+            .ok_or_else(|| anyhow!("Counsel chat is unavailable"))?;
+        self.task_store.hydrate(session)?;
+        let human_input = session.active_turn_id().is_some_and(|turn| {
+            session
+                .messages
+                .iter()
+                .rev()
+                .find(|message| {
+                    message.turn_id == Some(turn) && message.role == crate::model::MessageRole::User
+                })
+                .is_some_and(|message| !message.hidden && message.sent_by_task.is_none())
+        });
+        anyhow::ensure!(
+            human_input,
+            "Counsel can relay instructions only while answering a human message"
+        );
+        Ok((
+            session.provider,
+            session.model.clone(),
+            session.runtime_mode,
+        ))
+    }
+
+    /// Send the exact approved recommendation to Boss. The durable mirror carries the
     /// record's id so parked delivery, transcript landing, and rotation
     /// lineage all dedupe on the same identity — a retry can never send the
     /// approved instruction twice.
@@ -632,7 +731,7 @@ impl WakuBackend {
         delivery.map(|()| BossResult::Counsel { state: outcome })
     }
 
-    /// Immediate delivery of an approved instruction into Boss's live turn.
+    /// Immediate delivery of a human-authorized instruction into Boss's live turn.
     /// A steerable runtime takes a steer — never the normal prompt queue —
     /// an unsteerable one is interrupted so the durable mirror drains as
     /// soon as the turn settles, and an idle boss starts on the drain.
@@ -645,7 +744,7 @@ impl WakuBackend {
         events: &EventSink,
     ) -> anyhow::Result<()> {
         let target = self.boss_active_alias(target);
-        // The human's explicit approval owns delivery — it outranks a stale
+        // The human's instruction owns delivery — it outranks a stale
         // stop the way a Boss correction does.
         self.agent.clear_user_stop(target);
         if let Some(driver) = self.steerable_driver(target) {
@@ -667,10 +766,8 @@ impl WakuBackend {
                 },
             ) {
                 driver.steer(transport.unwrap_or(prompt));
-                return Ok(());
             }
-            // A concurrent steer owns the slot; fall through to the queue
-            // path so this attempt still delivers.
+            return Ok(());
         }
         let fallback = self
             .sessions
@@ -737,6 +834,7 @@ impl WakuBackend {
         }
         let counsel = self.boss.document().counsel;
         if counsel.session_id != Some(session_id)
+            || counsel.has_outstanding_recommendation()
             || counsel.recommendation_turns.contains(&turn.id)
         {
             return None;
@@ -793,6 +891,7 @@ impl WakuBackend {
             let eligible = latest
                 && human_authored
                 && counsel.session_id == Some(session_id)
+                && !counsel.has_outstanding_recommendation()
                 && !counsel.recommendation_turns.contains(&source_turn)
                 && !self.agent.user_stopped(session_id);
             if !eligible {

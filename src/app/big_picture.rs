@@ -1495,8 +1495,12 @@ impl Waku {
                 .clone()
         };
         let pending_turn = self.blocked_checkpoint_turn(session.id);
+        let counsel = self
+            .counsel_state_for_session(session_id)
+            .map(|(_, state)| state);
         let fingerprint = transcript_rows_fingerprint(session, &self.expanded_turns, pending_turn)
-            ^ (u64::from(self.runtime_submission_checks.contains_key(&session_id)) << 1);
+            ^ (u64::from(self.runtime_submission_checks.contains_key(&session_id)) << 1)
+            ^ counsel.map_or(0, |state| state.revision.rotate_left(2));
         let (kinds, refolded) = {
             let mut cache = self.big_picture.card_kinds.borrow_mut();
             let entry = cache
@@ -1505,6 +1509,16 @@ impl Waku {
             if entry.0 != fingerprint {
                 let mut folded =
                     folded_transcript_row_kinds(session, &self.expanded_turns, pending_turn);
+                if let Some(counsel) = counsel {
+                    super::transcript::splice_counsel_rows(
+                        &mut folded,
+                        session,
+                        &counsel.recommendations,
+                        self.transcript_views
+                            .get(&session_id)
+                            .is_some_and(|view| view.has_more_before || view.has_more_after),
+                    );
+                }
                 if self.runtime_submission_checks.contains_key(&session_id)
                     && !folded.contains(&TranscriptRowKind::WorkingIndicator)
                 {
@@ -2153,6 +2167,21 @@ impl Waku {
 
     pub(super) fn attention_runtime(&self) -> Option<&SessionRuntime> {
         self.runtimes.get(&self.attention_session_id()?)
+    }
+
+    pub(super) fn remeasure_big_picture_row(&self, session_id: Uuid, row: TranscriptRowKind) {
+        let kinds = self.big_picture.card_kinds.borrow();
+        let cards = self.big_picture.card_transcripts.borrow();
+        if let Some((_, kinds)) = kinds.get(&session_id)
+            && let Some(index) = kinds
+                .iter()
+                .position(|kind| *kind == row)
+            && let Some(card) = cards.get(&session_id)
+        {
+            let top = card.rows.logical_scroll_top();
+            card.rows.remeasure_items(index..index + 1);
+            card.rows.scroll_to(top);
+        }
     }
 
     pub(super) fn pending_rush_resume(&self, session_id: Uuid) -> Option<Uuid> {

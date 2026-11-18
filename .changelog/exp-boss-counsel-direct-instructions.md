@@ -1,0 +1,1 @@
+- Ask Counsel to relay instructions to Boss or message an existing task directly. Recommendation cards stay inline in Counsel history, and automatic reviews wait while a recommendation is open or saved for later.

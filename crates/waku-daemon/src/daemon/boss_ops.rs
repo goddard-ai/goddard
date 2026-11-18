@@ -250,7 +250,7 @@ impl WakuBackend {
                         | BossOperation::HistorySearch { .. }
                         | BossOperation::Projects { .. }
                 ),
-                "Counsel can advise, propose, and deliver human-approved recommendations; other Boss instructions are the human's alone"
+                "Counsel can advise, propose, and relay human instructions through the Counsel commands"
             );
         }
         if !was_active {

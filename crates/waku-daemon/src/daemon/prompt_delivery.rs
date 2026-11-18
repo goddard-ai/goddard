@@ -101,8 +101,15 @@ pub(super) fn automation_prompt_waiting(
     if agent.has_open_turn(target) {
         return true;
     }
-    // A submitted human prompt already owns a turn even before the provider
-    // emits TurnStarted. An automation must not adopt that turn's identity.
+    pending_persisted_turn(target, task_state, task_store)
+}
+
+/// A human prompt owns its turn before the provider emits TurnStarted.
+fn pending_persisted_turn(
+    target: Uuid,
+    task_state: &Mutex<PersistedState>,
+    task_store: &StateStore,
+) -> bool {
     let mut state = task_state.lock();
     let Some(session) = state
         .sessions
@@ -112,10 +119,22 @@ pub(super) fn automation_prompt_waiting(
         return false;
     };
     if let Err(error) = task_store.hydrate(session) {
-        eprintln!("could not check automation target {target}: {error:#}");
+        eprintln!("could not check the active turn for task {target}: {error:#}");
         return true;
     }
     session.active_turn_id().is_some()
+}
+
+pub(super) fn automatic_counsel_waiting(
+    session_id: Uuid,
+    entry: &crate::agent::AgentPrompt,
+    boss: &crate::boss::BossService,
+    task_state: &Mutex<PersistedState>,
+    task_store: &StateStore,
+) -> bool {
+    super::counsel::is_automatic_counsel_prompt(entry)
+        && boss.is_counsel(session_id)
+        && pending_persisted_turn(session_id, task_state, task_store)
 }
 
 /// Only finalized plans bypass Boss notification and sender-settlement holds.
@@ -149,7 +168,8 @@ pub(super) fn agent_prompt_waiting(
         task_state,
         task_store,
         automations,
-    ) {
+    ) || automatic_counsel_waiting(target, entry, boss, task_state, task_store)
+    {
         return true;
     }
     if entry.is_plan_finalization() {
@@ -191,6 +211,21 @@ pub(super) fn deliver_agent_prompt(
     automations: &AutomationService,
     lineage: &[Uuid],
 ) -> anyhow::Result<()> {
+    let automatic_counsel =
+        super::counsel::is_automatic_counsel_prompt(&entry) && boss.is_counsel(session_id);
+    // Serialize the last check and dispatch against recommendation writes.
+    // This also covers event-forwarder drains and recovered queue entries.
+    let _counsel_operation = automatic_counsel.then(|| boss.operation_guard());
+    if automatic_counsel && boss.document().counsel.has_outstanding_recommendation() {
+        if let Some(id) = entry.queued_id
+            && let Err(error) = unmirror_agent_queued_prompt(task_state, task_store, session_id, id)
+        {
+            agent.requeue_front(session_id, entry);
+            return Err(error);
+        }
+        send_agent_queue_changed(task_state, sink, session_id);
+        return Ok(());
+    }
     boss.require_active(session_id)?;
     // An incident-fenced Boss chat holds its queued work: delivering now
     // would record a turn the fence-denied provider can never confirm.
@@ -215,6 +250,7 @@ pub(super) fn deliver_agent_prompt(
         return Ok(());
     }
     if !automation_prompt
+        && !automatic_counsel
         && driver.supports_steer()
         && (agent.has_parked_turn(session_id)
             || (employee_report_interrupts(&entry) && agent.has_open_turn(session_id)))
@@ -282,7 +318,7 @@ pub(super) fn deliver_agent_prompt(
         entry.report_trigger.clone(),
         reference_context.clone(),
         boss.is_boss(session_id),
-        automation_prompt,
+        automation_prompt || automatic_counsel,
         lineage,
     )? {
         PromptPersistence::Submitted => {}
@@ -465,7 +501,7 @@ pub(super) fn persist_agent_prompt(
     report_trigger: Option<crate::model::ReportTrigger>,
     reference_context: Option<crate::model::ReferenceContext>,
     boss_notification: bool,
-    automation_prompt: bool,
+    exclusive_turn: bool,
     lineage: &[Uuid],
 ) -> anyhow::Result<PromptPersistence> {
     let mut state = task_state.lock();
@@ -481,7 +517,7 @@ pub(super) fn persist_agent_prompt(
         state.sessions[index].archived_at.is_none(),
         "task is archived"
     );
-    if boss_notification || automation_prompt {
+    if boss_notification || exclusive_turn {
         // Claim the durable id under the same lock as the user queue and
         // active turn. A competing settlement/scheduler delivery may have
         // rehydrated this entry before the first delivery removed its mirror.
@@ -519,7 +555,7 @@ pub(super) fn persist_agent_prompt(
             .find(|session| session.id == *lineage_id)
             .is_some_and(|held| {
                 task_store.hydrate(held).is_ok()
-                    && (((boss_notification || automation_prompt)
+                    && (((boss_notification || exclusive_turn)
                         && (held.messages.iter().any(|m| m.id == message_id)
                             || held.queued_messages.iter().any(|m| m.id == message_id)))
                         || report_trigger.as_ref().is_some_and(|trigger| {

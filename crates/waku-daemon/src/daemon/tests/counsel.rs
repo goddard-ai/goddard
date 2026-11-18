@@ -747,3 +747,290 @@ fn counsel_propose_anchors_the_card_to_its_originating_message() {
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
 }
+
+fn human_turn(backend: &WakuBackend, session_id: Uuid, prompt: &str, completed: bool) -> Uuid {
+    let mut state = backend.task_state.lock();
+    let session = state.session_mut(session_id).unwrap();
+    backend.task_store.hydrate(session).unwrap();
+    session.finish_active_turn(TurnStatus::Completed);
+    let turn = session.begin_turn(prompt);
+    if completed {
+        session.finish_active_turn(TurnStatus::Completed);
+    }
+    backend.task_store.save(&mut state).unwrap();
+    turn
+}
+
+#[test]
+fn direct_counsel_handoff_steers_busy_boss_and_requires_human_turn() {
+    let root = std::env::temp_dir().join(format!("counsel-direct-{}", Uuid::new_v4()));
+    let (backend, task, captures) = fixture(&root);
+    let boss = rotation_boss(&backend);
+    let counsel = open(&backend);
+    let recommendation = propose(&backend, counsel, task);
+    let instruction = "Check the build and report only the failing check.";
+    let handoff = || Action::Handoff {
+        instruction: instruction.into(),
+    };
+    assert!(invoke(&backend, Some(counsel), handoff()).is_err());
+
+    human_turn(
+        &backend,
+        counsel,
+        &format!("Tell Boss: {instruction}"),
+        false,
+    );
+    assert!(invoke(&backend, Some(task), handoff()).is_err());
+
+    backend
+        .ensure_agent_runtime(boss, &EventSink::detached())
+        .unwrap();
+    backend
+        .agent
+        .note_driver_event(boss, &DriverEvent::TurnStarted);
+    assert!(matches!(
+        invoke(&backend, Some(counsel), handoff()).unwrap(),
+        BossResult::Saved
+    ));
+    let captures = captures.lock();
+    let steers = captures[&boss].steers.lock();
+    assert_eq!(steers.len(), 1);
+    assert!(steers[0].contains(&format!("task id {counsel}")));
+    assert!(steers[0].ends_with(instruction));
+    assert!(captures[&boss].prompts.lock().is_empty());
+    let state = backend.boss.document().counsel;
+    assert_eq!(state.recommendations, vec![recommendation]);
+    drop(steers);
+    drop(captures);
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn direct_counsel_handoff_reports_launch_failure() {
+    let root = std::env::temp_dir().join(format!("counsel-direct-{}", Uuid::new_v4()));
+    let (mut backend, _, _) = fixture(&root);
+    let boss = rotation_boss(&backend);
+    let start = backend.runtime_test_start.take().unwrap();
+    backend.runtime_test_start = Some(Arc::new(move |provider, options, sender| {
+        if options
+            .agent
+            .as_ref()
+            .is_some_and(|agent| agent.task_id == boss)
+        {
+            anyhow::bail!("injected Boss launch failure");
+        }
+        start(provider, options, sender)
+    }));
+    let counsel = open(&backend);
+    human_turn(&backend, counsel, "Tell Boss to check the build.", false);
+    let error = invoke(
+        &backend,
+        Some(counsel),
+        Action::Handoff {
+            instruction: "Check the build.".into(),
+        },
+    )
+    .unwrap_err();
+    assert!(format!("{error:#}").contains("injected Boss launch failure"));
+    assert!(backend.boss.document().counsel.recommendations.is_empty());
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn counsel_messages_only_existing_normal_tasks_through_the_scoped_rpc() {
+    let root = std::env::temp_dir().join(format!("counsel-direct-{}", Uuid::new_v4()));
+    let (backend, task, captures) = fixture(&root);
+    assert!(!backend.settings.get().agent_tools_enabled);
+    let boss = rotation_boss(&backend);
+    let counsel = open(&backend);
+    let send = |target, prompt: &str, delivery| {
+        backend.handle(
+            Request {
+                request_id: Uuid::new_v4(),
+                session_id: counsel,
+                runtime_id: Uuid::nil(),
+                command: Command::AgentPrompt {
+                    task_id: Some(target),
+                    thread_id: None,
+                    provider: None,
+                    prompt: prompt.into(),
+                    delivery,
+                },
+            },
+            EventSink::detached(),
+            Some(counsel),
+        )
+    };
+    assert!(send(task, "Check the build.", AgentPromptDelivery::Queue).is_err());
+    human_turn(
+        &backend,
+        counsel,
+        "Tell the task to check the build.",
+        false,
+    );
+    for target in [counsel, boss, Uuid::new_v4()] {
+        assert!(send(target, "Check the build.", AgentPromptDelivery::Interrupt).is_err());
+    }
+    let special = {
+        let mut state = backend.task_state.lock();
+        let project = state
+            .sessions
+            .iter()
+            .find(|session| session.id == task)
+            .unwrap()
+            .project_id;
+        let mut side_chat = AgentSession::new(project, ProviderKind::Codex);
+        side_chat.side_chat_of = Some(task);
+        let id = side_chat.id;
+        state.push_session(side_chat);
+        id
+    };
+    assert!(send(special, "Check the build.", AgentPromptDelivery::Queue).is_err());
+    send(task, "Check the build.", AgentPromptDelivery::Queue).unwrap();
+    {
+        let state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter()
+            .find(|session| session.id == task)
+            .unwrap();
+        assert!(session.messages.iter().any(|message| {
+            message.content == "Check the build." && message.sent_by_task == Some(counsel)
+        }));
+    }
+    backend
+        .agent
+        .note_driver_event(task, &DriverEvent::TurnStarted);
+    send(
+        task,
+        "Include the test count.",
+        AgentPromptDelivery::Interrupt,
+    )
+    .unwrap();
+    assert!(captures.lock()[&task].steers.lock().iter().any(|steer| {
+        steer.contains(&format!("task id {counsel}")) && steer.ends_with("Include the test count.")
+    }));
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn outstanding_recommendations_block_scheduling_and_parked_delivery() {
+    let root = std::env::temp_dir().join(format!("counsel-direct-{}", Uuid::new_v4()));
+    let (backend, task, captures) = fixture(&root);
+    let counsel = open(&backend);
+    let source = human_turn(&backend, counsel, "What remains?", true);
+    assert!(backend.counsel_recommendation_candidate(counsel).is_some());
+    // Keep a scheduled recommendation parked while a proposal wins the race.
+    backend
+        .agent
+        .note_driver_event(counsel, &DriverEvent::TurnStarted);
+    assert!(backend.claim_counsel_recommendation_turn(counsel, source, &EventSink::detached()));
+    let proposed = propose(&backend, counsel, task);
+    invoke(
+        &backend,
+        None,
+        Action::Decide {
+            id: proposed.id,
+            expected_revision: proposed.revision,
+            decision: CounselDecision::Later,
+        },
+    )
+    .unwrap();
+    let latest = human_turn(
+        &backend,
+        counsel,
+        "Tell me more about the earlier proposal.",
+        true,
+    );
+    assert_eq!(
+        backend.boss.document().counsel.recommendations[0].status,
+        CounselStatus::Later
+    );
+    assert!(backend.counsel_recommendation_candidate(counsel).is_none());
+    assert!(!backend.claim_counsel_recommendation_turn(counsel, latest, &EventSink::detached()));
+    backend.agent.note_driver_event(
+        counsel,
+        &DriverEvent::TurnFinished {
+            success: true,
+            summary: None,
+            summary_i18n: None,
+        },
+    );
+    let count = captures.lock()[&counsel].prompts.lock().len();
+    open(&backend);
+    assert_eq!(captures.lock()[&counsel].prompts.lock().len(), count);
+    let state = backend.task_state.lock();
+    let session = state
+        .sessions
+        .iter()
+        .find(|session| session.id == counsel)
+        .unwrap();
+    assert!(session.queued_messages.is_empty());
+    drop(state);
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn counsel_revision_preserves_both_anchors_on_reopen() {
+    let root = std::env::temp_dir().join(format!("counsel-revision-{}", Uuid::new_v4()));
+    let (backend, task, _) = fixture(&root);
+    let counsel = open(&backend);
+    human_turn(&backend, counsel, "What should I do next?", true);
+    let first = propose(&backend, counsel, task);
+    invoke(
+        &backend,
+        None,
+        Action::Decide {
+            id: first.id,
+            expected_revision: first.revision,
+            decision: CounselDecision::Later,
+        },
+    )
+    .unwrap();
+    human_turn(&backend, counsel, "Revise that to cover only Codex.", false);
+    let BossResult::Counsel { state } = invoke(
+        &backend,
+        Some(counsel),
+        Action::Propose {
+            title: "Verify Codex".into(),
+            reason: "Narrow the verification to the requested provider.".into(),
+            instruction: "Verify the Codex interaction only.".into(),
+            sources: vec![task],
+            replaces: Some(first.id),
+        },
+    )
+    .unwrap() else {
+        panic!("expected revised Counsel state");
+    };
+    assert_eq!(state.recommendations[0].anchor, first.anchor);
+    assert_eq!(state.recommendations[0].status, CounselStatus::Dismissed);
+    assert!(state.recommendations[1].anchor.is_some());
+    assert_ne!(state.recommendations[1].anchor, first.anchor);
+    assert_eq!(state.recommendations[1].status, CounselStatus::Proposed);
+
+    drop(backend);
+    let reloaded = WakuBackend::new(
+        DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+        StateStore::daemon(root.join("app.db")),
+    )
+    .unwrap();
+    assert_eq!(reloaded.boss.document().counsel, state);
+    let mut persisted = reloaded.task_state.lock();
+    let session = persisted.session_mut(counsel).unwrap();
+    reloaded.task_store.hydrate(session).unwrap();
+    for record in &state.recommendations {
+        assert!(
+            session
+                .messages
+                .iter()
+                .any(|message| Some(message.id) == record.anchor)
+        );
+    }
+    drop(persisted);
+    drop(reloaded);
+    let _ = std::fs::remove_dir_all(root);
+}

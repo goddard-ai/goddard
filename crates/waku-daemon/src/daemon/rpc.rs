@@ -404,12 +404,13 @@ impl Backend for WakuBackend {
                     &request.command,
                     Command::Boss { .. }
                         | Command::AgentReadSession { .. }
+                        | Command::AgentPrompt { .. }
                         | Command::AgentSearchSessions { .. }
                         | Command::AgentHistorySearch { .. }
                         | Command::AgentListModels
                         | Command::AgentAsk { .. }
                 ),
-                "Counsel can read work and propose an instruction for the human to send to Boss"
+                "Counsel can read work, propose recommendations, and relay human instructions"
             );
         }
         // Conditional sidebar edits and older user metadata paths share an

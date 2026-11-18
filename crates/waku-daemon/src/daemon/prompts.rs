@@ -128,7 +128,17 @@ impl WakuBackend {
         delivery: AgentPromptDelivery,
         events: EventSink,
     ) -> anyhow::Result<ResponsePayload> {
-        self.require_agent_tools()?;
+        let counsel = sender.filter(|id| self.boss.is_counsel(*id));
+        // Counsel relays human input under the Boss experiment. Unmanaged
+        // agents still need the separate cross-task tools setting.
+        if counsel.is_some() {
+            anyhow::ensure!(
+                self.settings.get().boss_experiment_enabled,
+                "Boss is disabled by the experiment setting"
+            );
+        } else {
+            self.require_agent_tools()?;
+        }
         if prompt.trim().is_empty() {
             bail!("agent prompts require a prompt");
         }
@@ -148,6 +158,26 @@ impl WakuBackend {
             );
         }
         let target = self.resolve_agent_target(task_id, thread_id, provider)?;
+        if let Some(counsel) = counsel {
+            self.require_counsel_human_turn(counsel)?;
+            let state = self.task_state.lock();
+            anyhow::ensure!(
+                !self.boss.is_managed(target)
+                    && self.boss.employee_including_retired(target).is_none()
+                    && state.sessions.iter().any(|session| {
+                        session.id == target
+                            && !session.boss_managed
+                            && !session.incognito
+                            && session.planning.is_none()
+                            && session.side_chat_of.is_none()
+                            && session.friend_peer_id.is_none()
+                            && !state.projects.iter().any(|project| {
+                                project.id == session.project_id && project.is_friends()
+                            })
+                    }),
+                "Counsel can message existing normal tasks; use the Counsel handoff command for Boss"
+            );
+        }
         // An address resolved against a stale Boss pointer still means "the
         // Boss" — deliver it to the committed owner exactly once.
         let target = self.boss_active_alias(target);
@@ -157,7 +187,9 @@ impl WakuBackend {
         // task-prompt path below instead. Managed senders that are not boss
         // principals cannot get here: employees are refused above.
         if self.boss.is_managed(target)
-            || sender.is_some_and(|id| self.boss.is_managed(id) && !self.boss.is_boss_principal(id))
+            || sender.is_some_and(|id| {
+                counsel.is_none() && self.boss.is_managed(id) && !self.boss.is_boss_principal(id)
+            })
         {
             use waku_protocol::boss::EmployeeLifecycle;
             self.boss.require_control(sender, target)?;

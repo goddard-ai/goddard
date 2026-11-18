@@ -176,6 +176,7 @@ pub(super) fn aggregate() -> Value {
                 "boss counsel view",
                 "boss counsel propose",
                 "boss counsel send",
+                "boss counsel handoff",
                 "boss counsel complete",
             ],
             "instructionPin" => &[

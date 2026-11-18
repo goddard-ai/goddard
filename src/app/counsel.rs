@@ -7,11 +7,17 @@ use waku_protocol::counsel::{CounselDecision, CounselOperation, CounselStatus};
 
 impl Waku {
     pub(super) fn counsel_chat_key(&self) -> Option<DaemonKey> {
-        let id = self.composer_session_id()?;
-        self.boss_ui
-            .states
-            .iter()
-            .find_map(|(key, state)| (state.counsel.session_id == Some(id)).then_some(*key))
+        self.counsel_state_for_session(self.composer_session_id()?)
+            .map(|(key, _)| key)
+    }
+
+    pub(super) fn counsel_state_for_session(
+        &self,
+        id: Uuid,
+    ) -> Option<(DaemonKey, &waku_protocol::counsel::CounselState)> {
+        self.boss_ui.states.iter().find_map(|(key, state)| {
+            (state.counsel.session_id == Some(id)).then_some((*key, &state.counsel))
+        })
     }
 
     pub(super) fn chat_with_counsel(&mut self, key: DaemonKey, cx: &mut Context<Self>) {
@@ -314,10 +320,14 @@ impl Waku {
                 .focus_visible(|style| style.bg(theme.focus_highlight()))
                 .aria_label(tr!("counsel.message_to_boss"))
                 .aria_expanded(expanded)
-                .on_activation(cx, move |this, _, _| {
+                .on_activation(cx, move |this, _, cx| {
                     if !this.boss_ui.counsel_message_expanded.remove(&id) {
                         this.boss_ui.counsel_message_expanded.insert(id);
                     }
+                    let row = super::transcript::TranscriptRowKind::CounselRecommendation(id);
+                    this.remeasure_transcript_row(row);
+                    this.remeasure_big_picture_row(session_id, row);
+                    cx.notify();
                 })
                 .child(icon(chevron, 12.0, theme.text_secondary))
                 .child(

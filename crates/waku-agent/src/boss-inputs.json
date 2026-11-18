@@ -3364,6 +3364,22 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "handoff"
+            },
+            "instruction": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "instruction"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "rename"
             },
             "name": {

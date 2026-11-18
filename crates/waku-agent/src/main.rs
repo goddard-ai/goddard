@@ -349,6 +349,11 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             json!({"json":{"type":"counsel","state":"recommendations awaiting human approval; never sends to Boss"}}),
             "goddard-agent boss counsel propose --json-file proposal.json".to_owned(),
         ),
+        "boss counsel handoff" => (
+            json!({"--text|--file":{"required":true,"exactlyOne":true,"type":"human-directed message for Boss"}}),
+            json!({"json":{"type":"saved","meaning":"Boss handoff accepted for delivery"}}),
+            "goddard-agent boss counsel handoff --text 'Check the build and report the result'".to_owned(),
+        ),
         "boss counsel complete" => (
             json!({"ID":{"positional":true,"required":true,"type":"recommendation UUID"},"--revision":{"required":true,"type":"integer"},"--evidence":{"required":true,"type":"concrete reported completion evidence"}}),
             json!({"json":{"type":"counsel","state":"recommendation completion with reported evidence"}}),
@@ -949,6 +954,7 @@ fn schema() -> serde_json::Value {
         "boss context",
         "boss counsel view",
         "boss counsel propose",
+        "boss counsel handoff",
         "boss counsel complete",
         "boss instructions list",
         "boss instructions show",

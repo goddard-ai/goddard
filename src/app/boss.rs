@@ -1576,6 +1576,15 @@ fn archived_employee_session(
         && employee_session(session, managed, boss_chat, experiment_enabled)
 }
 
+fn is_boss_chat_surface(
+    state: &BossState,
+    session_id: Uuid,
+    project_identity: Option<Uuid>,
+) -> bool {
+    state.counsel.session_id != Some(session_id)
+        && (state.session_id == Some(session_id) || project_identity == Some(state.identity.id))
+}
+
 /// The Boss state owning one of the boss's own surfaces — its chat's
 /// `session_id` or a `planning` record's. Employee sessions resolve
 /// through `boss_ui.identities` instead, so this answers only for the
@@ -3500,7 +3509,7 @@ impl Waku {
         self.boss_ui.states.iter().find_map(|(key, state)| {
             // Keep the mounted predecessor a Boss chat while the catalog
             // and successor hydration catch up with the new pointer.
-            (state.session_id == Some(id) || identity == Some(state.identity.id)).then_some(*key)
+            is_boss_chat_surface(state, id, identity).then_some(*key)
         })
     }
 
@@ -13951,6 +13960,20 @@ mod tests {
             false,
             false
         ));
+    }
+
+    #[test]
+    fn counsel_in_the_boss_project_uses_its_own_transcript() {
+        let mut state = boss_state_for_queue_test();
+        let boss = Uuid::new_v4();
+        let counsel = Uuid::new_v4();
+        state.session_id = Some(boss);
+        state.counsel.session_id = Some(counsel);
+        let project = Some(state.identity.id);
+
+        assert!(is_boss_chat_surface(&state, boss, project));
+        assert!(is_boss_chat_surface(&state, Uuid::new_v4(), project));
+        assert!(!is_boss_chat_surface(&state, counsel, project));
     }
 
     #[test]

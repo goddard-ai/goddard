@@ -35,6 +35,12 @@ pub(super) fn run(mut args: Vec<String>) -> anyhow::Result<()> {
                     .context("invalid revision")?,
             }
         }
+        "handoff" => {
+            let (_, opts) = flags(args, &["file", "text"], false)?;
+            CounselOperation::Handoff {
+                instruction: raw_input(&opts)?,
+            }
+        }
         "complete" => {
             let (pos, opts) = flags(args, &["revision", "evidence"], true)?;
             anyhow::ensure!(

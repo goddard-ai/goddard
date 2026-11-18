@@ -154,17 +154,10 @@ impl Waku {
             });
         // Counsel card rows live in `boss_ui` too: a proposal landing or a
         // record arriving through a state push must refold the transcript.
-        let counsel =
-            self.counsel_chat_key()
-                .and_then(|key| self.boss_ui.states.get(&key))
-                .map_or(0, |state| {
-                    state.counsel.recommendations.iter().fold(
-                        state.counsel.revision,
-                        |hash, record| {
-                            mix_uuid(mix(hash, record.anchor.is_some() as u64), record.id)
-                        },
-                    )
-                });
+        let counsel = self
+            .transcript_session_id()
+            .and_then(|id| self.counsel_state_for_session(id))
+            .map_or(0, |(_, state)| state.revision);
         mix(
             mix(
                 mix(
@@ -271,10 +264,8 @@ impl Waku {
         let pending = self.blocked_checkpoint_turn(session.id);
         // A bounded window's top edge earns a sentinel row — the trigger
         // scrolling reaches for the previous page.
-        let windowed = self
-            .transcript_views
-            .get(&session.id)
-            .is_some_and(|view| view.has_more_before);
+        let view = self.transcript_views.get(&session.id);
+        let windowed = view.is_some_and(|view| view.has_more_before);
         if let Some(key) = self.transcript_boss_chat_key() {
             let mut rows = self.boss_ui.chat_history.get(&key).map_or_else(
                 || {
@@ -299,10 +290,9 @@ impl Waku {
         let mut rows = folded_transcript_row_kinds(session, &self.expanded_turns, pending);
         // Counsel's recommendations splice into the folded flow at their
         // originating positions — content and status stay live reads.
-        if let Some(key) = self.counsel_chat_key()
-            && let Some(state) = self.boss_ui.states.get(&key)
-        {
-            splice_counsel_rows(&mut rows, session, &state.counsel.recommendations);
+        if let Some((_, state)) = self.counsel_state_for_session(session.id) {
+            let partial = view.is_some_and(|view| view.has_more_before || view.has_more_after);
+            splice_counsel_rows(&mut rows, session, &state.recommendations, partial);
         }
         if self.runtime_submission_checks.contains_key(&session.id)
             && !rows.contains(&TranscriptRowKind::WorkingIndicator)
@@ -1019,31 +1009,51 @@ pub(super) fn splice_counsel_rows(
     rows: &mut Vec<TranscriptRowKind>,
     session: &AgentSession,
     recommendations: &[waku_protocol::counsel::CounselRecommendation],
+    partial: bool,
 ) {
-    let mut unanchored = Vec::new();
-    // Reverse iteration keeps same-anchor records chronological: each
-    // insert pushes the previously placed card below the anchor.
-    for record in recommendations.iter().rev() {
-        let position = record.anchor.and_then(|anchor| {
-            rows.iter().position(|kind| {
-                matches!(kind, TranscriptRowKind::Message(index)
-                    if session.messages.get(*index).is_some_and(|m| m.id == anchor))
-            })
-        });
-        match position {
-            Some(index) => rows.insert(
-                index + 1,
-                TranscriptRowKind::CounselRecommendation(record.id),
-            ),
-            None => unanchored.push(record.id),
+    if recommendations.is_empty() {
+        return;
+    }
+    let messages: HashMap<_, _> = session.messages.iter().enumerate()
+        .map(|(index, message)| (message.id, (index, message.turn_id)))
+        .collect();
+    let mut message_rows = HashMap::new();
+    let mut turn_ends = HashMap::new();
+    for (position, row) in rows.iter().copied().enumerate() {
+        if let TranscriptRowKind::Message(index) = row {
+            message_rows.insert(index, position);
+        }
+        if let Some(turn) = row_turn_id(session, row) {
+            turn_ends.insert(turn, position);
         }
     }
-    rows.extend(
-        unanchored
-            .into_iter()
-            .rev()
-            .map(TranscriptRowKind::CounselRecommendation),
-    );
+    let mut cards = HashMap::<usize, Vec<_>>::new();
+    for record in recommendations {
+        if partial && record.anchor.is_some_and(|anchor| !messages.contains_key(&anchor)) {
+            continue;
+        }
+        let at = record.anchor.and_then(|anchor| {
+            let (message, turn) = messages.get(&anchor)?;
+            message_rows.get(message).copied().or_else(|| {
+                // Hidden openers and folded messages may have no row of
+                // their own. Keep their cards in the originating turn.
+                turn.and_then(|turn| turn_ends.get(&turn).copied())
+            })
+        }).map_or(rows.len(), |position| position + 1);
+        cards.entry(at).or_default().push(TranscriptRowKind::CounselRecommendation(record.id));
+    }
+    let row_count = rows.len();
+    let mut merged = Vec::with_capacity(row_count + recommendations.len());
+    for (index, row) in rows.drain(..).enumerate() {
+        if let Some(cards) = cards.remove(&index) {
+            merged.extend(cards);
+        }
+        merged.push(row);
+    }
+    if let Some(cards) = cards.remove(&row_count) {
+        merged.extend(cards);
+    }
+    *rows = merged;
 }
 
 /// Translate a visible anchor when a retained window refreshes into full detail.
@@ -2860,6 +2870,27 @@ mod counsel_row_splice_tests {
     }
 
     #[test]
+    fn counsel_card_with_hidden_anchor_stays_in_its_originating_turn() {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.begin_hidden_turn("Review recent work");
+        let anchor = session.messages.last().unwrap().id;
+        session.push_message(MessageRole::Assistant, "Check the build.");
+        session.finish_active_turn(TurnStatus::Completed);
+        session.begin_turn("Next question");
+
+        let card = record(1, Some(anchor), CounselStatus::Later);
+        let mut rows = folded_transcript_row_kinds(&session, &HashSet::new(), None);
+        splice_counsel_rows(&mut rows, &session, std::slice::from_ref(&card), false);
+        let card_position = rows.iter().position(|row| {
+            *row == TranscriptRowKind::CounselRecommendation(card.id)
+        }).unwrap();
+        let followup_position = rows.iter().position(|row| {
+            *row == TranscriptRowKind::Message(2)
+        }).unwrap();
+        assert!(card_position < followup_position);
+    }
+
+    #[test]
     fn counsel_cards_seat_after_their_anchor_and_keep_order() {
         let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
         session.push_message(MessageRole::User, "what next");
@@ -2878,7 +2909,10 @@ mod counsel_row_splice_tests {
             record(4, Some(Uuid::new_v4()), CounselStatus::Completed),
             record(5, None, CounselStatus::Proposed),
         ];
-        splice_counsel_rows(&mut rows, &session, &recommendations);
+        let mut partial = rows.clone();
+        splice_counsel_rows(&mut partial, &session, &recommendations, true);
+        assert!(!partial.contains(&TranscriptRowKind::CounselRecommendation(Uuid::from_u128(4))));
+        splice_counsel_rows(&mut rows, &session, &recommendations, false);
         assert_eq!(
             rows,
             vec![

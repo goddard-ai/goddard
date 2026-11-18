@@ -80,6 +80,9 @@ fn group(path: &str) -> &str {
 
 fn authority(path: &str) -> &str {
     match path {
+        "boss counsel handoff" => {
+            "Counsel-only, during a human turn with an explicit handoff instruction"
+        }
         p if p.starts_with("boss counsel ") => {
             "Counsel chat or the human only; approving, deferring, and dismissing require the client’s human controls, and delivering an approval is Counsel’s alone"
         }
@@ -144,6 +147,9 @@ fn purpose(path: &str) -> &str {
         }
         "boss counsel send" => {
             "Deliver a human-approved recommendation to Boss; Counsel-only, bound to the approved revision."
+        }
+        "boss counsel handoff" => {
+            "Relay a direct instruction from the human to Boss, including during an active turn."
         }
         "boss counsel complete" => {
             "Record concrete reported evidence that an approved instruction is complete."

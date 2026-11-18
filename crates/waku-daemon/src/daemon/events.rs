@@ -1064,6 +1064,20 @@ pub(super) fn forward_driver_events(
             gate.interrupt_delivery();
         }
         let gate_consumed = plan_gate.as_ref().is_some_and(|gate| gate.observe(&event));
+        let rejected_counsel_handoff = match &event {
+            DriverEvent::SteerRejected { message, .. } if !stale && boss.is_boss(session_id) => {
+                boss.document().counsel.session_id.filter(|counsel| {
+                    agent.has_pending_steer_matching(session_id, |entry| {
+                        entry.sender == Some(*counsel)
+                            && entry
+                                .prompt
+                                .starts_with(super::counsel::DIRECT_HANDOFF_PREFIX)
+                            && entry.transport.as_deref() == Some(message.as_str())
+                    })
+                })
+            }
+            _ => None,
+        };
         let rejected_steer = if stale {
             None
         } else {
@@ -1217,6 +1231,26 @@ pub(super) fn forward_driver_events(
                     .is_some_and(|steer| steer.context.is_some())
                 {
                     continue;
+                }
+                if let Some(counsel) = rejected_counsel_handoff {
+                    let notice = format!(
+                        "Boss's provider rejected the live handoff: {reason}. The instruction remains queued for delivery."
+                    );
+                    let saved = (|| -> anyhow::Result<()> {
+                        let mut state = task_state.lock();
+                        let session = state
+                            .session_mut(counsel)
+                            .ok_or_else(|| anyhow!("Counsel chat is unavailable"))?;
+                        task_store.hydrate(session)?;
+                        session.push_message(crate::model::MessageRole::System, notice);
+                        task_store.save(&mut state)?;
+                        Ok(())
+                    })();
+                    if let Err(error) = saved {
+                        eprintln!("could not record the rejected Counsel handoff: {error:#}");
+                    } else if let Some(backend) = auto_prompts.backend() {
+                        backend.notify_task_state();
+                    }
                 }
                 // An enveloped steer echoes the envelope; a surfaced
                 // rejection names the sender's own words.
@@ -1400,6 +1434,13 @@ pub(super) fn forward_driver_events(
                         &task_state,
                         &task_store,
                         &automations,
+                    )
+                    || automatic_counsel_waiting(
+                        session_id,
+                        &entry,
+                        &boss,
+                        &task_state,
+                        &task_store,
                     )
                     || (entry.is_plan_finalization()
                         && agent.has_open_turn(session_id)

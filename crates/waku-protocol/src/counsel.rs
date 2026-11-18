@@ -24,6 +24,14 @@ pub struct CounselState {
     pub revision: u64,
 }
 
+impl CounselState {
+    pub fn has_outstanding_recommendation(&self) -> bool {
+        self.recommendations
+            .iter()
+            .any(|record| record.status.is_outstanding())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum CounselStatus {
@@ -45,6 +53,12 @@ pub enum CounselStatus {
     /// turn or a committed queue drain. Sent is not completion.
     Sent,
     Completed,
+}
+
+impl CounselStatus {
+    pub fn is_outstanding(self) -> bool {
+        matches!(self, Self::Proposed | Self::Later)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
@@ -125,13 +139,22 @@ pub enum CounselOperation {
         expected_revision: u64,
         decision: CounselDecision,
     },
-    /// Counsel's one authorized write to Boss, legal only on a record the
+    /// Recommendation delivery requires a record the
     /// human already approved at this revision. The instruction delivered
     /// is the record's stored message — Counsel cannot supply a different
     /// one. Idempotent across retries, redeliveries, and rotation.
-    Send { id: Uuid, expected_revision: u64 },
+    Send {
+        id: Uuid,
+        expected_revision: u64,
+    },
+    /// A separate handoff requested by the human in the active Counsel turn.
+    Handoff {
+        instruction: String,
+    },
     /// Human rename of the persistent Counsel identity.
-    Rename { name: String },
+    Rename {
+        name: String,
+    },
     /// Human re-roll of Counsel's avatar seed.
     RegenerateAvatar,
     Complete {
