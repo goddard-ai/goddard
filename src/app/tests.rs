@@ -11188,6 +11188,18 @@ mod live_employee_approvals {
             rushed.service_tier = Some("fast".into());
             waku.toggle_rush(ids.second, cx);
             assert!(waku.session_is_rushed(ids.second));
+            // An event for the selected task must not surface later either.
+            waku.state.selected_session = Some(ids.second);
+            waku.queue_rush_attention(ids.second);
+            waku.state.selected_session = Some(ids.first);
+            waku.show_pending_rush(window, cx);
+            assert!(waku.big_picture.rush_session_id().is_none());
+            // A queued event is also discarded if its task becomes selected.
+            waku.queue_rush_attention(ids.second);
+            waku.state.selected_session = Some(ids.second);
+            waku.show_pending_rush(window, cx);
+            assert!(waku.big_picture.rush_session_id().is_none());
+            waku.state.selected_session = Some(ids.first);
             focus
         });
         vcx.run_until_parked();

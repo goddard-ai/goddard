@@ -2231,7 +2231,9 @@ impl Waku {
     }
 
     pub(super) fn queue_rush_attention(&mut self, session_id: Uuid) {
-        self.big_picture.queue_rush_attention(session_id);
+        if self.state.selected_session != Some(session_id) {
+            self.big_picture.queue_rush_attention(session_id);
+        }
     }
 
     pub(super) fn show_pending_rush(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -2239,7 +2241,8 @@ impl Waku {
             return;
         }
         while let Some(session_id) = self.big_picture.rush_pending.pop_front() {
-            if self.big_picture.rushed.contains(&session_id)
+            if self.state.selected_session != Some(session_id)
+                && self.big_picture.rushed.contains(&session_id)
                 && self
                     .state
                     .sessions
