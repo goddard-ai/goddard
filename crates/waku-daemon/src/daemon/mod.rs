@@ -500,6 +500,8 @@ struct RuntimeLifecycles {
     #[cfg(test)]
     event_applying: Mutex<Option<Arc<dyn Fn(Uuid, Uuid) + Send + Sync>>>,
     #[cfg(test)]
+    task_view_detail_read: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    #[cfg(test)]
     rotation_observer: Mutex<Option<RotationObserver>>,
 }
 

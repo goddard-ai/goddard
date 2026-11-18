@@ -51,6 +51,124 @@ fn next(events: &crossbeam_channel::Receiver<waku_protocol::ServerMessage>) -> D
 }
 
 #[test]
+fn task_views_hydrate_off_the_state_lock_and_publish_before_waiting_deltas() {
+    use waku_protocol::task_metadata::{TaskMetadataEdit, TaskMetadataUpdate};
+    use waku_protocol::transcript::TaskViewPayloadInterest;
+
+    for warm_during_read in [false, true] {
+        let root = std::env::temp_dir().join(format!("task-view-hydration-{}", Uuid::new_v4()));
+        let (backend, session_id) = surface_test_backend(&root);
+        let runtime_id = Uuid::new_v4();
+        let sink = EventSink::detached().begin_session_runtime(session_id, runtime_id);
+        let (client, events) = sink.tapped_connection();
+        let (sender, receiver) = driver::test_event_channel();
+        let forwarder = backend
+            .register_runtime_forwarder(
+                session_id,
+                runtime_generation_entry(runtime_id, Arc::new(CaptureDriver::default()), &root),
+                receiver,
+                sink,
+            )
+            .unwrap();
+        let call = |command| {
+            backend
+                .handle(
+                    Request {
+                        request_id: Uuid::new_v4(),
+                        session_id,
+                        runtime_id,
+                        command,
+                    },
+                    client.clone(),
+                    None,
+                )
+                .unwrap()
+        };
+        let view = |generation, payloads| {
+            call(Command::SetTaskView {
+                detail: true,
+                generation,
+                payloads,
+            })
+        };
+        backend.task_state.lock().sessions[0].release_transcript();
+        view(1, TaskViewPayloadInterest::Compact);
+        let DriverEvent::TaskViewSnapshot { session, .. } = next(&events) else {
+            panic!("expected a compact snapshot");
+        };
+        assert!(session.turns.is_empty());
+        assert!(!backend.task_state.lock().sessions[0].detail_loaded);
+
+        let timeout = std::time::Duration::from_secs(5);
+        let (detail_read, read_ready) = crossbeam_channel::bounded(1);
+        let (resume, resume_read) = crossbeam_channel::bounded(1);
+        *backend.runtime_lifecycles.task_view_detail_read.lock() = Some(Arc::new(move || {
+            detail_read.send(()).unwrap();
+            resume_read.recv_timeout(timeout).unwrap();
+        }));
+        let (event_received, event_waiting) = crossbeam_channel::bounded(1);
+        *backend.runtime_lifecycles.event_received.lock() = Some(Arc::new(move |_, _| {
+            event_received.try_send(()).ok();
+        }));
+
+        std::thread::scope(|scope| {
+            let request = scope.spawn(|| view(2, TaskViewPayloadInterest::All));
+            read_ready.recv_timeout(timeout).unwrap();
+            let lifecycle = backend.runtime_lifecycles.session(session_id);
+            assert!(lifecycle.try_lock().is_none());
+            assert!(matches!(
+                call(Command::UpdateTaskMetadata {
+                    updates: vec![TaskMetadataUpdate {
+                        session_id,
+                        edit: TaskMetadataEdit::Rename {
+                            title: "Renamed during hydration".into(),
+                        },
+                    }],
+                }),
+                ResponsePayload::TaskStateSaved { .. }
+            ));
+            if warm_during_read {
+                call(Command::HydrateSession { session_id });
+                let mut state = backend.task_state.lock();
+                let session = state.session_mut(session_id).unwrap();
+                assert!(session.detail_loaded);
+                session
+                    .queued_messages
+                    .push(crate::model::QueuedMessage::new("resident edit"));
+                session.status = crate::model::SessionStatus::Working;
+            }
+            sender.send(DriverEvent::TurnStarted).unwrap();
+            event_waiting.recv_timeout(timeout).unwrap();
+            sender
+                .send(DriverEvent::TextDelta("after snapshot".into()))
+                .unwrap();
+            assert!(events.try_recv().is_err());
+
+            resume.send(()).unwrap();
+            assert!(matches!(request.join().unwrap(), ResponsePayload::Ack));
+            let DriverEvent::TaskViewSnapshot {
+                session, settle, ..
+            } = next(&events)
+            else {
+                panic!("the full snapshot must precede the waiting event");
+            };
+            assert_eq!(session.title, "Renamed during hydration");
+            assert_eq!(session.metadata_revision, 1);
+            assert_eq!(session.turns.len(), 1);
+            assert_eq!(settle, !warm_during_read);
+            assert_eq!(session.queued_messages.len(), usize::from(warm_during_read));
+            assert!(matches!(next(&events), DriverEvent::TurnStarted));
+            assert!(
+                matches!(next(&events), DriverEvent::TextDelta(text) if text == "after snapshot")
+            );
+        });
+        drop(sender);
+        forwarder.join().unwrap();
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
+
+#[test]
 fn task_views_handoff_recovers_hidden_output_and_fences_stale_saves() {
     let root = std::env::temp_dir().join(format!("task-view-handoff-{}", Uuid::new_v4()));
     let (backend, session_id) = surface_test_backend(&root);

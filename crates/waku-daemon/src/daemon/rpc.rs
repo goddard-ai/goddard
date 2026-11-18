@@ -618,20 +618,53 @@ impl Backend for WakuBackend {
                     return Ok(ResponsePayload::Ack);
                 }
                 let mut state = phase("taskView.stateLock", || self.task_state.lock());
-                let session = state
-                    .sessions
-                    .iter_mut()
-                    .find(|s| s.id == session_id)
-                    .ok_or_else(|| anyhow!("task no longer exists"))?;
                 // A compact viewer never receives a transcript-bearing
                 // snapshot — it materializes through `readTranscriptWindow`,
                 // so subscribing must not hydrate. Its snapshot stays the
                 // summary shape; turns and queue arrive inside the window.
                 let compact = detail
                     && payloads == waku_protocol::transcript::TaskViewPayloadInterest::Compact;
-                if !compact {
-                    phase("taskView.hydrate", || self.task_store.hydrate(session))?;
+                let locate = |state: &PersistedState| {
+                    state
+                        .sessions
+                        .iter()
+                        .position(|s| s.id == session_id)
+                        .ok_or_else(|| anyhow!("task no longer exists"))
+                };
+                let mut index = locate(&state)?;
+                while !compact && !state.sessions[index].detail_loaded {
+                    let history_generation = state.sessions[index].history_generation;
+                    // The lifecycle gate stays held. Other RPCs can still edit
+                    // the catalog, so only merge into the current resident row.
+                    drop(state);
+                    let stored = phase("taskView.hydrate", || {
+                        self.task_store.load_session_detail(session_id)
+                    });
+                    #[cfg(test)]
+                    if let Some(read) = self.runtime_lifecycles.task_view_detail_read.lock().clone()
+                    {
+                        read();
+                    }
+                    state = phase("taskView.stateLock", || self.task_state.lock());
+                    index = locate(&state)?;
+                    let current = &mut state.sessions[index];
+                    if current.detail_loaded {
+                        break;
+                    }
+                    if current.history_generation != history_generation {
+                        continue;
+                    }
+                    if let Some(stored) = stored? {
+                        anyhow::ensure!(
+                            stored.history_generation == history_generation,
+                            "stored detail belongs to a different task history generation"
+                        );
+                        crate::persistence::apply_session_detail(current, stored);
+                    } else {
+                        current.detail_loaded = true;
+                    }
                 }
+                let session = &state.sessions[index];
                 let settle = !session.status.is_busy();
                 let mut snapshot = if (detail || settle) && !compact {
                     session.clone()

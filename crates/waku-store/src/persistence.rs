@@ -2019,8 +2019,10 @@ impl StateStore {
     /// columns may lag the sessions table (which gets column-only writes), so
     /// callers merge with [`apply_session_detail`] instead of adopting it.
     pub fn load_session_detail(&self, session_id: Uuid) -> io::Result<Option<AgentSession>> {
-        let connection = self.open()?;
-        read_session_detail(&connection, session_id)
+        let mut connection = self.open()?;
+        // Keep the detail and message queries on the same WAL snapshot.
+        let transaction = connection.transaction().map_err(to_io_error)?;
+        read_session_detail(&transaction, session_id)
     }
 
     /// One bounded read of the flattened transcript index. `None` means the
