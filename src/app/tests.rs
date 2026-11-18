@@ -10750,12 +10750,13 @@ mod live_employee_approvals {
     ) {
         let (_env, daemon, _supervisor, view, vcx, session_id, runtime_id) =
             model_selection_app(cx);
-        update_app(vcx, &view, |waku, _, cx| {
+        update_app(vcx, &view, |waku, window, cx| {
             waku.choose_model(
                 ProviderKind::Claude,
                 "selected-model".into(),
                 None,
                 false,
+                window,
                 cx,
             );
         });
@@ -10817,13 +10818,14 @@ mod live_employee_approvals {
     #[gpui::test]
     fn selected_model_precedes_an_immediate_prompt(cx: &mut gpui::TestAppContext) {
         let (_env, daemon, _supervisor, view, vcx, session_id, _) = model_selection_app(cx);
-        update_app(vcx, &view, |waku, _, cx| {
+        update_app(vcx, &view, |waku, window, cx| {
             let began = Instant::now();
             waku.choose_model(
                 ProviderKind::Claude,
                 "selected-model".into(),
                 None,
                 false,
+                window,
                 cx,
             );
             waku.submit_submission_for_session(
@@ -10893,9 +10895,9 @@ mod live_employee_approvals {
                 },
             })
         }));
-        update_app(vcx, &view, |waku, _, cx| {
+        update_app(vcx, &view, |waku, window, cx| {
             waku.state.session_mut(session_id).unwrap().incognito = false;
-            waku.choose_model(ProviderKind::Claude, "selected-model".into(), None, false, cx);
+            waku.choose_model(ProviderKind::Claude, "selected-model".into(), None, false, window, cx);
             waku.submit_submission_for_session(
                 session_id,
                 ComposerSubmission::plain("validate the owner and my chosen model".into()),
@@ -10917,12 +10919,12 @@ mod live_employee_approvals {
     fn queued_prompts_keep_the_configuration_selected_for_each(cx: &mut gpui::TestAppContext) {
         let (_env, daemon, _supervisor, view, vcx, session_id, runtime_id) =
             model_selection_app(cx);
-        update_app(vcx, &view, |waku, _, cx| {
+        update_app(vcx, &view, |waku, window, cx| {
             for (model, prompt) in [
                 ("first-model", "first prompt"),
                 ("latest-model", "second prompt"),
             ] {
-                waku.choose_model(ProviderKind::Claude, model.into(), None, false, cx);
+                waku.choose_model(ProviderKind::Claude, model.into(), None, false, window, cx);
                 waku.submit_submission_for_session(
                     session_id,
                     ComposerSubmission::plain(prompt.into()),
@@ -11022,12 +11024,13 @@ mod live_employee_approvals {
         daemon
             .reject_configured_prompts
             .store(true, Ordering::Release);
-        update_app(vcx, &view, |waku, _, cx| {
+        update_app(vcx, &view, |waku, window, cx| {
             waku.choose_model(
                 ProviderKind::Claude,
                 "selected-model".into(),
                 None,
                 false,
+                window,
                 cx,
             );
             waku.submit_submission_for_session(
@@ -11035,7 +11038,7 @@ mod live_employee_approvals {
                 ComposerSubmission::plain("retain my prompt".into()),
                 cx,
             );
-            waku.choose_model(ProviderKind::Claude, "latest-model".into(), None, false, cx);
+            waku.choose_model(ProviderKind::Claude, "latest-model".into(), None, false, window, cx);
         });
         wait_for(vcx, &view, |waku| {
             waku.state
