@@ -1501,11 +1501,14 @@ pub struct DaemonSessionSample {
 /// One process-memory sample written by the daemon's stats sampler — see
 /// [`Command::GetDaemonStats`]. Also the per-line shape of
 /// `daemon-stats.jsonl` in the daemon's data directory.
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct DaemonStatsSample {
     /// Unix seconds when the sample was taken.
     pub at: u64,
+    /// The memory probe skipped a busy daemon lock; those fields are from an earlier sample.
+    #[serde(default)]
+    pub probe_deferred: bool,
     /// The daemon process's own resident size. `None` on platforms without
     /// a sampler implementation, or before the first sample lands.
     pub daemon_rss_mb: Option<u64>,
@@ -1547,6 +1550,15 @@ pub struct DaemonStatsSample {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestPoolSample {
+    /// Worker slots successfully started for this pool.
+    #[serde(default)]
+    pub workers: u32,
+    /// Maximum number of jobs admitted to the execution queue.
+    #[serde(default)]
+    pub queue_capacity: u32,
+    /// Milliseconds since the oldest waiting job was submitted, including deferred admission.
+    #[serde(default)]
+    pub oldest_waiting_ms: u64,
     /// Requests submitted to this pool since boot.
     pub submits: u64,
     /// Jobs waiting for a worker in the execution or bounded admission queue.
@@ -1565,6 +1577,12 @@ pub struct RequestPoolSample {
     /// its jobs. Empty on daemons that predate command attribution.
     #[serde(default)]
     pub commands: BTreeMap<String, RequestCommandSample>,
+    /// Requests occupying workers at sample time.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub active: Vec<RequestTimingSample>,
+    /// Bounded tail of slow requests and admission failures from this boot.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent_slow: Vec<RequestTimingSample>,
 }
 
 /// One command's counters inside a pool's [`RequestPoolSample`]. `queued`,
@@ -1585,12 +1603,52 @@ pub struct RequestCommandSample {
     pub running_ms: u64,
     /// Jobs of this command finished since boot.
     pub completed: u64,
+    /// Cumulative time between admission to the execution queue and worker pickup.
+    #[serde(default)]
+    pub queue_ms: u64,
+    /// Longest single wait between admission and worker pickup.
+    #[serde(default)]
+    pub max_queue_ms: u64,
     /// Cumulative milliseconds spent running this command.
     pub run_ms: u64,
     /// Longest single completed run.
     pub max_run_ms: u64,
     /// Submits of this command rejected when admission failed or timed out.
     pub rejected: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum RequestTimingOutcome {
+    Ok,
+    Error,
+    Panicked,
+    AdmissionBusy,
+    WorkersUnavailable,
+}
+
+/// Timing only. This contains no client identifiers, request data, or error text.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestTimingSample {
+    /// Sequence within this pool and daemon boot.
+    pub sequence: u64,
+    pub operation: String,
+    /// Unix timestamp in milliseconds when sampled or completed.
+    pub at_ms: u64,
+    pub admission_ms: u64,
+    pub queue_ms: u64,
+    pub worker_ms: u64,
+    /// Present while running inside an instrumented phase.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase_ms: Option<u64>,
+    /// Time spent in completed phases. Nested phase timings can overlap.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub completed_phases_ms: BTreeMap<String, u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<RequestTimingOutcome>,
 }
 
 /// One label's subprocess counters in a [`DaemonStatsSample`]. `spawns`,

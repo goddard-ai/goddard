@@ -71,7 +71,7 @@ pub struct DaemonStats {
     path: PathBuf,
     /// The live-state readout for samples and the shutdown marker — set
     /// when the sampler starts.
-    probe: Mutex<Option<Box<dyn Fn() -> StatsProbe + Send + Sync>>>,
+    probe: Mutex<Option<Box<dyn Fn() -> Option<StatsProbe> + Send + Sync>>>,
     state: Mutex<DaemonStatsState>,
 }
 
@@ -190,7 +190,7 @@ impl DaemonStats {
     /// of daemon internals — `daemon.rs` owns the maps it reads.
     pub(crate) fn spawn_sampler(
         self: &Arc<Self>,
-        probe: impl Fn() -> StatsProbe + Send + Sync + 'static,
+        probe: impl Fn() -> Option<StatsProbe> + Send + Sync + 'static,
     ) {
         *self.probe.lock() = Some(Box::new(probe));
         let stats = self.clone();
@@ -216,15 +216,21 @@ impl DaemonStats {
     }
 
     fn current_sample(&self) -> DaemonStatsSample {
-        let probe = self
-            .probe
-            .lock()
-            .as_ref()
-            .map(|probe| probe())
-            .unwrap_or_default();
+        let at = crate::model::unix_time();
+        let request_pools = crate::server::request_pool_snapshot();
+        let subprocesses = crate::subprocess::snapshot();
+        let Some(probe) = self.probe.lock().as_ref().and_then(|probe| probe()) else {
+            let mut sample = self.state.lock().latest.clone().unwrap_or_default();
+            sample.at = at;
+            sample.probe_deferred = true;
+            sample.request_pools = request_pools;
+            sample.subprocesses = subprocesses;
+            return sample;
+        };
         let (daemon_rss_mb, children_rss_mb, children) = memory_rows(&probe);
         DaemonStatsSample {
-            at: crate::model::unix_time(),
+            at,
+            probe_deferred: false,
             daemon_rss_mb,
             children_rss_mb,
             runtimes: probe.runtimes,
@@ -232,8 +238,8 @@ impl DaemonStats {
             children,
             sessions_total: probe.sessions_total,
             sessions: probe.sessions,
-            subprocesses: crate::subprocess::snapshot(),
-            request_pools: crate::server::request_pool_snapshot(),
+            subprocesses,
+            request_pools,
         }
     }
 }
@@ -639,6 +645,7 @@ mod tests {
         let path = dir.join(STATS_FILE_NAME);
         let mut sample = DaemonStatsSample {
             at: 100,
+            probe_deferred: false,
             daemon_rss_mb: Some(200),
             children_rss_mb: Some(0),
             runtimes: 0,
@@ -676,6 +683,7 @@ mod tests {
         let path = dir.join(STATS_FILE_NAME);
         let sample = DaemonStatsSample {
             at: 100,
+            probe_deferred: false,
             daemon_rss_mb: Some(200),
             children_rss_mb: Some(0),
             runtimes: 0,
@@ -701,6 +709,7 @@ mod tests {
         let path = dir.join(STATS_FILE_NAME);
         let first = DaemonStatsSample {
             at: 100,
+            probe_deferred: false,
             daemon_rss_mb: Some(200),
             children_rss_mb: Some(1500),
             runtimes: 3,
@@ -733,6 +742,7 @@ mod tests {
         let path = dir.join(STATS_FILE_NAME);
         let sample = DaemonStatsSample {
             at: 200,
+            probe_deferred: false,
             daemon_rss_mb: Some(300),
             children_rss_mb: Some(700),
             runtimes: 2,
@@ -760,6 +770,7 @@ mod tests {
         let path = dir.join(STATS_FILE_NAME);
         let sample = DaemonStatsSample {
             at: 0,
+            probe_deferred: false,
             daemon_rss_mb: Some(1),
             children_rss_mb: Some(2),
             runtimes: 0,

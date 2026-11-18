@@ -11,6 +11,8 @@ use uuid::Uuid;
 use waku_protocol::boss::AdmissionBlocker;
 use waku_protocol::resources::*;
 
+use crate::request_timing::phase;
+
 #[derive(Default, Deserialize, Serialize)]
 struct Ledger {
     reservations: Vec<Reservation>,
@@ -107,7 +109,11 @@ impl Broker {
         if claims_devices {
             self.with_observation(task, operation, observe)
         } else if matches!(operation, ResourceOperation::Status { .. }) {
-            self.transaction(task, operation, cached_observation())
+            self.transaction(
+                task,
+                operation,
+                phase("broker.cachedObservation", cached_observation),
+            )
         } else {
             self.transaction(task, operation, Observation::unprobed())
         }
@@ -136,10 +142,15 @@ impl Broker {
             .write(true)
             .open(self.root.join("authority.lock"))?;
         crate::fs_ext::restrict_to_owner(&self.root.join("authority.lock"))?;
-        lock.lock().context("lock host resource authority")?;
+        phase("broker.authorityLock", || lock.lock()).context("lock host resource authority")?;
         let path = self.root.join("state.json");
-        let mut ledger: Ledger = read_json(&path)?.unwrap_or_default();
-        let policy: ResourcePolicy = read_json(&self.root.join("policy.json"))?.unwrap_or_default();
+        let (mut ledger, policy): (Ledger, ResourcePolicy) =
+            phase("broker.ledgerRead", || -> Result<_> {
+                Ok((
+                    read_json(&path)?.unwrap_or_default(),
+                    read_json(&self.root.join("policy.json"))?.unwrap_or_default(),
+                ))
+            })?;
         let observation = observe();
         let now = now();
         // A failed or skipped probe retains only that class's resident claims.
@@ -417,16 +428,18 @@ impl Broker {
         // Rename under a stable separate lock: a killed writer leaves either old or new complete JSON.
         let temporary = self.root.join("state.next");
         let bytes = serde_json::to_vec(&ledger)?;
-        fs::write(&temporary, bytes)?;
-        crate::fs_ext::restrict_to_owner(&temporary)?;
-        // FlushFileBuffers needs GENERIC_WRITE on Windows — a read-only
-        // File::open fails there with access denied.
-        OpenOptions::new()
-            .write(true)
-            .open(&temporary)?
-            .sync_all()?;
-        fs::rename(&temporary, &path)?;
-        crate::fs_ext::sync_dir(&self.root)?;
+        phase("broker.ledgerFlush", || -> Result<()> {
+            fs::write(&temporary, bytes)?;
+            crate::fs_ext::restrict_to_owner(&temporary)?;
+            // FlushFileBuffers needs GENERIC_WRITE on Windows.
+            OpenOptions::new()
+                .write(true)
+                .open(&temporary)?
+                .sync_all()?;
+            fs::rename(&temporary, &path)?;
+            crate::fs_ext::sync_dir(&self.root)?;
+            Ok(())
+        })?;
         drop(lock);
         Ok(ResourceStatus {
             policy,
@@ -1086,6 +1099,10 @@ fn cached_observation() -> Observation {
 }
 
 fn observe() -> Observation {
+    phase("broker.deviceProbe", observe_devices)
+}
+
+fn observe_devices() -> Observation {
     let mut observation = Observation::default();
     #[cfg(target_os = "macos")]
     if Path::new("/usr/bin/xcrun").exists() {

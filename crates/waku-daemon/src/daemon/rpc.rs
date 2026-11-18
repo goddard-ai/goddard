@@ -1,4 +1,5 @@
 use super::*;
+use waku_base::request_timing::phase;
 
 impl WakuBackend {
     fn persist_user_steer_submission(
@@ -197,42 +198,50 @@ impl Backend for WakuBackend {
         let probe_state = self.task_state.clone();
         self.stats.spawn_sampler(move || {
             let (runtimes, runtime_dirs, running) = {
-                let sessions = probe_sessions.lock();
+                let sessions = probe_sessions.try_lock()?;
                 let running: HashSet<Uuid> = sessions.keys().copied().collect();
                 let dirs = sessions
                     .iter()
-                    .map(|(session_id, entry)| crate::stats::RuntimeDir {
-                        session_id: *session_id,
-                        provider: entry.provider,
-                        cwd: std::fs::canonicalize(&entry.cwd)
-                            .unwrap_or_else(|_| entry.cwd.clone()),
-                    })
-                    .collect();
+                    .map(|(id, entry)| (*id, entry.provider, entry.cwd.clone()))
+                    .collect::<Vec<_>>();
                 (sessions.len() as u32, dirs, running)
             };
             let (terminals, terminal_roots) = {
-                let terminals = probe_terminals.lock();
+                let terminals = probe_terminals.try_lock()?;
                 let roots = terminals
                     .iter()
                     .map(|(_, entry)| (entry.terminal.child_pid(), entry.owner))
                     .collect();
                 (terminals.len() as u32, roots)
             };
-            let state = probe_state.lock();
-            crate::stats::StatsProbe {
+            let (sessions_total, sessions) = {
+                let state = probe_state.try_lock()?;
+                (
+                    state.sessions.len() as u32,
+                    state
+                        .sessions
+                        .iter()
+                        .filter_map(|session| {
+                            session_stats_sample(session, running.contains(&session.id))
+                        })
+                        .collect(),
+                )
+            };
+            Some(crate::stats::StatsProbe {
                 runtimes,
                 terminals,
-                runtime_dirs,
-                terminal_roots,
-                sessions_total: state.sessions.len() as u32,
-                sessions: state
-                    .sessions
-                    .iter()
-                    .filter_map(|session| {
-                        session_stats_sample(session, running.contains(&session.id))
+                runtime_dirs: runtime_dirs
+                    .into_iter()
+                    .map(|(session_id, provider, cwd)| crate::stats::RuntimeDir {
+                        session_id,
+                        provider,
+                        cwd: std::fs::canonicalize(&cwd).unwrap_or(cwd),
                     })
                     .collect(),
-            }
+                terminal_roots,
+                sessions_total,
+                sessions,
+            })
         });
         let sessions = self.sessions.clone();
         let lifecycles = self.runtime_lifecycles.clone();
@@ -599,7 +608,7 @@ impl Backend for WakuBackend {
                 // and publication. The targeted snapshot precedes every delta
                 // produced after the observation changes.
                 let lifecycle = self.runtime_lifecycles.session(session_id);
-                let _owner = lifecycle.lock();
+                let _owner = phase("taskView.lifecycleLock", || lifecycle.lock());
                 if !self
                     .sessions
                     .lock()
@@ -608,7 +617,7 @@ impl Backend for WakuBackend {
                 {
                     return Ok(ResponsePayload::Ack);
                 }
-                let mut state = self.task_state.lock();
+                let mut state = phase("taskView.stateLock", || self.task_state.lock());
                 let session = state
                     .sessions
                     .iter_mut()
@@ -621,7 +630,7 @@ impl Backend for WakuBackend {
                 let compact = detail
                     && payloads == waku_protocol::transcript::TaskViewPayloadInterest::Compact;
                 if !compact {
-                    self.task_store.hydrate(session)?;
+                    phase("taskView.hydrate", || self.task_store.hydrate(session))?;
                 }
                 let settle = !session.status.is_busy();
                 let mut snapshot = if (detail || settle) && !compact {

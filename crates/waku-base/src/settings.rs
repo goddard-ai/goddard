@@ -8,6 +8,8 @@ use parking_lot::Mutex;
 use uuid::Uuid;
 pub use waku_protocol::settings::DaemonSettings;
 
+use crate::request_timing::phase;
+
 pub struct DaemonSettingsStore {
     path: PathBuf,
     settings: Mutex<DaemonSettings>,
@@ -76,13 +78,13 @@ impl DaemonSettingsStore {
     }
 
     pub fn get(&self) -> DaemonSettings {
-        self.settings.lock().clone()
+        phase("settings.readLock", || self.settings.lock()).clone()
     }
 
     pub fn replace(&self, mut settings: DaemonSettings) -> io::Result<()> {
         settings.discard_legacy_app_keys();
-        let mut current = self.settings.lock();
-        write_atomic(&self.path, &settings)?;
+        let mut current = phase("settings.writeLock", || self.settings.lock());
+        phase("settings.write", || write_atomic(&self.path, &settings))?;
         *current = settings;
         Ok(())
     }

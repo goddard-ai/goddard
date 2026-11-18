@@ -29,6 +29,14 @@ runningMs: number,
  */
 completed: number,
 /**
+ * Cumulative time between admission to the execution queue and worker pickup.
+ */
+queueMs: number,
+/**
+ * Longest single wait between admission and worker pickup.
+ */
+maxQueueMs: number,
+/**
  * Cumulative milliseconds spent running this command.
  */
 runMs: number,

@@ -316,6 +316,8 @@ export type { ReportedCommand } from "./ReportedCommand";
 export type { Request } from "./Request";
 export type { RequestCommandSample } from "./RequestCommandSample";
 export type { RequestPoolSample } from "./RequestPoolSample";
+export type { RequestTimingOutcome } from "./RequestTimingOutcome";
+export type { RequestTimingSample } from "./RequestTimingSample";
 export type { Reservation } from "./Reservation";
 export type { ResourceOperation } from "./ResourceOperation";
 export type { ResourcePolicy } from "./ResourcePolicy";

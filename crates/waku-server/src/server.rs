@@ -5,7 +5,7 @@ use std::io::Write as _;
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context as _, bail};
 use base64::Engine as _;
@@ -19,6 +19,7 @@ use tungstenite::http::{StatusCode, header::ORIGIN};
 use tungstenite::protocol::WebSocketConfig;
 use tungstenite::{Message, WebSocket, accept_hdr_with_config};
 use uuid::Uuid;
+use waku_base::request_timing::PhaseCapture;
 
 use waku_protocol::event_to_wire;
 use waku_protocol::workspace::WorkspaceOperation;
@@ -27,7 +28,8 @@ use waku_protocol::MAX_WIRE_MESSAGE_BYTES;
 use waku_protocol::model::{AgentSession, DriverEvent, Project, ProviderKind, SessionStatus};
 use waku_protocol::{
     ClientMessage, Command, DaemonExposure, PROTOCOL_VERSION, ReplayCursor, Request,
-    ResponseOutcome, ResponsePayload, RpcError, SequencedEvent, ServerMessage, WireDriverEvent,
+    RequestTimingOutcome, RequestTimingSample, ResponseOutcome, ResponsePayload, RpcError,
+    SequencedEvent, ServerMessage, WireDriverEvent,
 };
 
 const ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(25);
@@ -80,11 +82,29 @@ const HEALTH_REQUEST_QUEUE: usize = 16;
 const NAVIGATION_REQUEST_WORKERS: usize = 2;
 const NAVIGATION_REQUEST_QUEUE: usize = 64;
 /// A pooled request job. The label is the command's wire `type` tag —
-/// `workspace` jobs add their operation tag (`workspace:listTree`) — so a
+/// Workspace and resource jobs add their operation tag — so a
 /// full or slow pool names what it holds instead of just counting it.
 struct PoolJob {
     label: String,
-    run: Box<dyn FnOnce() + Send + 'static>,
+    run: Box<dyn FnOnce() -> RequestTimingOutcome + Send + 'static>,
+    submission: Option<PoolSubmission>,
+    admitted: Option<Instant>,
+}
+
+#[derive(Clone, Copy)]
+struct PoolSubmission {
+    sequence: u64,
+    started: Instant,
+}
+
+const SLOW_REQUEST: Duration = Duration::from_millis(250);
+const RECENT_SLOW_LIMIT: usize = 16;
+
+fn timestamp_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 /// A job holding a worker this long earns a stderr line — the subprocess
@@ -99,6 +119,8 @@ struct CommandStats {
     submits: u64,
     queued: u32,
     completed: u64,
+    queue_ms: u64,
+    max_queue_ms: u64,
     run_ms: u64,
     max_run_ms: u64,
     rejected: u64,
@@ -111,11 +133,16 @@ struct RunningJob {
     worker: String,
     label: String,
     started: Instant,
+    sequence: u64,
+    admission_ms: u64,
+    queue_ms: u64,
+    phases: PhaseCapture,
     outlier_logged: bool,
 }
 
 #[derive(Default)]
 struct RequestPoolStats {
+    workers: u32,
     submits: u64,
     waited: u64,
     wait_ms: u64,
@@ -123,6 +150,8 @@ struct RequestPoolStats {
     rejected: u64,
     deferred: usize,
     commands: HashMap<String, CommandStats>,
+    waiting: BTreeMap<u64, Instant>,
+    recent_slow: VecDeque<RequestTimingSample>,
     /// One row per worker's current job — a queue pinned at capacity is
     /// only diagnosable if the busy workers are named too.
     running: Vec<RunningJob>,
@@ -131,6 +160,13 @@ struct RequestPoolStats {
 impl RequestPoolStats {
     fn command(&mut self, label: &str) -> &mut CommandStats {
         self.commands.entry(label.to_owned()).or_default()
+    }
+
+    fn record_slow(&mut self, sample: RequestTimingSample) {
+        if self.recent_slow.len() == RECENT_SLOW_LIMIT {
+            self.recent_slow.pop_front();
+        }
+        self.recent_slow.push_back(sample);
     }
 }
 
@@ -148,7 +184,9 @@ fn request_pools() -> &'static Mutex<HashMap<String, (RequestPoolStats, Sender<P
 /// time — the fields that name a pinned queue's jobs.
 pub fn request_pool_snapshot() -> BTreeMap<String, waku_protocol::RequestPoolSample> {
     let mut pools = request_pools().lock();
-    pools
+    let at_ms = timestamp_ms();
+    let mut warnings = Vec::new();
+    let snapshot = pools
         .iter_mut()
         .map(|(name, (stats, jobs))| {
             let mut commands: BTreeMap<String, waku_protocol::RequestCommandSample> = stats
@@ -163,6 +201,8 @@ pub fn request_pool_snapshot() -> BTreeMap<String, waku_protocol::RequestPoolSam
                             running: 0,
                             running_ms: 0,
                             completed: command.completed,
+                            queue_ms: command.queue_ms,
+                            max_queue_ms: command.max_queue_ms,
                             run_ms: command.run_ms,
                             max_run_ms: command.max_run_ms,
                             rejected: command.rejected,
@@ -170,22 +210,39 @@ pub fn request_pool_snapshot() -> BTreeMap<String, waku_protocol::RequestPoolSam
                     )
                 })
                 .collect();
+            let mut active = Vec::with_capacity(stats.running.len());
             for running in &mut stats.running {
                 let running_ms = running.started.elapsed().as_millis() as u64;
                 if running_ms >= OUTLIER_JOB_RUN.as_millis() as u64 && !running.outlier_logged {
-                    eprintln!(
-                        "goddard-daemon: {name} request `{}` has held a worker for {running_ms}ms",
-                        running.label
-                    );
+                    warnings.push((name.clone(), running.label.clone(), running_ms));
                     running.outlier_logged = true;
                 }
                 let command = commands.entry(running.label.clone()).or_default();
                 command.running += 1;
                 command.running_ms = command.running_ms.max(running_ms);
+                let phase = running.phases.active();
+                active.push(RequestTimingSample {
+                    sequence: running.sequence,
+                    operation: running.label.clone(),
+                    at_ms,
+                    admission_ms: running.admission_ms,
+                    queue_ms: running.queue_ms,
+                    worker_ms: running_ms,
+                    phase: phase.map(|(name, _)| name.to_owned()),
+                    phase_ms: phase.map(|(_, ms)| ms),
+                    completed_phases_ms: BTreeMap::new(),
+                    outcome: None,
+                });
             }
             (
                 name.clone(),
                 waku_protocol::RequestPoolSample {
+                    workers: stats.workers,
+                    queue_capacity: jobs.capacity().unwrap_or_default() as u32,
+                    oldest_waiting_ms: stats
+                        .waiting
+                        .first_key_value()
+                        .map_or(0, |(_, started)| started.elapsed().as_millis() as u64),
                     submits: stats.submits,
                     queued: jobs.len().saturating_add(stats.deferred) as u32,
                     waited: stats.waited,
@@ -193,10 +250,17 @@ pub fn request_pool_snapshot() -> BTreeMap<String, waku_protocol::RequestPoolSam
                     max_wait_ms: stats.max_wait_ms,
                     rejected: stats.rejected,
                     commands,
+                    active,
+                    recent_slow: stats.recent_slow.iter().cloned().collect(),
                 },
             )
         })
-        .collect()
+        .collect();
+    drop(pools);
+    for (pool, label, running_ms) in warnings {
+        eprintln!("goddard-daemon: {pool} request `{label}` has held a worker for {running_ms}ms");
+    }
+    snapshot
 }
 
 /// Fixed execution, queue, and deferred-admission bounds for daemon requests.
@@ -210,6 +274,7 @@ struct IndependentRequestPool {
 impl IndependentRequestPool {
     fn new(name: &'static str, workers: usize, queue_capacity: usize) -> Self {
         let (jobs, receiver) = bounded::<PoolJob>(queue_capacity);
+        let mut started_workers = 0;
         for index in 0..workers {
             let receiver = receiver.clone();
             let pool_name = name.to_owned();
@@ -217,28 +282,57 @@ impl IndependentRequestPool {
             if let Err(error) = std::thread::Builder::new()
                 .name(worker_name.clone())
                 .spawn(move || {
+                    let phases = PhaseCapture::default();
                     while let Ok(job) = receiver.recv() {
+                        let started = Instant::now();
+                        let submission = job.submission.expect("submitted jobs have timing");
+                        let admitted = job.admitted.expect("queued jobs have admission time");
+                        let admission = admitted.duration_since(submission.started);
+                        let queuing = started.duration_since(admitted);
+                        let admission_ms = admission.as_millis() as u64;
+                        let queue_ms = queuing.as_millis() as u64;
                         {
                             let mut pools = request_pools().lock();
                             let stats = &mut pools
                                 .get_mut(&pool_name)
                                 .expect("a pool registers itself at construction")
                                 .0;
+                            stats.waiting.remove(&submission.sequence);
                             let command = stats.command(&job.label);
                             command.queued = command.queued.saturating_sub(1);
+                            command.queue_ms += queue_ms;
+                            command.max_queue_ms = command.max_queue_ms.max(queue_ms);
                             stats.running.push(RunningJob {
                                 worker: worker_name.clone(),
                                 label: job.label.clone(),
-                                started: Instant::now(),
+                                started,
+                                sequence: submission.sequence,
+                                admission_ms,
+                                queue_ms,
+                                phases: phases.clone(),
                                 outlier_logged: false,
                             });
                         }
-                        let started = Instant::now();
-                        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-                            job.run,
-                        ))
-                        .is_err();
-                        let run_ms = started.elapsed().as_millis() as u64;
+                        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            phases.run(job.run)
+                        }))
+                        .unwrap_or(RequestTimingOutcome::Panicked);
+                        let run = started.elapsed();
+                        let run_ms = run.as_millis() as u64;
+                        let slow = (admission + queuing + run >= SLOW_REQUEST
+                            || outcome == RequestTimingOutcome::Panicked)
+                            .then(|| RequestTimingSample {
+                                sequence: submission.sequence,
+                                operation: job.label.clone(),
+                                at_ms: timestamp_ms(),
+                                admission_ms,
+                                queue_ms,
+                                worker_ms: run_ms,
+                                phase: None,
+                                phase_ms: None,
+                                completed_phases_ms: phases.take_completed(),
+                                outcome: Some(outcome),
+                            });
                         {
                             let mut pools = request_pools().lock();
                             let stats = &mut pools
@@ -250,8 +344,11 @@ impl IndependentRequestPool {
                             command.completed += 1;
                             command.run_ms += run_ms;
                             command.max_run_ms = command.max_run_ms.max(run_ms);
+                            if let Some(slow) = slow {
+                                stats.record_slow(slow);
+                            }
                         }
-                        if panicked {
+                        if outcome == RequestTimingOutcome::Panicked {
                             eprintln!(
                                 "daemon {worker_name} request worker recovered from a panic"
                             );
@@ -266,11 +363,17 @@ impl IndependentRequestPool {
                 })
             {
                 eprintln!("could not start daemon request worker: {error}");
+            } else {
+                started_workers += 1;
             }
         }
+        let stats = RequestPoolStats {
+            workers: started_workers,
+            ..RequestPoolStats::default()
+        };
         request_pools()
             .lock()
-            .insert(name.to_owned(), (RequestPoolStats::default(), jobs.clone()));
+            .insert(name.to_owned(), (stats, jobs.clone()));
         Self {
             name,
             jobs,
@@ -279,43 +382,87 @@ impl IndependentRequestPool {
         }
     }
 
-    fn submit(&self, job: PoolJob) -> Result<(), crossbeam_channel::SendTimeoutError<PoolJob>> {
+    fn submit(&self, mut job: PoolJob) -> Result<(), crossbeam_channel::SendTimeoutError<PoolJob>> {
         let label = job.label.clone();
-        self.record_submission_start(&label);
-        let started = Instant::now();
-        let result = self.jobs.send_timeout(job, POOL_SUBMIT_WAIT);
-        self.record_submission_result(&label, started, result.is_err());
+        let submission = self.record_submission_start(&mut job);
+        // Reserve a send slot before stamping admission. A blocking send
+        // would otherwise count capacity wait as execution-queue time.
+        let mut select = crossbeam_channel::Select::new();
+        select.send(&self.jobs);
+        let result = match select.select_deadline(submission.started + POOL_SUBMIT_WAIT) {
+            Ok(slot) => {
+                job.admitted = Some(Instant::now());
+                slot.send(&self.jobs, job)
+                    .map_err(|error| crossbeam_channel::SendTimeoutError::Disconnected(error.0))
+            }
+            Err(_) => Err(crossbeam_channel::SendTimeoutError::Timeout(job)),
+        };
+        let outcome = match &result {
+            Ok(()) => None,
+            Err(crossbeam_channel::SendTimeoutError::Timeout(_)) => {
+                Some(RequestTimingOutcome::AdmissionBusy)
+            }
+            Err(crossbeam_channel::SendTimeoutError::Disconnected(_)) => {
+                Some(RequestTimingOutcome::WorkersUnavailable)
+            }
+        };
+        self.record_submission_result(&label, submission, outcome);
         result
     }
 
     #[cfg(test)]
-    fn try_submit(&self, job: PoolJob) -> Result<(), crossbeam_channel::TrySendError<PoolJob>> {
+    fn try_submit(&self, mut job: PoolJob) -> Result<(), crossbeam_channel::TrySendError<PoolJob>> {
+        let label = job.label.clone();
+        let submission = self.record_submission_start(&mut job);
+        let result = self.try_admit(job);
+        let outcome = match &result {
+            Ok(()) => None,
+            Err(crossbeam_channel::TrySendError::Full(_)) => {
+                Some(RequestTimingOutcome::AdmissionBusy)
+            }
+            Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
+                Some(RequestTimingOutcome::WorkersUnavailable)
+            }
+        };
+        self.record_submission_result(&label, submission, outcome);
+        result
+    }
+
+    fn try_admit(&self, mut job: PoolJob) -> Result<(), crossbeam_channel::TrySendError<PoolJob>> {
+        job.admitted = Some(Instant::now());
         self.jobs.try_send(job)
     }
 
-    fn try_submit_deferred(
-        &self,
-        job: PoolJob,
-    ) -> Result<(), crossbeam_channel::TrySendError<PoolJob>> {
-        self.jobs.try_send(job)
-    }
-
-    fn record_submission_start(&self, label: &str) {
+    fn record_submission_start(&self, job: &mut PoolJob) -> PoolSubmission {
         let mut pools = request_pools().lock();
         let stats = &mut pools
             .get_mut(self.name)
             .expect("a pool registers itself at construction")
             .0;
         stats.submits += 1;
-        let command = stats.command(label);
+        let submission = PoolSubmission {
+            sequence: stats.submits,
+            started: Instant::now(),
+        };
+        let command = stats.command(&job.label);
         command.submits += 1;
         // Count before sending so a worker that receives immediately can
         // balance the pickup decrement.
         command.queued += 1;
+        stats
+            .waiting
+            .insert(submission.sequence, submission.started);
+        job.submission = Some(submission);
+        submission
     }
 
-    fn record_submission_result(&self, label: &str, started: Instant, rejected: bool) {
-        let wait_ms = started.elapsed().as_millis() as u64;
+    fn record_submission_result(
+        &self,
+        label: &str,
+        submission: PoolSubmission,
+        outcome: Option<RequestTimingOutcome>,
+    ) {
+        let wait_ms = submission.started.elapsed().as_millis() as u64;
         let mut pools = request_pools().lock();
         let stats = &mut pools
             .get_mut(self.name)
@@ -328,11 +475,24 @@ impl IndependentRequestPool {
             stats.wait_ms += wait_ms;
             stats.max_wait_ms = stats.max_wait_ms.max(wait_ms);
         }
-        if rejected {
+        if let Some(outcome) = outcome {
             stats.rejected += 1;
+            stats.waiting.remove(&submission.sequence);
             let command = stats.command(label);
             command.queued = command.queued.saturating_sub(1);
             command.rejected += 1;
+            stats.record_slow(RequestTimingSample {
+                sequence: submission.sequence,
+                operation: label.to_owned(),
+                at_ms: timestamp_ms(),
+                admission_ms: wait_ms,
+                queue_ms: 0,
+                worker_ms: 0,
+                phase: None,
+                phase_ms: None,
+                completed_phases_ms: BTreeMap::new(),
+                outcome: Some(outcome),
+            });
         }
     }
 
@@ -445,7 +605,6 @@ struct PendingPoolAdmission {
     job: Option<PoolJob>,
     request_id: Uuid,
     session_id: Uuid,
-    started: Instant,
     deadline: Instant,
     slot: DeferredAdmissionSlot,
 }
@@ -465,14 +624,13 @@ impl ConnectionDispatchState {
         &mut self,
         kind: RequestPoolKind,
         pool: &IndependentRequestPool,
-        job: PoolJob,
+        mut job: PoolJob,
         request_id: Uuid,
         session_id: Uuid,
         encoded_bytes: usize,
     ) -> Result<(), RpcError> {
         let label = job.label.clone();
-        let started = Instant::now();
-        pool.record_submission_start(&label);
+        let submission = pool.record_submission_start(&mut job);
 
         if self.has_pending_pool(kind) {
             return self.defer(
@@ -482,13 +640,13 @@ impl ConnectionDispatchState {
                 request_id,
                 session_id,
                 encoded_bytes,
-                started,
+                submission,
             );
         }
 
-        match pool.jobs.try_send(job) {
+        match pool.try_admit(job) {
             Ok(()) => {
-                pool.record_submission_result(&label, started, false);
+                pool.record_submission_result(&label, submission, None);
                 Ok(())
             }
             Err(crossbeam_channel::TrySendError::Full(job)) => self.defer(
@@ -498,10 +656,14 @@ impl ConnectionDispatchState {
                 request_id,
                 session_id,
                 encoded_bytes,
-                started,
+                submission,
             ),
             Err(crossbeam_channel::TrySendError::Disconnected(_job)) => {
-                pool.record_submission_result(&label, started, true);
+                pool.record_submission_result(
+                    &label,
+                    submission,
+                    Some(RequestTimingOutcome::WorkersUnavailable),
+                );
                 Err(RpcError::from(anyhow::anyhow!(kind.unavailable_message())))
             }
         }
@@ -515,11 +677,15 @@ impl ConnectionDispatchState {
         request_id: Uuid,
         session_id: Uuid,
         encoded_bytes: usize,
-        started: Instant,
+        submission: PoolSubmission,
     ) -> Result<(), RpcError> {
         let label = job.label.clone();
         let Some(slot) = pool.reserve_deferred(encoded_bytes) else {
-            pool.record_submission_result(&label, started, true);
+            pool.record_submission_result(
+                &label,
+                submission,
+                Some(RequestTimingOutcome::AdmissionBusy),
+            );
             return Err(RpcError::admission_busy(kind.busy_message()));
         };
         self.pending.push_back(PendingPoolAdmission {
@@ -527,8 +693,7 @@ impl ConnectionDispatchState {
             job: Some(job),
             request_id,
             session_id,
-            started,
-            deadline: started + POOL_SUBMIT_WAIT,
+            deadline: submission.started + POOL_SUBMIT_WAIT,
             slot,
         });
         Ok(())
@@ -575,14 +740,18 @@ impl ConnectionDispatchState {
             }
 
             let pool = pending.pool.pool(dispatcher);
-            let label = pending
+            let job = pending
                 .job
                 .as_ref()
-                .expect("pending admission owns a job until accepted")
-                .label
-                .clone();
+                .expect("pending admission owns a job until accepted");
+            let label = job.label.clone();
+            let submission = job.submission.expect("pending jobs have a submission time");
             if Instant::now() >= pending.deadline {
-                pool.record_submission_result(&label, pending.started, true);
+                pool.record_submission_result(
+                    &label,
+                    submission,
+                    Some(RequestTimingOutcome::AdmissionBusy),
+                );
                 drop(pending.slot);
                 if deliver_errors {
                     can_continue = self.queue_error(
@@ -611,9 +780,9 @@ impl ConnectionDispatchState {
                 .job
                 .take()
                 .expect("pending admission owns a job until accepted");
-            match pool.try_submit_deferred(job) {
+            match pool.try_admit(job) {
                 Ok(()) => {
-                    pool.record_submission_result(&label, pending.started, false);
+                    pool.record_submission_result(&label, submission, None);
                     drop(pending.slot);
                 }
                 Err(crossbeam_channel::TrySendError::Full(job)) => {
@@ -622,7 +791,11 @@ impl ConnectionDispatchState {
                     self.pending.push_back(pending);
                 }
                 Err(crossbeam_channel::TrySendError::Disconnected(_job)) => {
-                    pool.record_submission_result(&label, pending.started, true);
+                    pool.record_submission_result(
+                        &label,
+                        submission,
+                        Some(RequestTimingOutcome::WorkersUnavailable),
+                    );
                     drop(pending.slot);
                     if deliver_errors {
                         can_continue = self.queue_error(
@@ -2417,8 +2590,15 @@ impl RequestDispatcher {
         let job = PoolJob {
             label,
             run: Box::new(move || {
-                handle_request(request, outgoing, source_subscriber_id, agent, backend, hub);
+                let handled =
+                    handle_request(request, outgoing, source_subscriber_id, agent, backend, hub);
+                match handled.outcome {
+                    ResponseOutcome::Ok { .. } => RequestTimingOutcome::Ok,
+                    ResponseOutcome::Error { .. } => RequestTimingOutcome::Error,
+                }
             }),
+            submission: None,
+            admitted: None,
         };
         if let Some(state) = connection_state.as_deref_mut() {
             return match state.submit_or_defer(
@@ -4042,13 +4222,25 @@ fn command_kind(command: &Command) -> &'static str {
     }
 }
 
-/// The stats key for a pooled request: the command's wire tag, with the
-/// operation tag appended for `workspace` jobs (`workspace:listTree`)
-/// since they share one command across very different costs.
+/// The stats key for a pooled request, with an operation tag for commands
+/// that combine work with very different costs.
 fn pool_job_label(command: &Command) -> String {
     match command {
         Command::Workspace { operation } => {
             format!("workspace:{}", workspace_operation_kind(operation))
+        }
+        Command::AgentResources { operation } => {
+            use waku_protocol::resources::ResourceOperation;
+            let name = match operation {
+                ResourceOperation::Acquire { .. } => "acquire",
+                ResourceOperation::Admission { .. } => "admission",
+                ResourceOperation::Attach { .. } => "attach",
+                ResourceOperation::Reanchor { .. } => "reanchor",
+                ResourceOperation::Release { .. } => "release",
+                ResourceOperation::Cancel { .. } => "cancel",
+                ResourceOperation::Status { .. } => "status",
+            };
+            format!("agentResources:{name}")
         }
         _ => command_kind(command).to_owned(),
     }
@@ -4365,7 +4557,12 @@ mod tests {
     fn test_job(label: &str, run: impl FnOnce() + Send + 'static) -> PoolJob {
         PoolJob {
             label: label.to_owned(),
-            run: Box::new(run),
+            run: Box::new(move || {
+                run();
+                RequestTimingOutcome::Ok
+            }),
+            submission: None,
+            admitted: None,
         }
     }
 
@@ -4410,8 +4607,10 @@ mod tests {
         let (started_tx, started_rx) = std::sync::mpsc::channel::<()>();
         let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
         pool.submit(test_job("stats-blocking", move || {
-            started_tx.send(()).unwrap();
-            release_rx.recv().unwrap();
+            waku_base::request_timing::phase("test.wait", || {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            });
         }))
         .unwrap();
         started_rx
@@ -4420,12 +4619,17 @@ mod tests {
         // The single worker is parked in the first job, so this submit
         // stays queued at snapshot time.
         pool.submit(test_job("stats-queued", || {})).unwrap();
+        std::thread::sleep(SLOW_REQUEST);
 
         let snapshot = request_pool_snapshot();
         let stats = &snapshot["stats-test"];
         assert_eq!(stats.submits, 2);
         assert_eq!(stats.queued, 1);
         assert_eq!(stats.rejected, 0);
+        assert_eq!(stats.workers, 1);
+        assert_eq!(stats.queue_capacity, 4);
+        assert!(stats.oldest_waiting_ms >= SLOW_REQUEST.as_millis() as u64);
+        assert_eq!(stats.active[0].phase.as_deref(), Some("test.wait"));
         // The snapshot names what the pool holds: one job running, one
         // queued, each under its own command label.
         let running = &stats.commands["stats-blocking"];
@@ -4435,6 +4639,29 @@ mod tests {
         assert_eq!(queued.running, 0);
         assert_eq!(queued.queued, 1);
         release_tx.send(()).unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let snapshot = request_pool_snapshot();
+            let stats = &snapshot["stats-test"];
+            if let [blocked, queued] = stats.recent_slow.as_slice() {
+                assert_eq!(blocked.operation, "stats-blocking");
+                assert_eq!(blocked.outcome, Some(RequestTimingOutcome::Ok));
+                assert!(
+                    blocked.completed_phases_ms["test.wait"] >= SLOW_REQUEST.as_millis() as u64
+                );
+                assert_eq!(queued.operation, "stats-queued");
+                assert!(queued.queue_ms >= SLOW_REQUEST.as_millis() as u64);
+                assert_eq!(stats.commands["stats-queued"].max_queue_ms, queued.queue_ms);
+                assert_eq!(stats.oldest_waiting_ms, 0);
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "both slow requests should be retained"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
     }
 
     #[test]
