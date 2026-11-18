@@ -12,6 +12,9 @@ pub(super) fn inputs() -> Value {
 
 pub(super) fn availability(path: &str) -> Value {
     match path {
+        "boss counsel handoff" => {
+            json!({"roles":["counsel"],"scopedAgentCallable":true,"conditions":["Boss experiment enabled","The active Counsel turn must answer a human message containing an explicit instruction to relay"]})
+        }
         path if path.starts_with("boss counsel ") => {
             json!({"roles":["counsel","human"],"conditions":["Boss experiment enabled","Counsel drafts, delivers human-approved instructions, and records reported completion; only the human client can approve, defer, or dismiss recommendations","send is Counsel-only and carries the record's stored instruction at the approved revision — never a freshly worded message"]})
         }
@@ -335,4 +338,17 @@ fn script_examples() -> Value {
 
 fn constraint_contract() -> Value {
     json!({"summon":["outcomeId and newOutcome are mutually exclusive","finishesOutcome requires an outcome with explicit success criteria and no other live finisher; conflicts with afterSuccess","prerequisites require existing outcomeId and sibling assignment UUIDs","item requires plan; unknown/closed outcome or plan and done/dropped items reject","requestId retries must carry identical fields","worktree requires baseBranch; adopt requires finished-owner adoptWorktree","PermissionOverrides inherit per field and clamp employee supervisor grants","resources must fit host capacity; contested resources queue","priority is stored but FIFO is unchanged"],"setOutcomeState":["completed requires nonempty evidence and no pending handoffs","cancelled stops live assignments; open reopens"],"resolveHandoff":["Handoff must be pending on outcome","assign references an existing follow-up assignment","completeOutcome requires evidence; other pending handoffs block completion"],"attachPlan":["Plan must be approved; attaching does not start work or change outcome state"],"setOutcomeWaiting":["waiting=null clears wait; snoozedUntil=null clears snooze","until.at and snoozedUntil are Unix timestamps; dependency waits persist until resolved/cleared"],"control":["setPlan fields are tri-state: omitted keeps, null clears; changing plan without item drops allocation","setWorkspace allows local or worktree, never adopt; worktree requires baseBranch","setModel provider/model must exist in catalog; omitted effort resolves target default","setPermissions updates per field; cannot exceed supervisor grants","steer supports optional jobTitle; CLI boss prompt --delivery steer cannot retitle, use script control"],"personaDefault":["keep, adopt and chooseEmployeeBase require human client; scoped agents are rejected","Choose base in Settings > Boss > Personas; no CLI command is invented"],"finalizePlan":["Human client only; all scoped agent calls rejected without creating an approval request","Unscoped human call requires planFile; approval freezes document"],"setResourcePolicy":["expectedRevision must match; liveLimit >= 0; hardCap >= liveLimit","Lowering caps does not stop active work"],"files":["Relative paths only; traversal and symlinks rejected","Finalized plan documents are frozen; persona Markdown uses persona upsert"],"automation":["update requires existing id; create ignores supplied id","Workspace worktree requires baseBranch; existing requires sessionId","Schedule fields must be in range; scheduled/webhook configuration is validated by daemon"]})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn direct_counsel_handoff_advertises_only_the_counsel_role() {
+        let schema = crate::leaf_schema("boss counsel handoff");
+        assert_eq!(schema["availability"]["roles"], json!(["counsel"]));
+        assert_eq!(schema["availability"]["scopedAgentCallable"], true);
+        assert_eq!(schema["outputs"]["json"]["type"], "saved");
+    }
 }
