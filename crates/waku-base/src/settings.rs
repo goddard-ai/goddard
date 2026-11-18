@@ -4,7 +4,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use uuid::Uuid;
 pub use waku_protocol::settings::DaemonSettings;
 
@@ -12,7 +12,8 @@ use crate::request_timing::phase;
 
 pub struct DaemonSettingsStore {
     path: PathBuf,
-    settings: Mutex<DaemonSettings>,
+    snapshot: RwLock<DaemonSettings>,
+    writer: Mutex<()>,
 }
 
 impl DaemonSettingsStore {
@@ -73,19 +74,21 @@ impl DaemonSettingsStore {
         }
         Ok(Self {
             path,
-            settings: Mutex::new(settings),
+            snapshot: RwLock::new(settings),
+            writer: Mutex::new(()),
         })
     }
 
     pub fn get(&self) -> DaemonSettings {
-        phase("settings.readLock", || self.settings.lock()).clone()
+        phase("settings.readLock", || self.snapshot.read()).clone()
     }
 
     pub fn replace(&self, mut settings: DaemonSettings) -> io::Result<()> {
         settings.discard_legacy_app_keys();
-        let mut current = phase("settings.writeLock", || self.settings.lock());
+        // Keep persistence and publication in the same order across writers.
+        let _writer = phase("settings.writeLock", || self.writer.lock());
         phase("settings.write", || write_atomic(&self.path, &settings))?;
-        *current = settings;
+        *phase("settings.publishLock", || self.snapshot.write()) = settings;
         Ok(())
     }
 }
@@ -117,6 +120,109 @@ mod tests {
     use serde_json::Value;
     use uuid::Uuid;
     use waku_protocol::model::ProviderKind;
+
+    #[cfg(unix)]
+    #[test]
+    fn reads_keep_the_persisted_snapshot_during_a_failed_write() {
+        use std::ffi::CString;
+        use std::io::Read as _;
+        use std::os::unix::fs::OpenOptionsExt as _;
+        use std::sync::mpsc;
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        let directory = std::env::temp_dir().join(format!("waku-settings-{}", Uuid::new_v4()));
+        let path = directory.join("settings.json");
+        let store = DaemonSettingsStore::open(path.clone()).unwrap();
+        let mut persisted = store.get();
+        persisted.disabled_providers = vec![ProviderKind::Claude];
+        store.replace(persisted.clone()).unwrap();
+
+        let temporary = path.with_extension("json.tmp");
+        let fifo_path = CString::new(temporary.as_os_str().as_encoded_bytes()).unwrap();
+        // SAFETY: the FIFO is inside this test's unique settings directory.
+        assert_eq!(unsafe { libc::mkfifo(fifo_path.as_ptr(), 0o600) }, 0);
+        let mut fifo = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&temporary)
+            .unwrap();
+
+        let (write_started, observed, write_result) = thread::scope(|scope| {
+            let mut rejected = persisted.clone();
+            // Exceed the pipe buffer so the save stays in progress until the reader closes.
+            rejected.extra.insert(
+                "test_payload".into(),
+                Value::from("x".repeat(2 * 1024 * 1024)),
+            );
+            let store = &store;
+            let writer = scope.spawn(move || store.replace(rejected));
+
+            let timeout = Duration::from_secs(5);
+            let deadline = Instant::now() + timeout;
+            let write_started = loop {
+                match fifo.read(&mut [0]) {
+                    Ok(1) => break true,
+                    Ok(_) => (),
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => (),
+                    Err(error) => panic!("could not read the settings test pipe: {error}"),
+                }
+                if Instant::now() >= deadline {
+                    break false;
+                }
+                thread::sleep(Duration::from_millis(2));
+            };
+            let (send, receive) = mpsc::channel();
+            scope.spawn(move || send.send(store.get()).ok());
+            let observed = receive.recv_timeout(timeout);
+
+            fs::remove_file(&temporary).unwrap();
+            drop(fifo);
+            (write_started, observed, writer.join().unwrap())
+        });
+
+        let current = store.get();
+        let reopened = DaemonSettingsStore::open(path).unwrap().get();
+        fs::remove_dir_all(directory).unwrap();
+
+        assert!(write_started, "the writer did not reach the settings file");
+        assert_eq!(
+            observed.expect("settings read waited for persistence"),
+            persisted
+        );
+        assert!(write_result.is_err());
+        assert_eq!(current, persisted);
+        assert_eq!(reopened, persisted);
+    }
+
+    #[test]
+    fn concurrent_writes_leave_the_snapshot_and_file_in_agreement() {
+        use std::sync::Barrier;
+        use std::thread;
+
+        let directory = std::env::temp_dir().join(format!("waku-settings-{}", Uuid::new_v4()));
+        let path = directory.join("settings.json");
+        let store = DaemonSettingsStore::open(path.clone()).unwrap();
+        let days = [7, 14, 21, 28];
+        let start = Barrier::new(days.len());
+
+        thread::scope(|scope| {
+            for days in days {
+                let mut settings = store.get();
+                settings.employee_chat_search_days = days;
+                let (start, store) = (&start, &store);
+                scope.spawn(move || {
+                    start.wait();
+                    store.replace(settings).unwrap();
+                });
+            }
+        });
+
+        let stored: DaemonSettings = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        assert!(days.contains(&stored.employee_chat_search_days));
+        assert_eq!(store.get(), stored);
+        fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn legacy_combined_settings_keep_only_daemon_fields() {

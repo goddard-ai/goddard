@@ -1,0 +1,1 @@
+- Reading provider and other daemon settings no longer waits for an in-progress settings save.
