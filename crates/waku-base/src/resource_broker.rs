@@ -151,6 +151,8 @@ impl Broker {
                     read_json(&self.root.join("policy.json"))?.unwrap_or_default(),
                 ))
             })?;
+        let before_poll = matches!(operation, ResourceOperation::Status { .. })
+            .then(|| ledger.reservations.clone());
         let observation = observe();
         let now = now();
         // A failed or skipped probe retains only that class's resident claims.
@@ -393,6 +395,10 @@ impl Broker {
             }
         }
         schedule(&mut ledger, &policy, &observation, now);
+        // Polls can grant waiters, prune dead rows, or record orphan
+        // reaping. Persist those changes before replying. Polls that
+        // only refresh elapsed time and wait descriptions need no write.
+        let persist = before_poll.is_none_or(|before| before != ledger.reservations);
         for reservation in &mut ledger.reservations {
             reservation.duration_seconds =
                 now.saturating_sub(reservation.granted_at.unwrap_or(reservation.requested_at));
@@ -425,20 +431,27 @@ impl Broker {
                 });
             ledger.reservations[index].waiting_on = waiting_on;
         }
-        // Rename under a stable separate lock: a killed writer leaves either old or new complete JSON.
-        let temporary = self.root.join("state.next");
-        let bytes = serde_json::to_vec(&ledger)?;
-        phase("broker.ledgerFlush", || -> Result<()> {
-            fs::write(&temporary, bytes)?;
-            crate::fs_ext::restrict_to_owner(&temporary)?;
-            // FlushFileBuffers needs GENERIC_WRITE on Windows.
-            OpenOptions::new()
-                .write(true)
-                .open(&temporary)?
-                .sync_all()?;
-            fs::rename(&temporary, &path)?;
-            crate::fs_ext::sync_dir(&self.root)?;
-            Ok(())
+        if persist {
+            // Rename under a stable separate lock: a killed writer leaves either old or new complete JSON.
+            phase("broker.ledgerFlush", || -> Result<()> {
+                let temporary = self.root.join("state.next");
+                let bytes = serde_json::to_vec(&ledger)?;
+                fs::write(&temporary, bytes)?;
+                crate::fs_ext::restrict_to_owner(&temporary)?;
+                // FlushFileBuffers needs GENERIC_WRITE on Windows.
+                OpenOptions::new()
+                    .write(true)
+                    .open(&temporary)?
+                    .sync_all()?;
+                fs::rename(&temporary, &path)?;
+                Ok(())
+            })?;
+        }
+        // Even an unchanged poll can be the first reader after a writer
+        // died between rename and directory sync. Make that rename
+        // durable before returning the state to a caller.
+        phase("broker.ledgerDirectorySync", || {
+            crate::fs_ext::sync_dir(&self.root)
         })?;
         drop(lock);
         Ok(ResourceStatus {
@@ -1308,6 +1321,43 @@ mod tests {
                 .iter()
                 .any(|error| error == "device inventory not probed")
         );
+    }
+
+    #[test]
+    fn status_refreshes_diagnostics_without_writing_and_persists_grants() {
+        let h = Harness::new();
+        let task = Uuid::new_v4();
+        let resources = ios();
+        let external = Observation {
+            devices: resources.exclusive.clone(),
+            ..Default::default()
+        };
+        let pending = h
+            .broker
+            .transaction(task, acquisition(resources, None), external.clone())
+            .unwrap();
+        let id = id(&pending);
+        assert!(!granted(&pending, id));
+
+        let path = h.broker.root.join("state.json");
+        h.mutate(|ledger| {
+            ledger.reservations[0].duration_seconds = u64::MAX;
+            ledger.reservations[0].waiting_on = None;
+        });
+        let unchanged = fs::read(&path).unwrap();
+        let status = h
+            .broker
+            .transaction(task, ResourceOperation::Status { id: Some(id) }, external)
+            .unwrap();
+        assert!(!granted(&status, id));
+        assert_ne!(status.reservations[0].duration_seconds, u64::MAX);
+        assert!(status.reservations[0].waiting_on.is_some());
+        assert_eq!(fs::read(&path).unwrap(), unchanged);
+
+        let status = h.op(task, ResourceOperation::Status { id: Some(id) });
+        assert!(granted(&status, id));
+        let persisted: Ledger = read_json(&path).unwrap().unwrap();
+        assert_eq!(persisted.reservations, status.reservations);
     }
 
     #[test]
