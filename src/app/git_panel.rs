@@ -3707,12 +3707,13 @@ impl Waku {
                     icon("icons/cloud-upload.svg", 12.0, theme.text).into_any_element(),
                     tr!("git_panel.push_changes"),
                 ),
-                GitPanelPrimary::Unavailable => (
+                // A queued landing or an operation in another checkout blocks
+                // the primary action without a pending label for this panel.
+                GitPanelPrimary::Busy | GitPanelPrimary::Unavailable => (
                     icon("icons/git-commit-horizontal.svg", 12.0, theme.text_ghost)
                         .into_any_element(),
                     tr!("git_panel.commit"),
                 ),
-                GitPanelPrimary::Busy => unreachable!(),
             }
         };
 

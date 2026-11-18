@@ -9663,6 +9663,40 @@ mod live_employee_approvals {
         });
     }
 
+    #[gpui::test]
+    fn git_panel_renders_during_queued_landing(cx: &mut gpui::TestAppContext) {
+        let (_env, dir) = isolated_env();
+        let project = Project::from_path(dir.join("project"));
+        std::fs::create_dir_all(&project.path).unwrap();
+        let session = AgentSession::new(project.id, ProviderKind::Codex);
+        let daemon = FakeDaemon::start(
+            dir,
+            project.clone(),
+            vec![session.clone()],
+            boss_state(None, Vec::new()),
+        );
+        let supervisor = DaemonSupervisor::connect(&daemon.address, "test-token".into()).unwrap();
+        let (view, vcx) = test_app(cx, supervisor);
+        update_app(vcx, &view, |waku, window, cx| {
+            waku.state.selected_session = Some(session.id);
+            waku.state.projects = vec![project.clone()];
+            waku.state.sessions = vec![session];
+            waku.open_git_panel(window, cx, false);
+            let workspace = waku.selected_workspace_path().unwrap().to_path_buf();
+            waku.start_queued_landing(
+                workspace,
+                Some("main".into()),
+                waku_client::git::PullStrategy::Rebase,
+                true,
+                cx,
+            );
+            // Render before a daemon reply can settle the request.
+            assert!(waku.git_panel.is_some());
+            assert_eq!(waku.landing_operations.len(), 1);
+            waku.git_panel_pane_content(window, cx);
+        });
+    }
+
     // Deliver the late snapshot explicitly so the ordering is deterministic.
     #[gpui::test]
     fn send_from_latest_turn_supersedes_saved_landing(cx: &mut gpui::TestAppContext) {
