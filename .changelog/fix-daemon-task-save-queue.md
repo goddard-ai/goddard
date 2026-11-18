@@ -1,0 +1,1 @@
+- The desktop task list can load while transcript saves are queued behind a slow database write.

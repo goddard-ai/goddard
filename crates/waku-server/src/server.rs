@@ -70,8 +70,9 @@ const POOL_SUBMIT_WAIT: Duration = Duration::from_secs(5);
 const POOL_DEFERRED_ADMISSIONS_PER_POOL: usize = MAX_CONNECTIONS;
 const POOL_DEFERRED_BYTES_PER_POOL: usize = MAX_WIRE_MESSAGE_BYTES;
 const MAX_PENDING_ADMISSION_ERRORS: usize = 80;
-const CONTROL_REQUEST_WORKERS: usize = 4;
+const CONTROL_REQUEST_WORKERS: usize = 3;
 const CONTROL_REQUEST_QUEUE: usize = 64;
+const TASK_SAVE_REQUEST_QUEUE: usize = 64;
 const LONG_CONTROL_REQUEST_WORKERS: usize = 4;
 const LONG_CONTROL_REQUEST_QUEUE: usize = 64;
 const HEALTH_REQUEST_WORKERS: usize = 2;
@@ -396,6 +397,7 @@ enum RequestPoolKind {
     Health,
     Navigation,
     FileTree,
+    TaskSave,
 }
 
 impl RequestPoolKind {
@@ -407,6 +409,7 @@ impl RequestPoolKind {
             Self::Health => &dispatcher.health_requests,
             Self::Navigation => &dispatcher.navigation_requests,
             Self::FileTree => &dispatcher.file_tree_requests,
+            Self::TaskSave => &dispatcher.task_save_requests,
         }
     }
 
@@ -418,6 +421,7 @@ impl RequestPoolKind {
             Self::Health => 3,
             Self::Navigation => 4,
             Self::FileTree => 5,
+            Self::TaskSave => 6,
         }
     }
 
@@ -555,7 +559,7 @@ impl ConnectionDispatchState {
         deliver_errors: bool,
     ) -> bool {
         let attempts = self.pending.len();
-        let mut blocked = [false; RequestPoolKind::FileTree.index() + 1];
+        let mut blocked = [false; RequestPoolKind::TaskSave.index() + 1];
         let mut can_continue = true;
 
         for _ in 0..attempts {
@@ -1423,6 +1427,7 @@ struct RequestDispatcher {
     health_requests: IndependentRequestPool,
     navigation_requests: IndependentRequestPool,
     file_tree_requests: IndependentRequestPool,
+    task_save_requests: IndependentRequestPool,
     /// The runtime-controlled non-loopback listener, installed by `serve`
     /// once this dispatcher is shared so an exposure request arriving on
     /// any listener can rebind it.
@@ -2113,6 +2118,13 @@ impl RequestDispatcher {
                 FILE_TREE_REQUEST_WORKERS,
                 FILE_TREE_REQUEST_QUEUE,
             ),
+            // The daemon serializes these writes already. Admit them on one
+            // worker so requests waiting to save cannot occupy general controls.
+            task_save_requests: IndependentRequestPool::new(
+                "task-save",
+                1,
+                TASK_SAVE_REQUEST_QUEUE,
+            ),
             exposure: OnceLock::new(),
         }
     }
@@ -2390,6 +2402,8 @@ impl RequestDispatcher {
             )
         {
             (RequestPoolKind::FileTree, &self.file_tree_requests)
+        } else if matches!(&request.command, Command::SaveTaskState { .. }) {
+            (RequestPoolKind::TaskSave, &self.task_save_requests)
         } else if long_control {
             (RequestPoolKind::LongControl, &self.long_control_requests)
         } else if heavy {
@@ -6112,6 +6126,85 @@ mod tests {
             elapsed < Duration::from_millis(300),
             "navigation exceeded 300ms under bulk replay"
         );
+    }
+
+    #[test]
+    fn task_catalog_replies_while_saves_are_blocked() {
+        struct BlockedSaveBackend {
+            entered: Sender<()>,
+            release: Receiver<()>,
+        }
+
+        impl Backend for BlockedSaveBackend {
+            fn handle(
+                &self,
+                request: Request,
+                _: EventSink,
+                _: Option<Uuid>,
+            ) -> anyhow::Result<ResponsePayload> {
+                if matches!(request.command, Command::SaveTaskState { .. }) {
+                    let _ = self.entered.send(());
+                    let _ = self.release.recv();
+                }
+                Ok(ResponsePayload::Ack)
+            }
+        }
+
+        let (entered, entered_rx) = unbounded();
+        let (release, release_rx) = unbounded();
+        let dispatcher = RequestDispatcher::new(
+            Arc::new(BlockedSaveBackend {
+                entered,
+                release: release_rx,
+            }),
+            Arc::new(Hub::default()),
+        );
+        let (outgoing, responses) = unbounded();
+        let dispatch = |command| {
+            let request_id = Uuid::new_v4();
+            dispatcher.dispatch(
+                Request {
+                    request_id,
+                    session_id: Uuid::nil(),
+                    runtime_id: Uuid::nil(),
+                    command,
+                },
+                outgoing.clone(),
+                0,
+                None,
+            );
+            request_id
+        };
+        let mut saves: HashSet<_> = (0..CONTROL_REQUEST_WORKERS + 1)
+            .map(|_| {
+                dispatch(Command::SaveTaskState {
+                    projects: Vec::new(),
+                    live_session_ids: Vec::new(),
+                    sessions: Vec::new(),
+                    session_tails: Vec::new(),
+                })
+            })
+            .collect();
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let catalog = dispatch(Command::LoadTaskState);
+        let reply = responses.recv_timeout(Duration::from_secs(2));
+        drop(release);
+        assert!(matches!(
+            reply,
+            Ok(ServerMessage::Response { request_id, outcome: ResponseOutcome::Ok { .. } })
+                if request_id == catalog
+        ));
+        for _ in 0..saves.len() {
+            let ServerMessage::Response {
+                request_id,
+                outcome: ResponseOutcome::Ok { .. },
+            } = responses.recv_timeout(Duration::from_secs(2)).unwrap()
+            else {
+                panic!("expected successful save");
+            };
+            assert!(saves.remove(&request_id));
+        }
+        assert!(saves.is_empty());
     }
 
     /// File browsing and task opening each keep capacity while bulk work waits.
