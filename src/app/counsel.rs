@@ -134,8 +134,8 @@ impl Waku {
                     )
                     .child(
                         div()
-                            .text_size(sp(11.0))
-                            .text_color(theme.text_secondary)
+                            .text_size(sp(13.0))
+                            .text_color(theme.text_tertiary)
                             .child(subtitle),
                     ),
             )
