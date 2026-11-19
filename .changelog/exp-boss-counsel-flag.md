@@ -1,0 +1,1 @@
+- Counsel now has its own opt-in under Settings → Experiments, off by default. It works only while Boss is also enabled; turning Counsel off leaves Boss running on its own, and your Counsel chat and recommendations are still there when you turn it back on.

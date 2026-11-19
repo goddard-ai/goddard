@@ -471,6 +471,7 @@ pub(super) const SETTINGS_SEARCH_TITLES: &[(SettingsPage, &[&str])] = &[
             "experiments.subagents_title",
             "experiments.automations_title",
             "experiments.boss_title",
+            "experiments.counsel_title",
             "experiments.wireframes_title",
             "settings.composer_dictation",
             "experiments.composer_drafts_title",
@@ -5803,6 +5804,17 @@ impl Waku {
             },
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
+                id: "counsel-experiment-toggle",
+                icon: "icons/compass.svg",
+                title_key: "experiments.counsel_title",
+                description_key: "experiments.counsel_description",
+                enabled: self.state.counsel_experiment_enabled,
+                set: Self::set_counsel_experiment_enabled,
+                eval_backed: false,
+                tuning: None,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Sessions,
                 id: "wireframes-experiment-toggle",
                 icon: "icons/panel-left.svg",
                 title_key: "experiments.wireframes_title",
@@ -8289,6 +8301,17 @@ impl Waku {
             // waits for a restart or task-state revision to show its rows.
             self.refresh_boss_states(cx);
         }
+        cx.notify();
+    }
+
+    /// Counsel's opt-in rides on the Boss experiment — the combined gate
+    /// lives in `counsel_enabled_on`. Its state is pull-only inside the
+    /// Boss document, so toggling needs no fetch or unmount of its own;
+    /// the sidebar row drops out through the fingerprint and a running
+    /// Counsel chat stays in history untouched.
+    fn set_counsel_experiment_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.counsel_experiment_enabled = enabled;
+        self.save();
         cx.notify();
     }
 

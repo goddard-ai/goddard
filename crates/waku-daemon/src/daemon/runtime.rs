@@ -139,6 +139,14 @@ impl WakuBackend {
         let cwd = options.cwd.clone();
         let mut options = options;
         self.boss.require_active(session_id)?;
+        // The Counsel experiment gates its chat's runtime like its
+        // operations: off means no launch, and queued work stays parked.
+        if self.boss.is_counsel(session_id) {
+            anyhow::ensure!(
+                self.counsel_enabled(),
+                "Counsel is disabled by the experiment setting"
+            );
+        }
         anyhow::ensure!(
             !self.boss_fenced_chat(session_id),
             "task {session_id} is a fenced Boss generation; the active chat owns coordination"

@@ -1036,6 +1036,10 @@ experiments.boss_title:
   en: Boss and employees
 experiments.boss_description:
   en: Enable the Boss assistant, employee tasks, personas, and plans. Configure sidebar grouping, avatars, and employee chat search in Settings → Boss.
+experiments.counsel_title:
+  en: Counsel
+experiments.counsel_description:
+  en: A persistent adviser chat that reviews your recent work, proposes recommendations you approve or reject, and relays accepted instructions to Boss. Requires the Boss experiment.
 experiments.employee_search_window:
   en: Employee chat search
 experiments.employee_search_off:

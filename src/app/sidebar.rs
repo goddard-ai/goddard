@@ -4327,6 +4327,11 @@ impl Waku {
         // filtering, and deliverables join the list at all — with an empty
         // roster the session loop alone cannot see the flip.
         fingerprint = mix(fingerprint, u64::from(self.state.boss_experiment_enabled));
+        // Counsel's row hides on its own flag per host — remote hosts hold
+        // their own settings mirror, so mix every host's effective gate.
+        for key in &self.boss_ui.hosts {
+            fingerprint = mix(fingerprint, u64::from(self.counsel_enabled_on(*key)));
+        }
         fingerprint = mix_uuid(
             fingerprint,
             self.focused_project_id().unwrap_or(Uuid::nil()),
@@ -4881,7 +4886,9 @@ impl Waku {
                 }
             }
             for key in &self.boss_ui.hosts {
-                rows.push(SidebarRow::Counsel(*key));
+                if self.counsel_enabled_on(*key) {
+                    rows.push(SidebarRow::Counsel(*key));
+                }
             }
             rows.push(SidebarRow::GroupSpacer);
         }

@@ -603,10 +603,12 @@ impl Waku {
                 if !merged.iter().any(|command| command.name == "goal") {
                     merged.push(waku_goal_command());
                 }
-                // Counsel is a separate conversation on the same daemon.
-                if self.state.boss_experiment_enabled
-                    && (self.transcript_boss_chat_key().is_some()
-                        || self.counsel_chat_key().is_some())
+                // Counsel is a separate conversation on the same daemon,
+                // offered only while both experiment flags hold there.
+                if self
+                    .transcript_boss_chat_key()
+                    .or_else(|| self.counsel_chat_key())
+                    .is_some_and(|key| self.counsel_enabled_on(key))
                 {
                     merged.retain(|command| command.name != "counsel");
                     merged.push(SlashCommand {

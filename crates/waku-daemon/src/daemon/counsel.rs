@@ -56,12 +56,25 @@ impl WakuBackend {
         Ok(())
     }
 
+    /// Counsel rides on the Boss experiment plus its own opt-in: both flags
+    /// must be on before a Counsel session launches or its operations run.
+    /// Identity-only checks keep `boss.is_counsel` — they preserve records
+    /// across toggles rather than admitting work.
+    pub(super) fn counsel_enabled(&self) -> bool {
+        let settings = self.settings.get();
+        settings.boss_experiment_enabled && settings.counsel_experiment_enabled
+    }
+
     pub(super) fn handle_counsel_operation(
         &self,
         caller: Option<Uuid>,
         action: CounselOperation,
         events: &EventSink,
     ) -> anyhow::Result<BossResult> {
+        anyhow::ensure!(
+            self.counsel_enabled(),
+            "Counsel is disabled by the experiment setting"
+        );
         match action {
             CounselOperation::Open {
                 provider,
@@ -934,6 +947,9 @@ impl WakuBackend {
     /// recommendation turn. The eligibility check runs cheaply on the event
     /// forwarder; the eval itself runs off-thread like every other Jev call.
     pub(super) fn capture_counsel_answer_settled(&self, session_id: Uuid, events: EventSink) {
+        if !self.counsel_enabled() {
+            return;
+        }
         let Ok(admission) = self.idle_shutdown.enter() else {
             return;
         };

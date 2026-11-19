@@ -390,6 +390,11 @@ pub struct PersistedState {
     pub subagents_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
     pub boss_experiment_enabled: bool,
+    /// Counsel experiment flag mirrored from daemon settings. Counsel rides
+    /// on the Boss experiment — both flags must be on — and unlike Boss it
+    /// defaults off in every build, development included.
+    #[serde(default)]
+    pub counsel_experiment_enabled: bool,
     /// Boss rotation policy mirrored from daemon settings.
     #[serde(default)]
     pub boss_rotation_disabled: bool,
@@ -553,6 +558,7 @@ impl PersistedState {
             custom_commands: Vec::new(),
             subagents_enabled: default_experiment_enabled(),
             boss_experiment_enabled: default_experiment_enabled(),
+            counsel_experiment_enabled: false,
             boss_rotation_disabled: false,
             boss_rotation_context_threshold: 0.75,
             employee_chat_search_days: default_employee_chat_search_days(),
@@ -712,6 +718,7 @@ impl PersistedState {
             custom_commands: self.custom_commands.clone(),
             subagents_enabled: self.subagents_enabled,
             boss_experiment_enabled: self.boss_experiment_enabled,
+            counsel_experiment_enabled: self.counsel_experiment_enabled,
             boss_rotation_disabled: self.boss_rotation_disabled,
             boss_rotation_context_threshold: self.boss_rotation_context_threshold,
             employee_chat_search_days: self.employee_chat_search_days,
@@ -782,6 +789,7 @@ impl PersistedState {
         self.custom_commands = settings.custom_commands;
         self.subagents_enabled = settings.subagents_enabled;
         self.boss_experiment_enabled = settings.boss_experiment_enabled;
+        self.counsel_experiment_enabled = settings.counsel_experiment_enabled;
         self.boss_rotation_disabled = settings.boss_rotation_disabled;
         self.boss_rotation_context_threshold = settings.boss_rotation_context_threshold;
         self.employee_chat_search_days = settings.employee_chat_search_days;

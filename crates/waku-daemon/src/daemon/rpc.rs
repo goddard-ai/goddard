@@ -409,6 +409,10 @@ impl Backend for WakuBackend {
         let _admission = self.idle_shutdown.enter()?;
         if agent.is_some_and(|id| self.boss.is_counsel(id)) {
             anyhow::ensure!(
+                self.counsel_enabled(),
+                "Counsel is disabled by the experiment setting"
+            );
+            anyhow::ensure!(
                 matches!(
                     &request.command,
                     Command::Boss { .. }

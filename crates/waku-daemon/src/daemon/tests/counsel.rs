@@ -11,6 +11,7 @@ fn fixture(
     let settings = DaemonSettingsStore::open(root.join("settings.json")).unwrap();
     let mut document = settings.get();
     document.boss_experiment_enabled = true;
+    document.counsel_experiment_enabled = true;
     settings.replace(document).unwrap();
     let (mut backend, task) = surface_test_backend(root);
     assert!(backend.boss.uses_database());
@@ -1032,5 +1033,116 @@ fn counsel_revision_preserves_both_anchors_on_reopen() {
     }
     drop(persisted);
     drop(reloaded);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn counsel_experiment_requires_both_flags_and_preserves_state() {
+    let root = std::env::temp_dir().join(format!("counsel-flag-{}", Uuid::new_v4()));
+    let (backend, _task, _captures) = fixture(&root);
+
+    // boss on + counsel on: the fixture's starting point.
+    let boss = rotation_boss(&backend);
+    let counsel = open(&backend);
+    let document = backend.boss.document().counsel;
+
+    // Toggle through the live settings path — `UpdateSettings` replaces the
+    // document, deactivates Boss when its flag drops, and broadcasts the
+    // change the same way the settings UI does.
+    let set_flags = |boss: bool, counsel: bool| {
+        let mut settings = backend.settings.get();
+        settings.boss_experiment_enabled = boss;
+        settings.counsel_experiment_enabled = counsel;
+        backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: Uuid::nil(),
+                    runtime_id: Uuid::nil(),
+                    command: Command::UpdateSettings { settings },
+                },
+                EventSink::detached(),
+                None,
+            )
+            .unwrap();
+    };
+    let counsel_open = || {
+        invoke(
+            &backend,
+            None,
+            Action::Open {
+                provider: ProviderKind::Codex,
+                model: Some("gpt-6.1-sol".into()),
+                mode: Default::default(),
+            },
+        )
+    };
+    let boss_open = || {
+        backend.handle_boss_operation(
+            None,
+            BossOperation::Open {
+                provider: ProviderKind::Codex,
+                model: Some("gpt-6.1-sol".into()),
+                mode: Default::default(),
+            },
+            &EventSink::detached(),
+        )
+    };
+
+    // boss on + counsel off: Boss keeps working on its own, Counsel is
+    // refused — and its stored record is untouched by the disabled window.
+    set_flags(true, false);
+    assert!(boss_open().is_ok());
+    assert!(counsel_open().is_err());
+    assert!(invoke(&backend, None, Action::View).is_err());
+    // Counsel's own agent commands take the same gate — alternate entry
+    // points share the availability check.
+    assert!(
+        backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: counsel,
+                    runtime_id: Uuid::nil(),
+                    command: Command::AgentPrompt {
+                        task_id: Some(boss),
+                        thread_id: None,
+                        provider: None,
+                        prompt: "relay".into(),
+                        delivery: AgentPromptDelivery::Queue
+                    },
+                },
+                EventSink::detached(),
+                Some(counsel)
+            )
+            .is_err()
+    );
+    assert_eq!(backend.boss.document().counsel, document);
+    assert!(backend.boss.is_counsel(counsel));
+
+    // boss off + counsel on: Counsel still refuses — it needs both flags —
+    // and the Boss experiment's own gate keeps Boss closed.
+    set_flags(false, true);
+    assert!(counsel_open().is_err());
+    assert!(boss_open().is_err());
+
+    // boss off + counsel off: both closed. Deactivating Boss here is the
+    // live-toggle path — it must not delete Counsel's durable state.
+    set_flags(false, false);
+    assert!(counsel_open().is_err());
+    assert!(boss_open().is_err());
+
+    // boss on + counsel on: both open again, and the preserved Counsel
+    // record is the same chat — not a fresh one.
+    set_flags(true, true);
+    assert!(boss_open().is_ok());
+    let BossResult::Session { session, .. } = counsel_open().unwrap() else {
+        panic!("expected Counsel chat")
+    };
+    assert_eq!(session.id, counsel);
+    assert_eq!(backend.boss.document().counsel, document);
+    assert!(backend.boss.is_counsel(counsel));
+
+    drop(backend);
     let _ = std::fs::remove_dir_all(root);
 }

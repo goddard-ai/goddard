@@ -20,8 +20,15 @@ impl Waku {
         })
     }
 
+    /// Counsel needs both experiment flags on the owning host — its own
+    /// opt-in and the Boss experiment it rides on.
+    pub(super) fn counsel_enabled_on(&self, key: DaemonKey) -> bool {
+        let settings = self.daemon_settings_for_key(key);
+        settings.boss_experiment_enabled && settings.counsel_experiment_enabled
+    }
+
     pub(super) fn chat_with_counsel(&mut self, key: DaemonKey, cx: &mut Context<Self>) {
-        if !self.state.boss_experiment_enabled {
+        if !self.counsel_enabled_on(key) {
             return;
         }
         let provider = self
@@ -54,10 +61,14 @@ impl Waku {
         prompt: &str,
         cx: &mut Context<Self>,
     ) -> bool {
-        if prompt.trim() != "/counsel" || !self.state.boss_experiment_enabled {
+        if prompt.trim() != "/counsel" {
             return false;
         }
-        let Some(key) = self.boss_chat_key().or_else(|| self.counsel_chat_key()) else {
+        let Some(key) = self
+            .boss_chat_key()
+            .or_else(|| self.counsel_chat_key())
+            .filter(|key| self.counsel_enabled_on(*key))
+        else {
             return false;
         };
         self.composer.update(cx, |input, cx| input.clear(cx));

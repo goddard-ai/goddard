@@ -241,6 +241,10 @@ impl WakuBackend {
         self.boss.activate()?;
         if caller.is_some_and(|id| self.boss.is_counsel(id)) {
             anyhow::ensure!(
+                self.counsel_enabled(),
+                "Counsel is disabled by the experiment setting"
+            );
+            anyhow::ensure!(
                 matches!(
                     &operation,
                     BossOperation::Counsel { .. }

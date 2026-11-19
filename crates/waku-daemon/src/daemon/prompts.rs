@@ -129,12 +129,13 @@ impl WakuBackend {
         events: EventSink,
     ) -> anyhow::Result<ResponsePayload> {
         let counsel = sender.filter(|id| self.boss.is_counsel(*id));
-        // Counsel relays human input under the Boss experiment. Unmanaged
-        // agents still need the separate cross-task tools setting.
+        // Counsel relays human input under its own experiment flag plus
+        // the Boss one it rides on. Unmanaged agents still need the
+        // separate cross-task tools setting.
         if counsel.is_some() {
             anyhow::ensure!(
-                self.settings.get().boss_experiment_enabled,
-                "Boss is disabled by the experiment setting"
+                self.counsel_enabled(),
+                "Counsel is disabled by the experiment setting"
             );
         } else {
             self.require_agent_tools()?;

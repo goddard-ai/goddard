@@ -2748,6 +2748,12 @@ pub struct PersistedState {
     /// Experimental Boss surface and daemon feature flag, mirrored from the daemon.
     #[serde(default = "default_experiment_enabled")]
     pub boss_experiment_enabled: bool,
+    /// Experimental Counsel surface and daemon feature flag, mirrored from
+    /// the daemon. Counsel rides on the Boss experiment — both flags must
+    /// be on — and unlike Boss it defaults off in every build, development
+    /// included.
+    #[serde(default)]
+    pub counsel_experiment_enabled: bool,
     /// Daemon-owned Boss rotation policy mirrored for the settings UI.
     #[serde(default)]
     pub boss_rotation_disabled: bool,
@@ -3114,6 +3120,7 @@ impl PersistedState {
             qa_branch: default_qa_branch(),
             subagents_enabled: default_experiment_enabled(),
             boss_experiment_enabled: default_experiment_enabled(),
+            counsel_experiment_enabled: false,
             boss_rotation_disabled: false,
             boss_rotation_context_threshold: default_boss_rotation_threshold(),
             employee_chat_search_days: default_employee_chat_search_days(),
@@ -3494,6 +3501,7 @@ impl PersistedState {
             qa_branch: self.qa_branch.clone(),
             subagents_enabled: self.subagents_enabled,
             boss_experiment_enabled: self.boss_experiment_enabled,
+            counsel_experiment_enabled: self.counsel_experiment_enabled,
             boss_rotation_disabled: self.boss_rotation_disabled,
             boss_rotation_context_threshold: self.boss_rotation_context_threshold,
             employee_chat_search_days: self.employee_chat_search_days,
@@ -3534,6 +3542,7 @@ impl PersistedState {
         self.qa_branch = settings.qa_branch;
         self.subagents_enabled = settings.subagents_enabled;
         self.boss_experiment_enabled = settings.boss_experiment_enabled;
+        self.counsel_experiment_enabled = settings.counsel_experiment_enabled;
         self.boss_rotation_disabled = settings.boss_rotation_disabled;
         self.boss_rotation_context_threshold = settings.boss_rotation_context_threshold;
         self.employee_chat_search_days = settings.employee_chat_search_days;
@@ -7206,6 +7215,20 @@ mod tests {
         // A provider with no hosted environment falls back to the host.
         let session = state.new_session(Uuid::new_v4(), ProviderKind::Pi);
         assert_eq!(session.environment(), SessionEnvironment::Local);
+    }
+
+    #[test]
+    fn counsel_experiment_flag_defaults_off_and_mirrors_daemon_settings() {
+        // Counsel is opt-in in every build — an old document without the
+        // key and a fresh state alike default it off.
+        let state = PersistedState::empty();
+        assert!(!state.counsel_experiment_enabled);
+        assert!(!state.daemon_settings().counsel_experiment_enabled);
+
+        let mut mirror = PersistedState::empty();
+        mirror.counsel_experiment_enabled = true;
+        mirror.apply_daemon_settings(state.daemon_settings());
+        assert!(!mirror.counsel_experiment_enabled);
     }
 
     #[test]
