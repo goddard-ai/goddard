@@ -27,13 +27,13 @@ use anyhow::{Context as _, Result};
 use base64::Engine as _;
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use gpui::{
-    AnyElement, App, AppContext, Bounds, ClipboardItem, Context, Entity, EventEmitter, FocusHandle,
-    Focusable, FontFallbacks, FontStyle, FontWeight, Global, Hsla, InteractiveElement, IntoElement,
-    KeyBinding, KeyDownEvent, Keystroke, Modifiers, ModifiersChangedEvent, MouseButton,
-    MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point,
-    Render, ScrollDelta, ScrollWheelEvent, SharedString, StrikethroughStyle, Styled, StyledText,
-    Subscription, Task, TextAlign, TextRun, UnderlineStyle, Window, actions, canvas, div, fill,
-    font, point, px, rgb, size,
+    AnyElement, App, AppContext, Bounds, ClipboardItem, Context, Div, Entity, EventEmitter,
+    FocusHandle, Focusable, FontFallbacks, FontStyle, FontWeight, Global, Hsla, InteractiveElement,
+    IntoElement, KeyBinding, KeyDownEvent, Keystroke, Modifiers, ModifiersChangedEvent,
+    MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, ParentElement,
+    Pixels, Point, Render, ScrollDelta, ScrollWheelEvent, SharedString, StrikethroughStyle, Styled,
+    StyledText, Subscription, Task, TextAlign, TextRun, UnderlineStyle, Window, actions, canvas,
+    div, fill, font, point, px, rgb, size,
 };
 use parking_lot::Mutex;
 
@@ -1543,10 +1543,6 @@ pub struct TerminalView {
     /// Terminals rendered inside another surface — the provider setup block
     /// in Settings — keep their own header strip and skip the command bar.
     embedded: bool,
-    /// One cell of a split group — like `embedded` the grid sizes to its
-    /// painted cell and the toolbar strip shows, but a pane stays a user
-    /// shell: the command bar and context menu still work.
-    pane: bool,
     /// Advance width of one grid cell, measured from the terminal font on
     /// first render so grid math matches what `StyledText` actually lays out.
     /// Keyed by family and size so a font change re-measures instead of
@@ -1649,7 +1645,6 @@ impl TerminalView {
             scroll_accumulator: 0.0,
             panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
             embedded: false,
-            pane: false,
             measured_cell_width: None,
             scrollbar_state: ScrollbarState::new(),
             grid_bounds: Rc::new(Cell::new(None)),
@@ -1766,7 +1761,6 @@ impl TerminalView {
             scroll_accumulator: 0.0,
             panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
             embedded: false,
-            pane: false,
             measured_cell_width: None,
             scrollbar_state: ScrollbarState::new(),
             grid_bounds: Rc::new(Cell::new(None)),
@@ -1998,10 +1992,66 @@ impl TerminalView {
         self.panel_width = width;
     }
 
-    /// Join or leave a split group: pane mode sizes the grid to the
-    /// painted cell and shows the toolbar strip.
-    pub fn set_pane(&mut self, pane: bool) {
-        self.pane = pane;
+    #[cfg(test)]
+    pub(crate) fn painted_grid_bounds(&self) -> Option<Bounds<Pixels>> {
+        self.grid_bounds.get()
+    }
+
+    #[track_caller]
+    pub(crate) fn render_toolbar(&self, controls: Option<AnyElement>, cx: &App) -> Div {
+        let theme = Theme::current(cx);
+        let title = if self.title().trim().is_empty() {
+            tr!("right_panel.terminal")
+        } else {
+            self.title().to_owned()
+        };
+        let directory = self
+            .working_directory
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_owned)
+            .unwrap_or_else(|| tr!("workspace.workspace"));
+        div()
+            .h(px(TERMINAL_TOOLBAR_HEIGHT))
+            .flex_none()
+            .pl(px(10.0))
+            .pr(px(if controls.is_some() { 6.0 } else { 34.0 }))
+            .flex()
+            .items_center()
+            .gap(px(7.0))
+            .border_b(hairline())
+            .border_color(theme.separator)
+            .bg(theme.surface)
+            .child(
+                div()
+                    .w(px(6.0))
+                    .h(px(6.0))
+                    .rounded_full()
+                    .bg(if self.exited {
+                        theme.danger
+                    } else {
+                        theme.accent
+                    }),
+            )
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .truncate()
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_secondary)
+                    .child(SharedString::from(title)),
+            )
+            .child(
+                div()
+                    .when(controls.is_none(), |directory| directory.flex_none())
+                    .min_w_0()
+                    .truncate()
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_tertiary)
+                    .child(directory),
+            )
+            .children(controls)
     }
 
     pub fn refresh_localized_text(&mut self, cx: &mut Context<Self>) {
@@ -3335,60 +3385,7 @@ impl Render for TerminalView {
 
         let command_bar = self.command_bar_element(window, cx);
 
-        // Only an embedded terminal or a split pane keeps the header
-        // strip. Its trailing inset clears the kill button the parent
-        // overlays at the toolbar's right edge.
-        let toolbar = (self.embedded || self.pane).then(|| {
-            let title = if self.title().trim().is_empty() {
-                tr!("right_panel.terminal")
-            } else {
-                self.title().to_owned()
-            };
-            let directory = self
-                .working_directory
-                .file_name()
-                .and_then(|name| name.to_str())
-                .map(str::to_owned)
-                .unwrap_or_else(|| tr!("workspace.workspace"));
-            div()
-                .h(px(TERMINAL_TOOLBAR_HEIGHT))
-                .flex_none()
-                .pl(px(10.0))
-                .pr(px(if self.pane { 62.0 } else { 34.0 }))
-                .flex()
-                .items_center()
-                .gap(px(7.0))
-                .border_b(hairline())
-                .border_color(theme.separator)
-                .bg(theme.surface)
-                .child(
-                    div()
-                        .w(px(6.0))
-                        .h(px(6.0))
-                        .rounded_full()
-                        .bg(if self.exited {
-                            theme.danger
-                        } else {
-                            theme.accent
-                        }),
-                )
-                .child(
-                    div()
-                        .min_w_0()
-                        .flex_1()
-                        .truncate()
-                        .text_size(sp(12.5))
-                        .text_color(theme.text_secondary)
-                        .child(SharedString::from(title)),
-                )
-                .child(
-                    div()
-                        .flex_none()
-                        .text_size(sp(12.5))
-                        .text_color(theme.text_tertiary)
-                        .child(directory),
-                )
-        });
+        let toolbar = self.embedded.then(|| self.render_toolbar(None, cx));
 
         let grid = div()
             .flex_1()

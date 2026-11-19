@@ -9534,6 +9534,71 @@ mod live_employee_approvals {
         (guard, dir)
     }
 
+    #[gpui::test]
+    fn floating_terminal_splits_fill_the_card(cx: &mut gpui::TestAppContext) {
+        let (_env, dir) = isolated_env();
+        let project = Project::from_path(dir.clone());
+        let daemon = FakeDaemon::start(
+            dir.clone(),
+            project,
+            Vec::new(),
+            boss_state(None, Vec::new()),
+        );
+        let supervisor = DaemonSupervisor::connect(&daemon.address, "test-token".into()).unwrap();
+        let (view, vcx) = test_app(cx, supervisor);
+        let (anchor, right) = update_app(vcx, &view, |waku, window, cx| {
+            let anchor = waku.create_terminal(dir, None, None, cx).unwrap();
+            waku.open_docked_terminal(anchor, window, cx);
+            let right = waku
+                .split_terminal(
+                    anchor,
+                    super::super::terminals::STANDALONE_TERMINAL_MAX_PANES,
+                    window,
+                    cx,
+                )
+                .unwrap();
+            (anchor, right)
+        });
+
+        let grid = |vcx: &mut VisualTestContext, pane| {
+            vcx.update(|_, cx| {
+                view.read(cx).right_panel_terminals[&pane]
+                    .read(cx)
+                    .painted_grid_bounds()
+                    .expect("the terminal grid has painted")
+            })
+        };
+        vcx.run_until_parked();
+        let card = vcx.debug_bounds("docked-terminal-card").unwrap();
+        let left_grid = grid(vcx, anchor);
+        let right_grid = grid(vcx, right);
+        for bounds in [left_grid, right_grid] {
+            assert!(
+                bounds.size.height > card.size.height - px(70.0),
+                "each grid fills the card below its pane toolbar: {bounds:?} in {card:?}"
+            );
+            assert!((bounds.size.width - card.size.width / 2.0).abs() < px(35.0));
+        }
+
+        let lower = update_app(vcx, &view, |waku, window, cx| {
+            let focus = waku.right_panel_terminals[&right].read(cx).focus_handle(cx);
+            window.focus(&focus, cx);
+            waku.split_terminal_down_action(&crate::SplitTerminalDown, window, cx);
+            let panes = waku.terminal_group_panes(anchor);
+            assert_eq!(panes.len(), 3);
+            panes[2]
+        });
+        vcx.run_until_parked();
+        let upper_grid = grid(vcx, right);
+        let lower_grid = grid(vcx, lower);
+        let updated_left = grid(vcx, anchor);
+        assert!((updated_left.size.width - left_grid.size.width).abs() < px(2.0));
+        assert!((updated_left.size.height - left_grid.size.height).abs() < px(2.0));
+        assert!(lower_grid.origin.y > upper_grid.origin.y + upper_grid.size.height);
+        assert!((upper_grid.size.height - lower_grid.size.height).abs() < px(2.0));
+        assert!(lower_grid.size.height > px(40.0));
+    }
+
     // Exercises actual clipboard/key dispatch and task draft switching, without screenshots.
     #[gpui::test]
     fn composer_chips_copy_between_tasks_and_survive_undo(cx: &mut gpui::TestAppContext) {

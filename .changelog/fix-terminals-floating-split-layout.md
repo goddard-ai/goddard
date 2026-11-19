@@ -1,0 +1,1 @@
+- Split panes now fill the floating terminal card. Use the first pane’s toolbar to expand or hide the group.
