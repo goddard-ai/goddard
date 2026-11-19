@@ -699,9 +699,14 @@ dormant.confirm_description_busy_worktree: 進行中のターンがあり、チ�
 recent_prompts.action: 最近のプロンプトを復元…
 recent_prompts.menu_header: 最近送信したプロンプト
 reclaim.title: ディスク容量を解放
-reclaim.description: 使っていないタスクは依存関係やビルド成果物をそれぞれ保持しています。削除しても次回のインストールやビルドで再生成されます。ソースの変更やタスク自体はそのまま残ります。
-reclaim.scanning: ワークツリーをスキャン中…
-reclaim.empty: 解放できる再生成可能な出力を持つワークツリーはありません。
+reclaim.description: アイドル状態のタスクには依存関係、ビルド成果物、スクラッチファイルが残っていることがあります。削除するとディスク容量を解放できます。ソースの変更とタスク自体はそのまま残ります。
+reclaim.scanning: タスクをスキャン中…
+reclaim.scan_progress: "スキャン済み: %{done} / %{total} タスク"
+reclaim.scan_current: "%{title} をスキャン中…"
+reclaim.scan_failures: "%{count} 件のタスクを完全にスキャンできませんでした。結果が不完全な可能性があります。"
+reclaim.incomplete: "完了したスキャンの結果はありません。"
+reclaim.retry: "タスクを再スキャン"
+reclaim.empty: 解放できる成果物やスクラッチ領域を持つアイドルタスクはありません。
 reclaim.confirm: "%{size} を解放"
 reclaim.confirm_generic: 解放
 reclaim.completed: "%{size} を解放しました"

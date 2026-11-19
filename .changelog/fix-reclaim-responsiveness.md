@@ -1,1 +1,1 @@
-- Reclaim Disk Space now scans and cleans worktrees one at a time to reduce contention with other desktop work; canceling a scan skips worktrees still in its queue.
+- Reclaim Disk Space scans and cleans tasks one at a time to reduce contention, shows results and progress as they arrive, and lets you rescan after failures. Canceling skips tasks still in the scan queue.

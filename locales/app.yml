@@ -2359,11 +2359,21 @@ dormant.confirm_description_busy_worktree:
 reclaim.title:
   en: Reclaim disk space
 reclaim.description:
-  en: Idle tasks keep their own copies of dependencies and build outputs. Deleting them frees disk space — they regenerate on the next install or build. Source changes and the tasks themselves stay untouched.
+  en: Idle tasks may keep dependencies, build outputs, and scratch files. Deleting them frees disk space. Source changes and the tasks themselves stay untouched.
 reclaim.scanning:
-  en: Scanning worktrees…
+  en: Scanning tasks…
+reclaim.scan_progress:
+  en: "Scanned %{done} of %{total} tasks"
+reclaim.scan_current:
+  en: "Scanning %{title}…"
+reclaim.scan_failures:
+  en: "%{count} tasks could not be fully scanned. Results may be incomplete."
+reclaim.incomplete:
+  en: No results available from completed scans.
+reclaim.retry:
+  en: Rescan tasks
 reclaim.empty:
-  en: No idle worktrees hold regenerable outputs.
+  en: No idle tasks hold reclaimable outputs or scratch space.
 reclaim.confirm:
   en: "Reclaim %{size}"
 reclaim.confirm_generic:

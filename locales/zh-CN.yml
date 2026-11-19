@@ -689,9 +689,14 @@ dormant.confirm_description_busy_worktree: 该任务仍有进行中的回合，�
 recent_prompts.action: 恢复最近的提示…
 recent_prompts.menu_header: 最近发送的提示
 reclaim.title: 回收磁盘空间
-reclaim.description: 空闲任务各自保留依赖和构建产物的副本。删除它们可以释放磁盘空间——下次安装或构建时会重新生成。源代码更改和任务本身不受影响。
-reclaim.scanning: 正在扫描工作树…
-reclaim.empty: 没有持有可重新生成输出的空闲工作树。
+reclaim.description: 空闲任务可能保留依赖、构建产物和暂存文件。删除它们可以释放磁盘空间。源代码更改和任务本身不受影响。
+reclaim.scanning: 正在扫描任务…
+reclaim.scan_progress: "已扫描 %{done} / %{total} 个任务"
+reclaim.scan_current: "正在扫描 %{title}…"
+reclaim.scan_failures: "%{count} 个任务未能完整扫描，结果可能不完整。"
+reclaim.incomplete: "已完成的扫描没有可用结果。"
+reclaim.retry: "重新扫描任务"
+reclaim.empty: 没有空闲任务持有可回收的产物或暂存空间。
 reclaim.confirm: "回收 %{size}"
 reclaim.confirm_generic: 回收
 reclaim.completed: "已回收 %{size}"
