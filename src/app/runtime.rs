@@ -9125,6 +9125,7 @@ impl Waku {
                     }
                     self.splice_transcript_rows_after_visibility_change(&previous_kinds);
                 }
+                eprintln!("could not prepare the workspace for task {session_id}: {error:#}");
                 let needs_recovery = error.downcast_ref::<WorkspaceRecoveryRequired>().is_some();
                 if selected || boss_send || needs_recovery {
                     if needs_recovery && !selected && !boss_send {
@@ -9135,7 +9136,7 @@ impl Waku {
                     if needs_recovery {
                         self.show_workspace_recovery_notice(session_id);
                     } else {
-                        self.show_toast(tr!("errors.create_worktree", error = error));
+                        self.show_toast(tr!("errors.send_workspace_preparation"));
                     }
                 }
                 cx.notify();

@@ -99,7 +99,10 @@ impl RouteStartPlan {
             // A route call that cannot answer, or a resolved provider with no
             // binary, still owes the user a running session — the draft's own
             // provider stands in, the way an unrouted submission would start.
-            Ok(Err(_)) | Err(_) => (None, self.fallback?),
+            Ok(Err(error)) | Err(error) => {
+                eprintln!("could not route task {}: {error:#}", self.session_id);
+                (None, self.fallback?)
+            }
         };
         let task_registration = task_registration.map(|(project, mut session)| {
             if let Some(decision) = &decision {

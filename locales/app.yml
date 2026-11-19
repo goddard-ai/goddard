@@ -4161,6 +4161,8 @@ errors.store_pasted_text:
   en: "Could not attach the pasted text: %{error}"
 errors.create_worktree:
   en: "Could not create the worktree: %{error}"
+errors.send_workspace_preparation:
+  en: "Message wasn’t sent because the workspace couldn’t be prepared. Try sending again."
 errors.move_to_worktree:
   en: "Could not move the task to a worktree: %{error}"
 errors.prepared_runtime_unavailable:

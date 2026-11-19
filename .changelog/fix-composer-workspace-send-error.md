@@ -1,0 +1,1 @@
+- If Goddard can’t prepare the workspace for a message, it tells you the message wasn’t sent and prompts you to retry.
