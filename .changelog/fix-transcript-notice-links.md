@@ -1,0 +1,1 @@
+- Long transcript notices wrap onto multiple lines, and web links in them are clickable.

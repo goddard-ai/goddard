@@ -1787,24 +1787,29 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                 div().w_full().flex().justify_center().child(
                     div()
                         .flex()
+                        .min_w_0()
+                        .max_w_full()
+                        .whitespace_normal()
                         .items_center()
                         .gap(px(5.0))
                         .px(px(10.0))
                         .py(px(4.0))
-                        .rounded_full()
+                        .rounded(px(10.0))
                         .bg(theme.overlay)
                         .text_size(sp(12.5))
                         .line_height(sp(16.0))
                         .when_some(status_kind, |row, kind| {
-                            row.child(status_notice_icon(kind, provider, theme, 11.0))
+                            row.child(
+                                div()
+                                    .flex_none()
+                                    .child(status_notice_icon(kind, provider, theme, 11.0)),
+                            )
                         })
-                        .child(md::render::plain_text(
+                        .child(div().min_w_0().child(md::render::notice_text(
                             content.clone(),
-                            ctx.families().ui.clone(),
-                            FontWeight::NORMAL,
                             theme.text_tertiary,
                             ctx,
-                        ))
+                        )))
                         .when(model_switched, |row| {
                             row.child(model_switch_cache_info(message_id, theme))
                         }),
@@ -1909,18 +1914,21 @@ fn status_notice_row(
         .w_full()
         .flex()
         .items_center()
+        .whitespace_normal()
         .gap(px(6.0))
         .py(px(4.0))
         .text_size(sp(12.5))
         .line_height(sp(16.0))
-        .child(status_notice_icon(status, provider, theme, 12.0))
-        .child(md::render::plain_text(
+        .child(
+            div()
+                .flex_none()
+                .child(status_notice_icon(status, provider, theme, 12.0)),
+        )
+        .child(div().min_w_0().child(md::render::notice_text(
             content.to_owned(),
-            ctx.families().ui.clone(),
-            FontWeight::NORMAL,
             theme.text_tertiary,
             ctx,
-        ))
+        )))
         .when(status == TranscriptNoticeStatus::ModelSwitched, |row| {
             row.child(model_switch_cache_info(message_id, theme))
         })

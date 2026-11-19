@@ -2734,6 +2734,89 @@ pub fn plain_text(
     text_element(&flat, key, ctx)
 }
 
+/// Selectable notice text with clickable bare web URLs and literal formatting.
+pub fn notice_text(text: impl Into<SharedString>, color: Hsla, ctx: &Ctx) -> AnyElement {
+    let key = ctx.next_key();
+    let flat = ctx.flat(key.index, || {
+        let mut flat = flatten_plain(text, ctx.families.ui.clone(), FontWeight::NORMAL, color);
+        let Some(base_run) = flat.runs.first().cloned() else {
+            return flat;
+        };
+        let mut cursor = 0;
+        let mut runs = Vec::new();
+        for range in super::parser::bare_web_url_ranges(&flat.text) {
+            if cursor < range.start {
+                runs.push(TextRun {
+                    len: range.start - cursor,
+                    ..base_run.clone()
+                });
+            }
+            runs.push(TextRun {
+                len: range.len(),
+                underline: Some(UnderlineStyle {
+                    color: Some(color),
+                    thickness: px(1.0),
+                    wavy: false,
+                }),
+                ..base_run.clone()
+            });
+            cursor = range.end;
+            flat.links
+                .push((range.clone(), flat.text[range].to_owned()));
+        }
+        if cursor > 0 {
+            if cursor < flat.text.len() {
+                runs.push(TextRun {
+                    len: flat.text.len() - cursor,
+                    ..base_run
+                });
+            }
+            flat.runs = runs;
+        }
+        flat
+    });
+    let body = text_element(&flat, key.clone(), ctx);
+    if flat.links.is_empty() {
+        return body;
+    }
+    let handler = ctx
+        .link_handler
+        .clone()
+        .unwrap_or_else(|| Rc::new(|url, _, cx| cx.open_url(url)));
+    let menu = ctx.context_menu.clone();
+    div()
+        .id(SharedString::from(format!(
+            "{}-notice-links-{}",
+            key.row, key.index
+        )))
+        .min_w_0()
+        .tab_index(0)
+        .focus_visible(|style| style.bg(ctx.palette.selection))
+        .on_key_down(move |event: &KeyDownEvent, window, cx| {
+            if !matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                return;
+            }
+            if let [(_, url)] = flat.links.as_slice() {
+                handler(url, window, cx);
+            } else if let Some(menu) = &menu {
+                menu.set_context_items(
+                    flat.links
+                        .iter()
+                        .map(|(_, url)| {
+                            let url = url.clone();
+                            let handler = handler.clone();
+                            MenuItem::new(url.clone(), move |window, cx| handler(&url, window, cx))
+                        })
+                        .collect(),
+                );
+                menu.open_context_menu(window, cx);
+            }
+            cx.stop_propagation();
+        })
+        .child(body)
+        .into_any_element()
+}
+
 /// A zero-size canvas that clears the frame's registry. Paint it *before* any
 /// transcript text so the registry holds exactly this frame's visible elements.
 pub fn frame_reset(selection: TranscriptSelection) -> impl IntoElement {
