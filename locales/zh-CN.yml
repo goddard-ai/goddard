@@ -719,6 +719,7 @@ sidebar.ordering_last_created: 最近创建
 sidebar.show_more: 显示更多
 sidebar.show_dormant: 显示休眠任务
 sidebar.pinned: 已置顶
+sidebar.rushed: 加急
 sidebar.terminals: 终端
 sidebar.dormant: 休眠
 sidebar.chats: 聊天

@@ -2419,6 +2419,8 @@ sidebar.show_dormant:
   en: Show dormant
 sidebar.pinned:
   en: Pinned
+sidebar.rushed:
+  en: Rushed
 sidebar.terminals:
   en: Terminals
 sidebar.dormant:

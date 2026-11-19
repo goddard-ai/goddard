@@ -108,7 +108,9 @@ impl SessionDateGroup {
 /// between Project and Date grouping.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(super) enum SidebarGroup {
-    /// Pinned tasks, always the first section regardless of grouping.
+    /// Rushed tasks, above Pinned in either grouping.
+    Rushed,
+    /// Pinned tasks that are not rushed.
     Pinned,
     /// Every terminal — session-scoped and global — sitting between the
     /// search field and the session history. Starts collapsed; pinned
@@ -135,6 +137,7 @@ pub(super) enum SidebarGroup {
 impl SidebarGroup {
     pub(super) fn element_key(self) -> SharedString {
         match self {
+            Self::Rushed => "rushed".into(),
             Self::Pinned => "pinned".into(),
             Self::Terminals => "terminals".into(),
             Self::Dormant => "dormant".into(),
@@ -154,6 +157,7 @@ impl SidebarGroup {
     /// relaunch through `PersistedState::sidebar_collapsed_groups`.
     pub(super) fn persisted(self) -> PersistedSidebarGroup {
         match self {
+            Self::Rushed => PersistedSidebarGroup::Rushed,
             Self::Pinned => PersistedSidebarGroup::Pinned,
             Self::Terminals => PersistedSidebarGroup::Terminals,
             Self::Dormant => PersistedSidebarGroup::Dormant,
@@ -174,6 +178,7 @@ impl SidebarGroup {
     /// than dangles.
     pub(super) fn from_persisted(group: PersistedSidebarGroup) -> Option<Self> {
         Some(match group {
+            PersistedSidebarGroup::Rushed => Self::Rushed,
             PersistedSidebarGroup::Pinned => Self::Pinned,
             PersistedSidebarGroup::Terminals => Self::Terminals,
             PersistedSidebarGroup::Dormant => Self::Dormant,
@@ -191,6 +196,7 @@ impl SidebarGroup {
 
     fn mix_fingerprint(self, fingerprint: u64) -> u64 {
         match self {
+            Self::Rushed => mix(fingerprint, 0x800),
             Self::Pinned => mix(fingerprint, 0x300),
             Self::Terminals => mix(fingerprint, 0x400),
             Self::Dormant => mix(fingerprint, 0x500),
@@ -4880,30 +4886,31 @@ impl Waku {
             rows.push(SidebarRow::GroupSpacer);
         }
 
-        // Pinned tasks lead the sidebar in both groupings, ordered by the same
-        // recency the row displays — newest first, independent of the ordering
-        // preference applied to the ordinary groups below.
-        let mut pinned = sorted_sessions
-            .iter()
-            .filter(|session| session.pinned_at.is_some())
-            .copied()
-            .collect::<Vec<_>>();
+        let mut rushed_ids = Vec::new();
+        let mut pinned = Vec::new();
+        sorted_sessions.retain(|&session| {
+            if self.session_is_rushed(session.id) {
+                rushed_ids.push(session.id);
+            } else if session.pinned_at.is_some() {
+                pinned.push(session);
+            } else {
+                return true;
+            }
+            false
+        });
+        // Pinned tasks keep activity order independently of the sidebar preference.
         pinned.sort_by_key(|session| std::cmp::Reverse(sidebar_session_timestamp(session)));
         let pinned_ids = pinned.iter().map(|session| session.id).collect::<Vec<_>>();
-        let pinned_collapsed = self
-            .sidebar_collapsed_groups
-            .contains(&SidebarGroup::Pinned);
-        append_sidebar_group_rows(
-            &mut rows,
-            SidebarGroup::Pinned,
-            &pinned_ids,
-            pinned_collapsed,
-            None,
-        );
-        if pinned_collapsed {
-            collapsed_members.insert(SidebarGroup::Pinned, pinned_ids);
+        for (group, ids) in [
+            (SidebarGroup::Rushed, rushed_ids),
+            (SidebarGroup::Pinned, pinned_ids),
+        ] {
+            let collapsed = self.sidebar_collapsed_groups.contains(&group);
+            append_sidebar_group_rows(&mut rows, group, &ids, collapsed, None);
+            if collapsed && !ids.is_empty() {
+                collapsed_members.insert(group, ids);
+            }
         }
-        sorted_sessions.retain(|session| session.pinned_at.is_none());
 
         match self.state.sidebar_grouping {
             SidebarGrouping::Date => {
@@ -5535,6 +5542,7 @@ impl Waku {
             _ => "icons/folder-open.svg",
         };
         let label = match group {
+            SidebarGroup::Rushed => tr!("sidebar.rushed"),
             SidebarGroup::Pinned => tr!("sidebar.pinned"),
             SidebarGroup::Terminals => tr!("sidebar.terminals"),
             SidebarGroup::Dormant => tr!("sidebar.dormant"),
@@ -5593,6 +5601,7 @@ impl Waku {
                 | SidebarGroup::Errands
                 | SidebarGroup::Waiting
                 | SidebarGroup::Employees
+                | SidebarGroup::Rushed
                 | SidebarGroup::Pinned
                 | SidebarGroup::Terminals
                 | SidebarGroup::Dormant
@@ -6197,7 +6206,8 @@ impl Waku {
                 }
                 return;
             }
-            SidebarGroup::Pinned
+            SidebarGroup::Rushed
+            | SidebarGroup::Pinned
             | SidebarGroup::Planning
             | SidebarGroup::Outcomes
             | SidebarGroup::Errands
@@ -6809,11 +6819,13 @@ impl Waku {
             .sidebar_multi_selection
             .contains(&SidebarSelection::Session(session_id));
         let pinned = session.pinned_at.is_some();
-        // Pinned rows mix projects, so they keep the flat layout and
+        // Rushed and pinned rows mix projects, so they keep the flat layout and
         // project-name detail even while Project grouping is active. A
         // dormant row sits inside its project there and indents like any
         // sibling; only Date grouping gives it the flat standalone group.
-        let grouped_by_project = self.state.sidebar_grouping == SidebarGrouping::Project && !pinned;
+        let grouped_by_project = self.state.sidebar_grouping == SidebarGrouping::Project
+            && !pinned
+            && !self.session_is_rushed(session_id);
         let left_padding = if grouped_by_project {
             SIDEBAR_GROUP_CHILD_PADDING
         } else {
@@ -6834,9 +6846,6 @@ impl Waku {
             .w_full()
             .min_w_0()
             .pl(px(left_padding))
-            .when(self.session_is_rushed(session_id), |element| {
-                element.pl(px(left_padding + 19.0))
-            })
             .pr(px(8.0))
             .py(px(7.0))
             .rounded(px(9.0))
@@ -6864,7 +6873,6 @@ impl Waku {
                     theme.sidebar_item_background
                 })
             })
-            .children(self.render_sidebar_rush_indicator(session_id, left_padding))
             .child(self.render_session_row_body(
                 session_id,
                 grouped_by_project,

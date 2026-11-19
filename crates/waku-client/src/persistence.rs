@@ -1125,6 +1125,7 @@ pub enum PersistedSidebarGroup {
     /// State files predate the rename — the stored token stays `bundles`.
     #[serde(rename = "bundles")]
     Deliverables,
+    Rushed,
 }
 
 /// A virtualized list's logical scroll position — row index plus the pixel

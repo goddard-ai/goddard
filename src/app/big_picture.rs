@@ -198,7 +198,6 @@ pub(super) struct BigPictureUi {
     open: bool,
     /// Rush is local to this window and lasts until explicitly switched off.
     rushed: HashSet<Uuid>,
-    rush_sidebar_indicators: HashMap<Uuid, Entity<RushIndicator>>,
     rush_modal_indicator: Entity<RushIndicator>,
     rush_pending: VecDeque<Uuid>,
     rush_session: Option<Uuid>,
@@ -276,7 +275,6 @@ impl BigPictureUi {
         Self {
             open: false,
             rushed: HashSet::new(),
-            rush_sidebar_indicators: HashMap::new(),
             rush_modal_indicator: cx.new(|_| RushIndicator),
             rush_pending: VecDeque::new(),
             rush_session: None,
@@ -2264,12 +2262,8 @@ impl Waku {
     pub(super) fn toggle_rush(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         if self.big_picture.rushed.remove(&session_id) {
             self.big_picture.rush_pending.retain(|id| *id != session_id);
-            self.big_picture.rush_sidebar_indicators.remove(&session_id);
         } else {
             self.big_picture.rushed.insert(session_id);
-            self.big_picture
-                .rush_sidebar_indicators
-                .insert(session_id, cx.new(|_| RushIndicator));
             let enable_fast = self
                 .state
                 .sessions
@@ -2315,30 +2309,8 @@ impl Waku {
                 self.queue_rush_attention(session_id);
             }
         }
+        self.sidebar_rows_fingerprint.set(None);
         cx.notify();
-    }
-
-    pub(super) fn render_sidebar_rush_indicator(
-        &self,
-        session_id: Uuid,
-        left_padding: f32,
-    ) -> Option<AnyElement> {
-        let indicator = self.big_picture.rush_sidebar_indicators.get(&session_id)?;
-        Some(
-            div()
-                .id(SharedString::from(format!("sidebar-rush-{session_id}")))
-                .absolute()
-                .left(px(left_padding))
-                .top(px(9.5))
-                .size(px(13.0))
-                .tooltip(Tooltip::text(tr!("rush.enabled")))
-                .child(
-                    indicator
-                        .clone()
-                        .cached(StyleRefinement::default().w(px(13.0)).h(px(13.0))),
-                )
-                .into_any_element(),
-        )
     }
 
     pub(super) fn render_rush_toggle(

@@ -11165,6 +11165,60 @@ mod live_employee_approvals {
     }
 
     #[gpui::test]
+    fn rushed_sidebar_group_updates_when_rush_is_toggled(cx: &mut gpui::TestAppContext) {
+        use super::super::sidebar::SidebarGroup;
+
+        let (_env, _daemon, _supervisor, view, vcx, session_id, _) = model_selection_app(cx);
+        update_app(vcx, &view, |waku, _, cx| {
+            let session = waku.state.session_mut(session_id).unwrap();
+            session.begin_turn("Rushed task");
+            session.pinned_at = Some(unix_time());
+            session.service_tier = Some("fast".into());
+
+            let mut pinned = AgentSession::new(session.project_id, ProviderKind::Claude);
+            pinned.begin_turn("Pinned task");
+            pinned.pinned_at = Some(unix_time());
+            waku.state.sessions.push(pinned);
+
+            let row = SidebarRow::Session(session_id);
+            let rushed_header = SidebarRow::Header(SidebarGroup::Rushed);
+            let pinned_header = SidebarRow::Header(SidebarGroup::Pinned);
+            for grouping in [
+                crate::persistence::SidebarGrouping::Date,
+                crate::persistence::SidebarGrouping::Project,
+            ] {
+                waku.state.sidebar_grouping = grouping;
+                let rows = waku.sidebar_rows_cached();
+                assert!(!rows.contains(&rushed_header));
+                assert!(rows.contains(&row));
+
+                waku.toggle_rush(session_id, cx);
+                let rows = waku.sidebar_rows_cached();
+                let rushed = rows
+                    .iter()
+                    .position(|entry| *entry == rushed_header)
+                    .unwrap();
+                let pinned = rows
+                    .iter()
+                    .position(|entry| *entry == pinned_header)
+                    .unwrap();
+                assert_eq!(rows[rushed + 1], row);
+                assert_eq!(pinned, rushed + 3);
+                assert_eq!(rows.iter().filter(|entry| **entry == row).count(), 1);
+
+                waku.toggle_rush(session_id, cx);
+                let rows = waku.sidebar_rows_cached();
+                assert!(!rows.contains(&rushed_header));
+                let pinned = rows
+                    .iter()
+                    .position(|entry| *entry == pinned_header)
+                    .unwrap();
+                assert!(rows[pinned + 1..pinned + 3].contains(&row));
+            }
+        });
+    }
+
+    #[gpui::test]
     fn rush_task_page_answers_the_foreground_task_and_restores_the_covered_draft(
         cx: &mut gpui::TestAppContext,
     ) {
