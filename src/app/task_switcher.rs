@@ -131,17 +131,15 @@ fn ordered_task_ids(
     current: Option<Uuid>,
     recent: &[Uuid],
     sessions: &[AgentSession],
-    dormant: &HashSet<Uuid>,
+    excluded: &HashSet<Uuid>,
 ) -> Vec<Uuid> {
-    // Dormant tasks never join the list — even the current one — so the
-    // switcher can neither highlight nor commit a shelved task.
     let eligible = sessions
         .iter()
         .filter(|session| {
             session.has_started()
                 && session.archived_at.is_none()
                 && !session.is_side_chat()
-                && !dormant.contains(&session.id)
+                && !excluded.contains(&session.id)
         })
         .collect::<Vec<_>>();
     let valid = eligible
@@ -303,11 +301,25 @@ impl Waku {
     }
 
     fn open_task_switcher(&mut self, reverse: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let mut excluded =
+            sessions::dormant_session_ids(&self.state.sessions, self.state.dormant_after_days);
+        excluded.extend(self.boss_ui.states.values().flat_map(|state| {
+            [state.session_id, state.counsel.session_id]
+                .into_iter()
+                .flatten()
+        }));
+        excluded.extend(
+            self.state
+                .sessions
+                .iter()
+                .filter(|session| self.session_is_employee(session))
+                .map(|session| session.id),
+        );
         let ordered = ordered_task_ids(
             self.state.selected_session,
             &self.task_switcher.recent_session_ids,
             &self.state.sessions,
-            &sessions::dormant_session_ids(&self.state.sessions, self.state.dormant_after_days),
+            &excluded,
         );
         let Some(highlighted_index) =
             initial_highlight_index(&ordered, self.state.selected_session, reverse)

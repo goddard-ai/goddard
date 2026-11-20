@@ -1,0 +1,1 @@
+- The Recently viewed tasks modal now omits Boss, Counsel, and employee chats.
