@@ -2356,9 +2356,12 @@ impl Waku {
     }
 
     pub(super) fn rush_task_width(&self, window: &Window) -> f32 {
-        let available = f32::from(window.viewport_size().width)
-            - 2.0 * (RUSH_MODAL_MARGIN + f32::from(hairline()));
-        self.chat_viewport_width(window).min(available).max(1.0)
+        let window_width = f32::from(window.viewport_size().width);
+        let available = window_width - 2.0 * (RUSH_MODAL_MARGIN + f32::from(hairline()));
+        // The overlay spans the window, so the covered right panel takes no space.
+        (window_width - self.sidebar_rendered_width)
+            .min(available)
+            .max(1.0)
     }
 
     fn render_rush_modal(

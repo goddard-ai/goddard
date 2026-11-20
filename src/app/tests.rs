@@ -11321,6 +11321,28 @@ mod live_employee_approvals {
     }
 
     #[gpui::test]
+    fn rush_task_width_ignores_the_covered_right_panel(cx: &mut gpui::TestAppContext) {
+        let (_env, _daemon, view, vcx, _supervisor, _ids) = two_employee_app(cx);
+        for window_width in [1280.0, 720.0] {
+            vcx.simulate_resize(size(px(window_width), px(800.0)));
+            update_app(vcx, &view, |waku, window, _| {
+                waku.sidebar_rendered_width = 252.0;
+                waku.right_panel_rendered_width = 0.0;
+                let closed_width = waku.rush_task_width(window);
+                assert_eq!(closed_width, window_width - 252.0);
+                for panel_width in [280.0, 420.0] {
+                    waku.right_panel_rendered_width = panel_width;
+                    assert_eq!(waku.rush_task_width(window), closed_width);
+                }
+
+                waku.sidebar_rendered_width = 0.0;
+                let max_width = window_width - 72.0 - f32::from(crate::theme::hairline()) * 2.0;
+                assert_eq!(waku.rush_task_width(window), max_width);
+            });
+        }
+    }
+
+    #[gpui::test]
     fn rush_task_page_answers_the_foreground_task_and_restores_the_covered_draft(
         cx: &mut gpui::TestAppContext,
     ) {
