@@ -1094,6 +1094,12 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // remains find-in-page on Linux/Windows while Cmd-F keeps the
         // native behavior on macOS.
         KeyBinding::new("secondary-f", OpenFind, Some("Workspace > TextInput")),
+        KeyBinding::new("secondary-f", OpenFind, Some("Terminal")),
+        KeyBinding::new("secondary-f", OpenFind, Some("TerminalFind > TextInput")),
+        KeyBinding::new("enter", FindNext, Some("TerminalFind > TextInput")),
+        KeyBinding::new("shift-enter", FindPrevious, Some("TerminalFind > TextInput")),
+        KeyBinding::new("escape", CloseFind, Some("TerminalFind > TextInput")),
+        KeyBinding::new("escape", CloseFind, Some("TerminalFind")),
         KeyBinding::new("secondary-alt-f", OpenFindReplace, Some("Workspace")),
         KeyBinding::new("secondary-g", FindNext, Some("Workspace")),
         KeyBinding::new("secondary-shift-g", FindPrevious, Some("Workspace")),

@@ -5,7 +5,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -43,6 +43,9 @@ use crate::persistence::DEFAULT_RIGHT_PANEL_WIDTH;
 use crate::theme::{Theme, hairline, sp};
 use crate::ui::scrollbar::{self, ScrollbarState};
 use uuid::Uuid;
+
+mod search;
+use search::TerminalSearch;
 
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
@@ -369,6 +372,7 @@ impl TerminalIo {
 #[derive(Clone)]
 struct TerminalEventProxy {
     dirty: Arc<AtomicBool>,
+    grid_revision: Arc<AtomicU64>,
     io: Arc<OnceLock<TerminalIo>>,
     ui_events: Sender<TerminalUiEvent>,
     window_size: Arc<Mutex<WindowSize>>,
@@ -378,6 +382,11 @@ struct TerminalEventProxy {
 }
 
 impl TerminalEventProxy {
+    fn grid_changed(&self) {
+        self.grid_revision.fetch_add(1, Ordering::Release);
+        self.dirty.store(true, Ordering::Release);
+    }
+
     fn write_pty(&self, bytes: impl Into<Cow<'static, [u8]>>) {
         if let Some(io) = self.io.get() {
             io.write(bytes.into());
@@ -388,7 +397,8 @@ impl TerminalEventProxy {
 impl EventListener for TerminalEventProxy {
     fn send_event(&self, event: Event) {
         match event {
-            Event::Wakeup | Event::MouseCursorDirty | Event::CursorBlinkingChange => {
+            Event::Wakeup => self.grid_changed(),
+            Event::MouseCursorDirty | Event::CursorBlinkingChange => {
                 self.dirty.store(true, Ordering::Release);
             }
             Event::Title(title) => {
@@ -490,6 +500,7 @@ impl EmulatorParts {
             .map_err(|error| anyhow::anyhow!("compile terminal link regex: {error}"))?;
         let proxy = TerminalEventProxy {
             dirty: dirty.clone(),
+            grid_revision: Arc::new(AtomicU64::new(0)),
             io: io.clone(),
             ui_events: ui_events_sender.clone(),
             window_size: shared_window_size.clone(),
@@ -566,8 +577,9 @@ fn remote_terminal_pump(
                                     else {
                                         continue;
                                     };
-                                    processor.advance(&mut *term.lock(), &bytes);
-                                    dirty.store(true, Ordering::Release);
+                                    let mut term = term.lock();
+                                    processor.advance(&mut *term, &bytes);
+                                    proxy.grid_changed();
                                 }
                                 "terminalExited" | "terminalError" => {
                                     let _ = ui_events.send(TerminalUiEvent::Exited(None));
@@ -614,18 +626,21 @@ fn remote_terminal_pump(
                 client.unsubscribe(channel_id, channel_id);
                 events = client.subscribe(channel_id, channel_id);
                 let size = *window_size.lock();
-                *term.lock() = Term::new(
-                    Config {
-                        scrolling_history: TERMINAL_SCROLLBACK_LINES,
-                        ..Default::default()
-                    },
-                    &TerminalDimensions {
-                        columns: size.num_cols.max(1) as usize,
-                        rows: size.num_lines.max(1) as usize,
-                    },
-                    proxy.clone(),
-                );
-                dirty.store(true, Ordering::Release);
+                {
+                    let mut term = term.lock();
+                    *term = Term::new(
+                        Config {
+                            scrolling_history: TERMINAL_SCROLLBACK_LINES,
+                            ..Default::default()
+                        },
+                        &TerminalDimensions {
+                            columns: size.num_cols.max(1) as usize,
+                            rows: size.num_lines.max(1) as usize,
+                        },
+                        proxy.clone(),
+                    );
+                    proxy.grid_changed();
+                }
                 let reclaimed = client.request(
                     channel_id,
                     channel_id,
@@ -655,6 +670,7 @@ struct TerminalSession {
     term: Arc<FairMutex<Term<TerminalEventProxy>>>,
     io: TerminalIo,
     dirty: Arc<AtomicBool>,
+    grid_revision: Arc<AtomicU64>,
     ui_events: Receiver<TerminalUiEvent>,
     window_size: Arc<Mutex<WindowSize>>,
     grid_size: (usize, usize),
@@ -782,6 +798,7 @@ impl TerminalSession {
             term: parts.term,
             io,
             dirty: parts.dirty,
+            grid_revision: parts.proxy.grid_revision,
             ui_events: parts.ui_events,
             window_size: parts.window_size,
             grid_size: (columns, rows),
@@ -859,6 +876,7 @@ impl TerminalSession {
             term: parts.term,
             io,
             dirty: parts.dirty,
+            grid_revision: parts.proxy.grid_revision,
             ui_events: parts.ui_events,
             window_size: parts.window_size,
             grid_size: (columns, rows),
@@ -884,7 +902,11 @@ impl TerminalSession {
         self.grid_size = (columns, rows);
         self.cell_size = (cell_width, cell_height);
         let dimensions = TerminalDimensions { columns, rows };
-        self.term.lock().resize(dimensions);
+        {
+            let mut term = self.term.lock();
+            term.resize(dimensions);
+            self.grid_revision.fetch_add(1, Ordering::Release);
+        }
         let size = WindowSize {
             num_lines: rows.min(u16::MAX as usize) as u16,
             num_cols: columns.min(u16::MAX as usize) as u16,
@@ -921,7 +943,9 @@ impl TerminalSession {
     }
 
     fn clear_scrollback(&self) {
-        clear_scrollback(&mut self.term.lock());
+        let mut term = self.term.lock();
+        clear_scrollback(&mut term);
+        self.grid_revision.fetch_add(1, Ordering::Release);
         self.dirty.store(true, Ordering::Release);
     }
 
@@ -952,10 +976,19 @@ impl TerminalSession {
         selection_color: Hsla,
         cursor_style: TerminalCursorStyle,
         hovered_link: Option<&Match>,
+        search: Option<&TerminalSearch>,
     ) -> TerminalSnapshot {
         *self.palette.lock() = theme;
         let term = self.term.lock();
         let content = term.renderable_content();
+        let (matches, active_match) = search
+            .and_then(|search| search.highlights(self.grid_revision.load(Ordering::Acquire)))
+            .unwrap_or_default();
+        let first_visible = TerminalPoint::new(Line(-(content.display_offset as i32)), Column(0));
+        let mut matches = matches
+            [matches.partition_point(|matched| *matched.end() < first_visible)..]
+            .iter()
+            .peekable();
         let columns = self.grid_size.0;
         let rows = self.grid_size.1;
         let selection = content.selection;
@@ -1006,6 +1039,22 @@ impl TerminalSession {
                 } else {
                     foreground.l = 1.0 - (1.0 - foreground.l) * 0.7;
                 }
+            }
+            while matches
+                .peek()
+                .is_some_and(|matched| *matched.end() < indexed.point)
+            {
+                matches.next();
+            }
+            if active_match.is_some_and(|matched| matched.contains(&indexed.point)) {
+                background = theme.inverse;
+                foreground = theme.on_inverse;
+            } else if matches
+                .peek()
+                .is_some_and(|matched| matched.contains(&indexed.point))
+            {
+                background = theme.warning.opacity(0.25);
+                foreground = theme.text;
             }
             if selection.is_some_and(|selection| selection.contains(indexed.point)) {
                 background = selection_color;
@@ -1501,6 +1550,7 @@ struct TerminalCommandBar {
 pub struct TerminalView {
     session: Option<TerminalSession>,
     command_bar: Option<TerminalCommandBar>,
+    search: Option<TerminalSearch>,
     error: Option<String>,
     focus_handle: FocusHandle,
     working_directory: PathBuf,
@@ -1621,6 +1671,7 @@ impl TerminalView {
         Self {
             session: None,
             command_bar: None,
+            search: None,
             error: None,
             focus_handle: cx.focus_handle(),
             title: default_title.clone(),
@@ -1739,6 +1790,7 @@ impl TerminalView {
         Self {
             session: None,
             command_bar: None,
+            search: None,
             error: None,
             focus_handle: cx.focus_handle(),
             title: default_title.clone(),
@@ -2149,6 +2201,7 @@ impl TerminalView {
                 }
             }
         }
+        self.refresh_search(cx);
         changed
     }
 
@@ -2175,10 +2228,9 @@ impl TerminalView {
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        // The command bar's field sits inside this view's dispatch path, so
-        // its keystrokes bubble through here — while it owns focus, nothing
-        // may reach the PTY.
-        if self.command_bar_focused(window, cx) {
+        // The find and command bars share the terminal's dispatch path.
+        // Their keystrokes belong to their controls while they have focus.
+        if self.terminal_input_focused(window, cx) {
             return;
         }
         self.pause_cursor_blink(cx);
@@ -2662,6 +2714,7 @@ impl TerminalView {
         if self.embedded || self.exited || self.session.is_none() {
             return;
         }
+        self.search = None;
         let input = cx.new(|cx| {
             TextInput::new(window, cx)
                 .multi_line()
@@ -2693,12 +2746,14 @@ impl TerminalView {
         cx.notify();
     }
 
-    /// Whether the bar's field owns focus — while it does, no keystroke
-    /// here may reach the PTY.
-    fn command_bar_focused(&self, window: &Window, cx: &App) -> bool {
+    fn terminal_input_focused(&self, window: &Window, cx: &App) -> bool {
         self.command_bar
             .as_ref()
             .is_some_and(|bar| bar.input.read(cx).focus().is_focused(window))
+            || self
+                .search
+                .as_ref()
+                .is_some_and(|search| search.focused(window, cx))
     }
 
     fn command_bar_confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -3135,10 +3190,15 @@ impl Render for TerminalView {
             );
         }
         let hovered_link = self.hovered_link.as_ref().map(|link| &link.bounds);
-        let snapshot = self
-            .session
-            .as_ref()
-            .map(|session| session.snapshot(theme, selection_color, cursor_style, hovered_link));
+        let snapshot = self.session.as_ref().map(|session| {
+            session.snapshot(
+                theme,
+                selection_color,
+                cursor_style,
+                hovered_link,
+                self.search.as_ref(),
+            )
+        });
         let mut screen = div()
             .flex_1()
             .min_h_0()
@@ -3413,7 +3473,20 @@ impl Render for TerminalView {
             .flex_col()
             .bg(theme.terminal)
             .children(toolbar)
+            .children(self.search_bar(theme, cx))
             .child(grid)
+            .on_action(
+                cx.listener(|this, _: &crate::OpenFind, window, cx| this.open_search(window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::CloseFind, window, cx| this.close_search(window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::FindNext, _, cx| this.navigate_search(false, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::FindPrevious, _, cx| this.navigate_search(true, cx)),
+            )
             .on_action(cx.listener(|this, _: &crate::CopySelection, _, cx| {
                 this.copy_selection_or_propagate(cx)
             }))

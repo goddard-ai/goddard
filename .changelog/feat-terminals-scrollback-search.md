@@ -1,0 +1,1 @@
+- Press Cmd+F (Ctrl+F on Windows and Linux) in a terminal to search its scrollback and jump between matches.
