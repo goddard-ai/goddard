@@ -422,7 +422,7 @@ impl ClaudeDriver {
                             match &written {
                                 Ok(()) => {
                                     let _ = writer_events
-                                        .send(DriverEvent::SteerAccepted { message: text, sent_by_task: None, hidden: false, report_trigger: None });
+                                        .send(DriverEvent::SteerAccepted { submission_id: None, message: text, sent_by_task: None, hidden: false, report_trigger: None });
                                 }
                                 Err(error) => {
                                     let _ = writer_events.send(DriverEvent::steer_rejected_keyed(

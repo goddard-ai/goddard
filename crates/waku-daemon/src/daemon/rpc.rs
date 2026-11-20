@@ -2955,6 +2955,7 @@ impl Backend for WakuBackend {
                             "The Boss chat is fenced while its provider context is refreshed. The prompt is queued."
                         };
                         events.send(event_to_wire(DriverEvent::SteerRejected {
+                            submission_id: None,
                             message: prompt.clone(),
                             reason: reason.into(),
                             reason_i18n: None,

@@ -613,6 +613,7 @@ impl PiDriver {
                             match result {
                                 Ok(_) => {
                                     let _ = writer_events.send(DriverEvent::SteerAccepted {
+                                        submission_id: None,
                                         message: prompt,
                                         sent_by_task: None,
                                         hidden: false,
@@ -621,6 +622,7 @@ impl PiDriver {
                                 }
                                 Err(error) => {
                                     let _ = writer_events.send(DriverEvent::SteerRejected {
+                                        submission_id: None,
                                         message: prompt,
                                         reason: error,
                                         reason_i18n: None,

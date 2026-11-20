@@ -47,9 +47,8 @@ pub struct AgentPrompt {
     /// prompt is confirmed delivered. `None` for prompts that never parked —
     /// steer-mode requests and queue prompts delivered immediately.
     pub queued_id: Option<Uuid>,
-    /// Stable id for a user steer persisted in a Boss chat's follow-up queue
-    /// before it is sent. Acceptance settles this exact queue entry;
-    /// rejection leaves it parked for the successor generation.
+    /// Stable id for a user steer. An acknowledgment settles the matching
+    /// transcript preview and consumes any durable queue entry with that id.
     pub submission_id: Option<Uuid>,
     /// Set when the steer is a daemon-injected context block rather than
     /// user or agent text: its `steerAccepted` echo stays out of the
@@ -423,8 +422,8 @@ impl AgentState {
                 // steer-mode request has no queue entry and stays dropped.
                 return match self.take_pending_steer(session_id, message) {
                     Some(entry) if entry.context.is_none() && entry.queued_id.is_some() => {
-                        self.requeue_front(session_id, entry);
-                        None
+                        self.requeue_front(session_id, entry.clone());
+                        Some(entry)
                     }
                     entry => entry,
                 };
@@ -1262,6 +1261,7 @@ mod tests {
         let _ = state.note_driver_event(
             session,
             &DriverEvent::SteerRejected {
+                submission_id: None,
                 message: "drained".into(),
                 reason: "turn ended".into(),
                 reason_i18n: None,
@@ -1277,6 +1277,7 @@ mod tests {
         let _ = state.note_driver_event(
             session,
             &DriverEvent::SteerRejected {
+                submission_id: None,
                 message: "direct".into(),
                 reason: "turn ended".into(),
                 reason_i18n: None,
@@ -1309,6 +1310,7 @@ mod tests {
             .note_driver_event(
                 session,
                 &DriverEvent::SteerRejected {
+                    submission_id: None,
                     message: "context".into(),
                     reason: "turn ended".into(),
                     reason_i18n: None,

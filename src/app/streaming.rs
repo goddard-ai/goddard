@@ -355,6 +355,25 @@ impl Waku {
                             })
                     })
                     .flatten();
+                if let Some(previews) = self.employee_prompt_previews.get(&session_id) {
+                    let delivered: Vec<_> = previews
+                        .iter()
+                        .filter(|preview| {
+                            session
+                                .messages
+                                .iter()
+                                .any(|message| message.id == preview.id)
+                                || session
+                                    .queued_messages
+                                    .iter()
+                                    .any(|queued| queued.id == preview.id)
+                        })
+                        .map(|preview| preview.id)
+                        .collect();
+                    for id in delivered {
+                        self.take_employee_prompt_preview(session_id, id);
+                    }
+                }
                 runtime.detail_visible = Some(detail);
                 if detail {
                     self.stale_task_details.remove(&session_id);
@@ -550,6 +569,7 @@ impl Waku {
                 // is news; a mirrored turn is marked for the next save so the
                 // projection this client persists carries the prompt whose
                 // reply it is about to stream.
+                self.take_employee_prompt_preview(session_id, message_id);
                 if let Some(session) = self.state.session_mut(session_id)
                     && session.adopt_submitted_prompt(
                         &message,
@@ -574,6 +594,9 @@ impl Waku {
                 // The daemon owns the agent-sourced slice of the follow-up
                 // queue — a parked prompt appeared, delivered, or was
                 // cancelled. Composer-queued entries pass through untouched.
+                for queued in &messages {
+                    self.take_employee_prompt_preview(session_id, queued.id);
+                }
                 if let Some(session) = self.state.session_mut(session_id)
                     && session.merge_agent_queued(messages)
                 {
@@ -899,6 +922,7 @@ impl Waku {
                 }
             }
             DriverEvent::SteerAccepted {
+                submission_id,
                 message,
                 sent_by_task,
                 hidden,
@@ -917,6 +941,23 @@ impl Waku {
                 if !accepts {
                     return true;
                 }
+                let preview =
+                    submission_id.and_then(|id| self.take_employee_prompt_preview(session_id, id));
+                if submission_id.is_some_and(|id| {
+                    self.state
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == session_id)
+                        .is_some_and(|session| {
+                            session
+                                .messages
+                                .iter()
+                                .any(|message| message.id == id && message.turn_id.is_some())
+                        })
+                }) {
+                    take_steer_submission(runtime, submission_id, &message);
+                    return true;
+                }
                 let queued_submission = self
                     .state
                     .sessions
@@ -926,7 +967,11 @@ impl Waku {
                         session
                             .queued_messages
                             .iter()
-                            .find(|queued| !queued.is_agent_owned() && queued.content == message)
+                            .find(|queued| {
+                                !queued.is_agent_owned()
+                                    && submission_id
+                                        .map_or(queued.content == message, |id| queued.id == id)
+                            })
                             .cloned()
                     })
                     .map(ComposerSubmission::from_queued_message);
@@ -965,17 +1010,15 @@ impl Waku {
                     }
                     return true;
                 }
-                let submission = runtime
-                    .pending_steers
-                    .iter()
-                    .position(|submission| submission.prompt == message)
-                    .and_then(|index| runtime.pending_steers.remove(index))
-                    // Providers normally echo the exact transport text, but a
-                    // normalized echo still acknowledges the oldest pending
-                    // steer. Preserve its attachment presentation metadata.
-                    .or_else(|| runtime.pending_steers.pop_front())
+                let mut submission = take_steer_submission(runtime, submission_id, &message)
                     .or(queued_submission)
                     .unwrap_or_else(|| ComposerSubmission::plain(message.clone()));
+                if let Some(preview) = preview {
+                    submission.display_content = preview.display_content;
+                    submission.attachments = preview.attachments;
+                    submission.message_atoms = preview.atoms;
+                }
+                submission.queued_id = submission_id.or(submission.queued_id);
                 // The provider folded the message into the live turn. Append
                 // it to the same turn so the transcript mirrors the provider
                 // conversation (no new turn boundary). Landing behind whatever
@@ -1042,6 +1085,7 @@ impl Waku {
                 runtime.stream_phase = None;
             }
             DriverEvent::SteerRejected {
+                submission_id,
                 message,
                 reason,
                 reason_i18n,
@@ -1053,13 +1097,16 @@ impl Waku {
                     return true;
                 }
                 let reason = reason_i18n.map(|i18n| i18n.render()).unwrap_or(reason);
-                let mut submission = runtime
-                    .pending_steers
-                    .iter()
-                    .position(|submission| submission.prompt == message)
-                    .and_then(|index| runtime.pending_steers.remove(index))
-                    .or_else(|| runtime.pending_steers.pop_front())
+                let preview =
+                    submission_id.and_then(|id| self.take_employee_prompt_preview(session_id, id));
+                let mut submission = take_steer_submission(runtime, submission_id, &message)
                     .unwrap_or_else(|| ComposerSubmission::plain(message));
+                if let Some(preview) = preview {
+                    submission.queued_id = Some(preview.id);
+                    submission.display_content = preview.display_content;
+                    submission.attachments = preview.attachments;
+                    submission.message_atoms = preview.atoms;
+                }
                 let (busy, settled_cleanly) = self
                     .state
                     .sessions
@@ -1690,6 +1737,22 @@ fn finish_streaming_messages(session: &mut AgentSession) {
             message.streaming = false;
         }
     }
+}
+
+// Older daemons and local drivers omit the id and can normalize the echo.
+fn take_steer_submission(
+    runtime: &mut SessionRuntime,
+    submission_id: Option<Uuid>,
+    message: &str,
+) -> Option<ComposerSubmission> {
+    let index = runtime.pending_steers.iter().position(|submission| {
+        submission_id.map_or(submission.prompt == message, |id| {
+            submission.queued_id == Some(id)
+        })
+    });
+    index
+        .or_else(|| submission_id.is_none().then_some(0))
+        .and_then(|index| runtime.pending_steers.remove(index))
 }
 
 fn complete_transcript_activities(session: &mut AgentSession) {

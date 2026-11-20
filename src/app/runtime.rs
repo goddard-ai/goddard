@@ -12,6 +12,32 @@ pub(super) struct RuntimeSubmissionCheck {
     project_id: Uuid,
     cwd: Option<PathBuf>,
     submissions: VecDeque<ComposerSubmission>,
+    pub(super) previews: Vec<Message>,
+}
+
+impl RuntimeSubmissionCheck {
+    fn push(&mut self, mut submission: ComposerSubmission) {
+        if let Some(preview) = submission.transcript_preview() {
+            self.previews.push(preview);
+        }
+        self.submissions.push_back(submission);
+    }
+}
+
+impl ComposerSubmission {
+    /// Give the provisional bubble and the admitted message the same identity.
+    fn transcript_preview(&mut self) -> Option<Message> {
+        if self.hidden {
+            return None;
+        }
+        let mut message = Message::new(MessageRole::User, self.prompt.clone()).with_presentation(
+            self.display_content.clone(),
+            self.attachments.clone(),
+            self.message_atoms.clone(),
+        );
+        message.id = *self.queued_id.get_or_insert(message.id);
+        Some(message)
+    }
 }
 
 enum SubmissionRuntime {
@@ -7669,7 +7695,7 @@ impl Waku {
         &mut self,
         command: boss::BossCommand,
         target: boss::ComposerTarget,
-        submission: ComposerSubmission,
+        mut submission: ComposerSubmission,
         delivery: waku_client::AgentPromptDelivery,
         cx: &mut Context<Self>,
     ) {
@@ -7743,6 +7769,30 @@ impl Waku {
                 .employee_composer_submission(session_id, &prompt, delivery)
         });
         let request = if let Some(submission_id) = submission_id {
+            if self.transcript_session_id() == Some(session_id)
+                && !was_expired
+                && self.selected_queued_employee().is_none()
+                && self
+                    .state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == session_id)
+                    .is_some_and(|session| {
+                        !session.is_busy()
+                            || ((delivery == waku_client::AgentPromptDelivery::Interrupt
+                                || session.status == SessionStatus::Background)
+                                && session.active_turn_id().is_some()
+                                && self
+                                    .runtimes
+                                    .get(&session_id)
+                                    .is_some_and(|runtime| runtime.driver.supports_steer()))
+                    })
+            {
+                submission.queued_id = Some(submission_id);
+                if let Some(preview) = submission.transcript_preview() {
+                    self.show_employee_prompt_preview(session_id, preview, cx);
+                }
+            }
             waku_client::Command::EmployeeComposerPrompt {
                 viewed_employee_id: session_id,
                 submission_id,
@@ -7771,6 +7821,15 @@ impl Waku {
                         if let Some(id) = submission_id {
                             waku.boss_ui
                                 .accept_employee_composer_submission(session_id, id);
+                            if submission.queued_id == Some(id)
+                                && waku.employee_prompt_previews.get(&session_id).is_some_and(
+                                    |previews| previews.iter().any(|preview| preview.id == id),
+                                )
+                            {
+                                waku.wait_for_employee_prompt_confirmation(
+                                    session_id, id, submission, delivery, cx,
+                                );
+                            }
                         }
                         if was_expired && !interaction {
                             let name = waku
@@ -7787,6 +7846,8 @@ impl Waku {
                     }
                     Err(error) => {
                         if let Some(id) = submission_id {
+                            waku.take_employee_prompt_preview(session_id, id);
+                            waku.refresh_runtime_submission_indicator(session_id, cx);
                             waku.boss_ui.restore_employee_composer_submission(
                                 session_id,
                                 id,
@@ -7802,6 +7863,78 @@ impl Waku {
             });
         })
         .detach();
+    }
+
+    fn show_employee_prompt_preview(
+        &mut self,
+        session_id: Uuid,
+        preview: Message,
+        cx: &mut Context<Self>,
+    ) {
+        let id = preview.id;
+        let previews = self.employee_prompt_previews.entry(session_id).or_default();
+        if previews.iter().any(|preview| preview.id == id) {
+            return;
+        }
+        previews.push(preview);
+        self.refresh_runtime_submission_indicator(session_id, cx);
+    }
+
+    fn wait_for_employee_prompt_confirmation(
+        &self,
+        session_id: Uuid,
+        id: Uuid,
+        submission: ComposerSubmission,
+        delivery: waku_client::AgentPromptDelivery,
+        cx: &mut Context<Self>,
+    ) {
+        let project_id = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .map(|session| session.project_id);
+        cx.spawn(async move |waku, cx| {
+            cx.background_executor().timer(UNSTARTED_TURN_TIMEOUT).await;
+            let _ = waku.update(cx, |waku, cx| {
+                if waku.take_employee_prompt_preview(session_id, id).is_none() {
+                    return;
+                }
+                if let Some(project_id) = project_id {
+                    waku.boss_ui.restore_employee_composer_submission(
+                        session_id,
+                        id,
+                        submission.prompt.clone(),
+                        delivery,
+                    );
+                    waku.recover_runtime_submissions(
+                        session_id,
+                        project_id,
+                        VecDeque::from([submission]),
+                        cx,
+                    );
+                }
+                if waku.transcript_session_id() == Some(session_id) {
+                    waku.show_toast(tr!("transcript.employee_prompt_unconfirmed"));
+                }
+                waku.refresh_runtime_submission_indicator(session_id, cx);
+            });
+        })
+        .detach();
+    }
+
+    pub(super) fn take_employee_prompt_preview(
+        &mut self,
+        session_id: Uuid,
+        id: Uuid,
+    ) -> Option<Message> {
+        let previews = self.employee_prompt_previews.get_mut(&session_id)?;
+        let index = previews.iter().position(|preview| preview.id == id)?;
+        let preview = previews.remove(index);
+        if previews.is_empty() {
+            self.employee_prompt_previews.remove(&session_id);
+        }
+        Some(preview)
     }
 
     /// A prompt, steer, or nudge aimed at an expired employee takes the
@@ -8262,8 +8395,8 @@ impl Waku {
         // This intent supersedes the older one held by a sign-in terminal.
         self.sandbox_pending_submissions.remove(&session_id);
         if let Some(check) = self.runtime_submission_checks.get_mut(&session_id) {
-            check.submissions.push_back(submission);
-            cx.notify();
+            check.push(submission);
+            self.refresh_runtime_submission_indicator(session_id, cx);
             return;
         }
         let session = self
@@ -8297,7 +8430,7 @@ impl Waku {
         let session = session.expect("eligible submission has a session");
         let token = Uuid::new_v4();
         let incognito = session.incognito;
-        let check = RuntimeSubmissionCheck {
+        let mut check = RuntimeSubmissionCheck {
             token,
             runtime_id: remote_runtime,
             options_generation: runtime.map(|runtime| runtime.options_generation),
@@ -8308,10 +8441,28 @@ impl Waku {
             cwd: self
                 .workspace_path_for_session(session)
                 .map(Path::to_path_buf),
-            submissions: VecDeque::from([submission]),
+            submissions: VecDeque::new(),
+            previews: Vec::new(),
         };
+        check.push(submission);
+        let reveal_preview = !check.previews.is_empty()
+            && self.transcript_session_id() == Some(session_id)
+            && !send_holds_transcript_position(
+                self.state.transcript_keep_scroll_on_send,
+                self.transcript_rests_at_tail_now(),
+                self.transcript_is_scrolled.get() && !self.transcript_anchor_following.get(),
+                self.transcript_watches_latest_turn(),
+            );
+        let preview_id = check.previews.first().map(|preview| preview.id);
         self.runtime_submission_checks.insert(session_id, check);
         self.refresh_runtime_submission_indicator(session_id, cx);
+        if reveal_preview
+            && let Some(row) = self.transcript_row_kinds.borrow().iter().position(|row| {
+                matches!(row, TranscriptRowKind::PendingPrompt(id) if Some(*id) == preview_id)
+            })
+        {
+            self.active_transcript_rows().scroll_to_reveal_item(row);
+        }
         let daemon = daemon.expect("eligible submission has a connected daemon");
         cx.spawn(async move |waku, cx| {
             let result = cx
@@ -8328,9 +8479,13 @@ impl Waku {
     }
 
     fn refresh_runtime_submission_indicator(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        if self.state.selected_session == Some(session_id) {
-            self.transcript_row_kinds_fingerprint.set(None);
-            self.sync_transcript_rows();
+        if self.transcript_session_id() == Some(session_id) {
+            let previous_kinds = self.transcript_row_kinds.borrow().clone();
+            if previous_kinds.len() == self.active_transcript_rows().item_count() {
+                self.splice_active_transcript_rows_after_visibility_change(&previous_kinds);
+            } else {
+                self.sync_transcript_rows();
+            }
         }
         cx.notify();
     }
@@ -8499,10 +8654,10 @@ impl Waku {
                 return;
             }
         }
-        self.refresh_runtime_submission_indicator(session_id, cx);
         while let Some(submission) = submissions.pop_front() {
             self.submit_validated_submission_for_session(session_id, submission, cx);
         }
+        self.refresh_runtime_submission_indicator(session_id, cx);
     }
 
     fn submit_validated_submission_for_session(

@@ -21,6 +21,17 @@ impl WakuBackend {
         prompt: String,
         sender: Option<Uuid>,
     ) {
+        self.send_agent_steer_with_id(driver, session_id, prompt, sender, None);
+    }
+
+    pub(super) fn send_agent_steer_with_id(
+        &self,
+        driver: &DriverHandle,
+        session_id: Uuid,
+        prompt: String,
+        sender: Option<Uuid>,
+        submission_id: Option<Uuid>,
+    ) {
         let transport = agent_prompt_envelope(&self.task_state, session_id, sender, &prompt);
         self.agent.record_pending_steer(
             session_id,
@@ -30,7 +41,7 @@ impl WakuBackend {
                 sender,
                 // A direct steer never parks — no chip to mirror.
                 queued_id: None,
-                submission_id: None,
+                submission_id,
                 context: None,
                 hidden: false,
                 report_trigger: None,

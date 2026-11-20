@@ -2346,6 +2346,7 @@ fn handle_codex_message(
     {
         if let Some(error) = value.pointer("/error/message").and_then(Value::as_str) {
             let _ = events.send(DriverEvent::SteerRejected {
+                submission_id: None,
                 message,
                 reason: error.to_owned(),
                 reason_i18n: None,
@@ -2353,6 +2354,7 @@ fn handle_codex_message(
             });
         } else {
             let _ = events.send(DriverEvent::SteerAccepted {
+                submission_id: None,
                 message,
                 sent_by_task: None,
                 hidden: false,

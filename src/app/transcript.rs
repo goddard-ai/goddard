@@ -176,7 +176,11 @@ impl Waku {
                 ),
                 windowed,
             ),
-            counsel,
+            mix(
+                counsel,
+                self.transcript_session_id()
+                    .map_or(0, |id| self.pending_prompt_fingerprint(id)),
+            ),
         )
     }
 
@@ -294,11 +298,7 @@ impl Waku {
             let partial = view.is_some_and(|view| view.has_more_before || view.has_more_after);
             splice_counsel_rows(&mut rows, session, &state.recommendations, partial);
         }
-        if self.runtime_submission_checks.contains_key(&session.id)
-            && !rows.contains(&TranscriptRowKind::WorkingIndicator)
-        {
-            rows.push(TranscriptRowKind::WorkingIndicator);
-        }
+        self.append_pending_prompt_rows(session.id, &mut rows);
         if windowed {
             rows.insert(0, TranscriptRowKind::HistoryBoundary);
         }
@@ -315,6 +315,70 @@ impl Waku {
             rows.push(TranscriptRowKind::QueuedEmployee);
         }
         rows
+    }
+
+    pub(super) fn append_pending_prompt_rows(
+        &self,
+        session_id: Uuid,
+        rows: &mut Vec<TranscriptRowKind>,
+    ) {
+        if !self.transcript_prompt_is_sending(session_id) {
+            return;
+        }
+        let status = rows
+            .iter()
+            .position(|row| *row == TranscriptRowKind::WorkingIndicator)
+            .unwrap_or_else(|| {
+                rows.push(TranscriptRowKind::WorkingIndicator);
+                rows.len() - 1
+            });
+        rows.splice(
+            status..status,
+            self.pending_transcript_prompts(session_id)
+                .map(|message| TranscriptRowKind::PendingPrompt(message.id)),
+        );
+    }
+
+    pub(super) fn transcript_prompt_is_sending(&self, session_id: Uuid) -> bool {
+        self.runtime_submission_checks.contains_key(&session_id)
+            || self.employee_prompt_previews.contains_key(&session_id)
+    }
+
+    pub(super) fn pending_transcript_prompts(
+        &self,
+        session_id: Uuid,
+    ) -> impl Iterator<Item = &Message> {
+        self.runtime_submission_checks
+            .get(&session_id)
+            .into_iter()
+            .flat_map(|check| &check.previews)
+            .chain(
+                self.employee_prompt_previews
+                    .get(&session_id)
+                    .into_iter()
+                    .flatten(),
+            )
+    }
+
+    pub(super) fn pending_prompt_fingerprint(&self, session_id: Uuid) -> u64 {
+        self.pending_transcript_prompts(session_id).fold(
+            u64::from(self.transcript_prompt_is_sending(session_id)),
+            |fingerprint, message| mix(fingerprint, message.id.as_u128() as u64),
+        )
+    }
+
+    pub(super) fn transcript_prompt_message<'a>(
+        &'a self,
+        session: &'a AgentSession,
+        kind: TranscriptRowKind,
+    ) -> Option<&'a Message> {
+        match kind {
+            TranscriptRowKind::Message(index) => session.messages.get(index),
+            TranscriptRowKind::PendingPrompt(id) => self
+                .pending_transcript_prompts(session.id)
+                .find(|message| message.id == id),
+            _ => None,
+        }
     }
 
     /// The response footer's copy content and timestamp for `message_index`,
@@ -965,6 +1029,7 @@ pub(super) enum TranscriptRowKind {
     /// reveal): newer retained entries page in behind the slice.
     FutureBoundary,
     Message(usize),
+    PendingPrompt(Uuid),
     TurnBlock(usize),
     TurnFold(Uuid),
     /// Actions and completion time for one settled response. This is a turn
@@ -1120,6 +1185,7 @@ impl BossHistoryRow {
             | TranscriptRowKind::BossHistoryBoundary(_)
             | TranscriptRowKind::HistoryBoundary
             | TranscriptRowKind::FutureBoundary
+            | TranscriptRowKind::PendingPrompt(_)
             | TranscriptRowKind::QueuedEmployee
             | TranscriptRowKind::CounselRecommendation(_) => {
                 return None;
@@ -1590,6 +1656,7 @@ pub(super) fn assistant_response_footer(
                 | TranscriptRowKind::BossHistoryBoundary(_)
                 | TranscriptRowKind::HistoryBoundary
                 | TranscriptRowKind::FutureBoundary
+                | TranscriptRowKind::PendingPrompt(_)
                 | TranscriptRowKind::QueuedEmployee
                 | TranscriptRowKind::CounselRecommendation(_) => None,
             })
@@ -2202,6 +2269,7 @@ fn response_footer_message_index_from_rows(
         | TranscriptRowKind::BossHistoryBoundary(_)
         | TranscriptRowKind::HistoryBoundary
         | TranscriptRowKind::FutureBoundary
+        | TranscriptRowKind::PendingPrompt(_)
         | TranscriptRowKind::QueuedEmployee
         | TranscriptRowKind::CounselRecommendation(_) => None,
     })?;
@@ -2223,6 +2291,7 @@ fn response_footer_message_index_from_rows(
             | TranscriptRowKind::BossHistoryBoundary(_)
             | TranscriptRowKind::HistoryBoundary
             | TranscriptRowKind::FutureBoundary
+            | TranscriptRowKind::PendingPrompt(_)
             | TranscriptRowKind::QueuedEmployee
             | TranscriptRowKind::CounselRecommendation(_) => None,
         })
@@ -2253,6 +2322,7 @@ fn turn_answer_start(session: &AgentSession, turn_rows: &[TranscriptRowKind]) ->
         | TranscriptRowKind::BossHistoryBoundary(_)
         | TranscriptRowKind::HistoryBoundary
         | TranscriptRowKind::FutureBoundary
+        | TranscriptRowKind::PendingPrompt(_)
         | TranscriptRowKind::QueuedEmployee
         | TranscriptRowKind::CounselRecommendation(_) => false,
     };
@@ -2298,6 +2368,7 @@ pub(super) fn row_turn_id(session: &AgentSession, row: TranscriptRowKind) -> Opt
         | TranscriptRowKind::BossHistoryBoundary(_)
         | TranscriptRowKind::HistoryBoundary
         | TranscriptRowKind::FutureBoundary
+        | TranscriptRowKind::PendingPrompt(_)
         | TranscriptRowKind::QueuedEmployee
         | TranscriptRowKind::CounselRecommendation(_) => None,
     }
@@ -2320,6 +2391,7 @@ pub(super) fn response_row_turn_id(session: &AgentSession, row: TranscriptRowKin
         | TranscriptRowKind::BossHistoryBoundary(_)
         | TranscriptRowKind::HistoryBoundary
         | TranscriptRowKind::FutureBoundary
+        | TranscriptRowKind::PendingPrompt(_)
         | TranscriptRowKind::QueuedEmployee
         | TranscriptRowKind::CounselRecommendation(_) => None,
         // The marker precedes the response it woke — like the prompt it

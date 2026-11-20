@@ -1497,7 +1497,7 @@ impl Waku {
             .counsel_state_for_session(session_id)
             .map(|(_, state)| state);
         let fingerprint = transcript_rows_fingerprint(session, &self.expanded_turns, pending_turn)
-            ^ (u64::from(self.runtime_submission_checks.contains_key(&session_id)) << 1)
+            ^ self.pending_prompt_fingerprint(session_id).rotate_left(1)
             ^ counsel.map_or(0, |state| state.revision.rotate_left(2));
         let (kinds, refolded) = {
             let mut cache = self.big_picture.card_kinds.borrow_mut();
@@ -1517,11 +1517,7 @@ impl Waku {
                             .is_some_and(|view| view.has_more_before || view.has_more_after),
                     );
                 }
-                if self.runtime_submission_checks.contains_key(&session_id)
-                    && !folded.contains(&TranscriptRowKind::WorkingIndicator)
-                {
-                    folded.push(TranscriptRowKind::WorkingIndicator);
-                }
+                self.append_pending_prompt_rows(session_id, &mut folded);
                 // Cards have no footer or file summary, but a capture
                 // holding a queued prompt still marks the settled turn.
                 folded.retain(|kind| match kind {
@@ -1674,9 +1670,8 @@ impl Waku {
             )
         };
         let inner = match kind {
-            TranscriptRowKind::Message(message_index) => session
-                .messages
-                .get(message_index)
+            TranscriptRowKind::Message(_) | TranscriptRowKind::PendingPrompt(_) => self
+                .transcript_prompt_message(session, kind)
                 .cloned()
                 .map(|message| {
                     let copied = self.copied_message_feedback.contains_key(&message.id);
@@ -2010,7 +2005,7 @@ impl Waku {
         session: &AgentSession,
         theme: &Theme,
     ) -> AnyElement {
-        let label = if self.runtime_submission_checks.contains_key(&session.id) {
+        let label = if self.transcript_prompt_is_sending(session.id) {
             tr!("transcript.sending_prompt")
         } else {
             working_indicator_label(

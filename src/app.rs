@@ -3429,6 +3429,7 @@ pub struct Waku {
     stale_task_details: HashSet<Uuid>,
     runtime_attach_pending: HashSet<Uuid>,
     runtime_submission_checks: HashMap<Uuid, runtime::RuntimeSubmissionCheck>,
+    employee_prompt_previews: HashMap<Uuid, Vec<Message>>,
     runtime_attach_misses: HashMap<Uuid, u8>,
     /// Automatic turn resumptions after a daemon restart, per session.
     /// Cleared when a turn completes successfully; capped so a daemon that
@@ -7872,6 +7873,7 @@ impl Waku {
                 stale_task_details: HashSet::new(),
                 runtime_attach_pending: HashSet::new(),
                 runtime_submission_checks: HashMap::new(),
+                employee_prompt_previews: HashMap::new(),
                 runtime_attach_misses: HashMap::new(),
                 runtime_auto_resumes: HashMap::new(),
                 daemon_recovery_episode: None,

@@ -1089,6 +1089,7 @@ impl driver::DriverControl for PlanGate {
     }
     fn steer(&self, prompt: String) {
         let event = DriverEvent::SteerRejected {
+            submission_id: None,
             message: prompt, reason: "Required-plan assignments queue follow-ups; steering is unavailable during verified plan delivery.".into(),
             reason_i18n: None, hidden: false,
         };

@@ -3756,6 +3756,7 @@ fn a_rejected_context_steer_leaves_the_session_eligible() {
     let rejected = backend.agent.note_driver_event(
         session_id,
         &DriverEvent::SteerRejected {
+            submission_id: None,
             message: capture.steers.lock()[0].clone(),
             reason: "turn ended".into(),
             reason_i18n: None,
@@ -3945,12 +3946,14 @@ fn runtime_generation_stale_events(managed: bool) {
         DriverEvent::TurnStarted,
         DriverEvent::TextDelta("stale answer".into()),
         DriverEvent::SteerAccepted {
+            submission_id: None,
             message: "pending acceptance".into(),
             sent_by_task: None,
             hidden: false,
             report_trigger: None,
         },
         DriverEvent::SteerRejected {
+            submission_id: None,
             message: "pending rejection".into(),
             reason: "stale".into(),
             reason_i18n: None,
@@ -18110,6 +18113,7 @@ fn a_steer_echo_on_a_retired_boss_chat_unmirrors_the_carried_chip() {
     let (sender, receiver) = driver::test_event_channel();
     sender
         .send(DriverEvent::SteerAccepted {
+            submission_id: None,
             message: "employee report".into(),
             sent_by_task: None,
             hidden: false,

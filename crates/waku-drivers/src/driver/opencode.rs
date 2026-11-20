@@ -1297,6 +1297,7 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut StreamSta
                 let (reason, reason_i18n) =
                     localized!("errors.provider_no_active_turn", provider = "OpenCode");
                 let _ = events.send(DriverEvent::SteerRejected {
+                    submission_id: None,
                     message: text,
                     reason,
                     reason_i18n: Some(reason_i18n),
@@ -1324,6 +1325,7 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut StreamSta
                     // The inbox event is authoritative; this 2xx is only the
                     // fallback for a response Goddard never sees.
                     let _ = events.send(DriverEvent::SteerAccepted {
+                        submission_id: None,
                         message: text,
                         sent_by_task: None,
                         hidden: false,
@@ -1332,6 +1334,7 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut StreamSta
                 }
                 Ok(None) => {
                     let _ = events.send(DriverEvent::SteerAccepted {
+                        submission_id: None,
                         message: text,
                         sent_by_task: None,
                         hidden: false,

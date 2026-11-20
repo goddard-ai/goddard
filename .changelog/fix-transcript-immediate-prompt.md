@@ -1,0 +1,1 @@
+- Prompts sent immediately now appear in the transcript while the existing “Sending prompt…” status is shown.

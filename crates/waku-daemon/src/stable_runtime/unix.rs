@@ -2095,6 +2095,7 @@ impl DriverControl for StableLink {
 
     fn steer(&self, prompt: String) {
         let _ = self.shared.sender.send(DriverEvent::SteerRejected {
+            submission_id: None,
             message: prompt,
             reason: "the stable runtime adapter cannot steer an executing turn".into(),
             reason_i18n: None,

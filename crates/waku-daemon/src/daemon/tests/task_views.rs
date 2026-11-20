@@ -303,6 +303,7 @@ fn task_views_handoff_recovers_hidden_output_and_fences_stale_saves() {
     assert_eq!(driver.steers.lock().len(), before + 1);
     sender
         .send(DriverEvent::SteerAccepted {
+            submission_id: None,
             message: queued.content.clone(),
             sent_by_task: None,
             hidden: false,

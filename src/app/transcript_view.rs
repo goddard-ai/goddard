@@ -2414,16 +2414,17 @@ impl Waku {
             | TranscriptRowKind::BossHistoryBoundary(_)
             | TranscriptRowKind::HistoryBoundary
             | TranscriptRowKind::FutureBoundary => div().into_any_element(),
-            TranscriptRowKind::Message(message_index) => self
+            TranscriptRowKind::Message(_) | TranscriptRowKind::PendingPrompt(_) => self
                 .transcript_display_session()
                 .and_then(|session| {
-                    session
-                        .messages
-                        .get(message_index)
-                        .cloned()
-                        .map(|message| (message, session.provider))
+                    let message_index = match kind {
+                        TranscriptRowKind::Message(index) => Some(index),
+                        _ => None,
+                    };
+                    let message = self.transcript_prompt_message(session, kind)?;
+                    Some((message.clone(), message_index, session.provider))
                 })
-                .map(|(message, provider)| {
+                .map(|(message, message_index, provider)| {
                     if self
                         .landing_operations
                         .get(&message.id)
@@ -2438,11 +2439,14 @@ impl Waku {
                     }
                     let display_content = super::transcript::display_message_content(&message);
                     let copied = self.copied_message_feedback.contains_key(&message.id);
-                    let (assistant_footer_copy_content, assistant_footer_time) =
-                        self.assistant_response_footer_cached(message_index);
-                    let assistant_message_action =
-                        self.assistant_message_action_for_message(message_index);
-                    let user_message_action = self.user_message_action_for_message(message_index);
+                    let (assistant_footer_copy_content, assistant_footer_time) = message_index
+                        .map_or((None, None), |index| {
+                            self.assistant_response_footer_cached(index)
+                        });
+                    let assistant_message_action = message_index
+                        .and_then(|index| self.assistant_message_action_for_message(index));
+                    let user_message_action =
+                        message_index.and_then(|index| self.user_message_action_for_message(index));
                     let message_edit_input = user_message_action.and_then(|action| {
                         self.message_edit
                             .as_ref()
@@ -2578,8 +2582,9 @@ impl Waku {
                         .history_render_session
                         .get()
                         .is_none()
-                        .then(|| self.transcript_search_highlights(message_index))
+                        .then_some(message_index)
                         .flatten()
+                        .and_then(|index| self.transcript_search_highlights(index))
                     {
                         ctx = ctx.with_search_highlights(highlights);
                     }
@@ -4161,8 +4166,7 @@ impl Waku {
         // A parked turn is waiting on detached work, not working; a
         // submission still preparing reads as its live stage — workspace,
         // checkpoint, routing, or provider start — not connecting.
-        let label = if session
-            .is_some_and(|session| self.runtime_submission_checks.contains_key(&session.id))
+        let label = if session.is_some_and(|session| self.transcript_prompt_is_sending(session.id))
         {
             tr!("transcript.sending_prompt")
         } else if let Some(status) = setup {

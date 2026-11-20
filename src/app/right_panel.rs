@@ -7536,6 +7536,9 @@ impl Waku {
         // The transcript's resolved-commit set is shared so SHAs underline
         // and hit-test in the lane the way they do in the session column.
         let resolved_commits = self.transcript_selection.resolved_commits.clone();
+        let mut pending_rows = Vec::new();
+        self.append_pending_prompt_rows(session_id, &mut pending_rows);
+        let pending_fingerprint = self.pending_prompt_fingerprint(session_id);
         let view = self
             .side_chat_views
             .entry(session_id)
@@ -7559,7 +7562,8 @@ impl Waku {
                 }
             });
         let expanded_turns = view.expanded_turns.clone();
-        let fingerprint = transcript_rows_fingerprint(&session, &expanded_turns, pending_turn);
+        let fingerprint = transcript_rows_fingerprint(&session, &expanded_turns, pending_turn)
+            ^ pending_fingerprint.rotate_left(1);
         let previous_kinds = view.kinds.1.clone();
         let (kinds, refolded) = if view.kinds.0 != fingerprint {
             let mut folded = folded_transcript_row_kinds(&session, &expanded_turns, pending_turn);
@@ -7584,6 +7588,10 @@ impl Waku {
                 && !folded.contains(&TranscriptRowKind::ChangedFiles(turn_id))
             {
                 folded.push(TranscriptRowKind::ChangedFiles(turn_id));
+            }
+            if !pending_rows.is_empty() {
+                folded.retain(|kind| *kind != TranscriptRowKind::WorkingIndicator);
+                folded.extend(pending_rows);
             }
             let kinds = Rc::new(folded);
             view.kinds = (fingerprint, kinds.clone());
@@ -8131,9 +8139,8 @@ impl Waku {
             )
         };
         let inner = match kind {
-            TranscriptRowKind::Message(message_index) => session
-                .messages
-                .get(message_index)
+            TranscriptRowKind::Message(_) | TranscriptRowKind::PendingPrompt(_) => self
+                .transcript_prompt_message(session, kind)
                 .cloned()
                 .map(|message| {
                     let copied = self.copied_message_feedback.contains_key(&message.id);

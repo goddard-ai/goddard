@@ -515,6 +515,7 @@ fn handle_command(
         CommandMessage::Steer(text) => match prompt(server, session_id, &text, "steer") {
             Ok(_) => {
                 let _ = events.send(DriverEvent::SteerAccepted {
+                    submission_id: None,
                     message: text,
                     sent_by_task: None,
                     hidden: false,
@@ -523,6 +524,7 @@ fn handle_command(
             }
             Err(error) => {
                 let _ = events.send(DriverEvent::SteerRejected {
+                    submission_id: None,
                     message: text,
                     reason: error.to_string(),
                     reason_i18n: None,

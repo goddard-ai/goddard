@@ -1154,6 +1154,7 @@ async fn run_sdk_connection(
                     CommandMessage::Steer(text) => {
                         if prompt_requests.lock().is_empty() {
                             let _ = events.send(DriverEvent::SteerRejected {
+                                submission_id: None,
                                 message: text,
                                 reason: format!(
                                     "{} has no active turn to steer.",
@@ -1178,6 +1179,7 @@ async fn run_sdk_connection(
                         ) {
                             Ok(()) => {
                                 let _ = events.send(DriverEvent::SteerAccepted {
+                                    submission_id: None,
                                     message: text,
                                     sent_by_task: None,
                                     hidden: false,
@@ -1186,6 +1188,7 @@ async fn run_sdk_connection(
                             }
                             Err(error) => {
                                 let _ = events.send(DriverEvent::SteerRejected {
+                                    submission_id: None,
                                     message: text,
                                     reason: error.to_string(),
                                     reason_i18n: None,

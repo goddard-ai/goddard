@@ -399,7 +399,7 @@ fn stream_projection_event(event: &DriverEvent) -> bool {
 /// that identified its queued submission. A rotation that happens before the
 /// provider acknowledgement therefore carries the queue row; one that happens
 /// after acceptance carries the transcript message instead.
-fn record_accepted_boss_steer(
+fn record_accepted_user_steer(
     task_state: &Mutex<PersistedState>,
     task_store: &StateStore,
     session_id: Uuid,
@@ -505,7 +505,7 @@ mod recency_tests {
             store.save(&mut state).unwrap();
             let state = Mutex::new(state);
 
-            record_accepted_boss_steer(&state, &store, session_id, submission_id, "follow-up")
+            record_accepted_user_steer(&state, &store, session_id, submission_id, "follow-up")
                 .unwrap();
 
             let restored = store.load_session_detail(session_id).unwrap().unwrap();
@@ -1179,8 +1179,17 @@ pub(super) fn forward_driver_events(
                     agent.mark_parent_index_delivered(session_id);
                     agent.mark_memory_delivered(session_id);
                 }
-                if let Some(submission_id) = steer.as_ref().and_then(|steer| steer.submission_id)
-                    && let Err(error) = record_accepted_boss_steer(
+                let submission_id = steer.as_ref().and_then(|steer| {
+                    steer.submission_id.or_else(|| {
+                        // A human composer prompt drained into a parked turn
+                        // carries its identity on the daemon-owned queue entry.
+                        steer.queued_id.filter(|_| {
+                            !hidden && steer.sender.is_none() && steer.report_trigger.is_none()
+                        })
+                    })
+                });
+                if let Some(submission_id) = submission_id
+                    && let Err(error) = record_accepted_user_steer(
                         &task_state,
                         &task_store,
                         session_id,
@@ -1216,6 +1225,7 @@ pub(super) fn forward_driver_events(
                     }
                 }
                 DriverEvent::SteerAccepted {
+                    submission_id,
                     message,
                     sent_by_task,
                     hidden,
@@ -1257,6 +1267,13 @@ pub(super) fn forward_driver_events(
                         backend.notify_task_state();
                     }
                 }
+                if rejected_steer
+                    .as_ref()
+                    .is_some_and(|steer| steer.queued_id.is_some())
+                {
+                    send_agent_queue_changed(&task_state, &events, session_id);
+                    continue;
+                }
                 // An enveloped steer echoes the envelope; a surfaced
                 // rejection names the sender's own words.
                 let message = rejected_steer
@@ -1265,6 +1282,9 @@ pub(super) fn forward_driver_events(
                     .map(|steer| steer.prompt.clone())
                     .unwrap_or(message);
                 DriverEvent::SteerRejected {
+                    submission_id: rejected_steer
+                        .as_ref()
+                        .and_then(|steer| steer.submission_id),
                     message,
                     reason,
                     reason_i18n,

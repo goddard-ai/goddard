@@ -2042,9 +2042,23 @@ impl WakuBackend {
                             AgentPromptDelivery::Interrupt | AgentPromptDelivery::Steer,
                             Some(driver),
                         ) => {
-                            self.send_agent_steer(&driver, session_id, prompt.clone(), None);
+                            self.send_agent_steer_with_id(
+                                &driver,
+                                session_id,
+                                prompt.clone(),
+                                None,
+                                Some(submission_id),
+                            );
                         }
-                        _ => self.queue_agent_prompt(session_id, prompt.clone(), None, events)?,
+                        _ => self.queue_agent_prompt_with_id(
+                            session_id,
+                            prompt.clone(),
+                            None,
+                            false,
+                            Some(submission_id),
+                            None,
+                            events,
+                        )?,
                     }
                     self.boss.update_employee_ticket(session_id, |ticket| {
                         if let Some(receipt) = ticket

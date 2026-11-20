@@ -9155,6 +9155,7 @@ fn compact_task_view_snapshot_cannot_restore_a_retired_history() {
 /// WebSocket, so the evidence covers the whole path — roster, painted
 /// card, click, and the session-bound command that reaches the daemon.
 mod live_employee_approvals {
+    use crate::app::TranscriptRowKind;
     use super::super::{SessionRuntime, Waku};
     use super::*;
     use crate::model::{PendingPermission, PermissionOption, UserInputAnswer};
@@ -10463,6 +10464,7 @@ mod live_employee_approvals {
             !waku.runtime_submission_checks.contains_key(&id)
         });
         read_app(vcx, &view, |waku| {
+            assert!(waku.pending_transcript_prompts(id).next().is_none());
             let saved: Vec<_> = waku
                 .state
                 .saved_drafts
@@ -10960,7 +10962,7 @@ mod live_employee_approvals {
                 },
             })
         }));
-        update_app(vcx, &view, |waku, window, cx| {
+        let preview_id = update_app(vcx, &view, |waku, window, cx| {
             waku.state.session_mut(session_id).unwrap().incognito = false;
             waku.choose_model(ProviderKind::Claude, "selected-model".into(), None, false, window, cx);
             waku.submit_submission_for_session(
@@ -10968,11 +10970,46 @@ mod live_employee_approvals {
                 ComposerSubmission::plain("validate the owner and my chosen model".into()),
                 cx,
             );
-            assert!(waku.runtime_submission_checks.contains_key(&session_id));
-            assert!(!daemon.commands.lock().iter().any(|record| record.executed_prompt));
+            let preview = waku.pending_transcript_prompts(session_id).next().unwrap();
+            assert_eq!(
+                preview.visible_content(),
+                "validate the owner and my chosen model"
+            );
+            assert!(waku.selected_transcript_row_kinds().ends_with(&[
+                TranscriptRowKind::PendingPrompt(preview.id),
+                TranscriptRowKind::WorkingIndicator,
+            ]));
+            assert!(
+                !daemon
+                    .commands
+                    .lock()
+                    .iter()
+                    .any(|record| record.executed_prompt)
+            );
+            preview.id
         });
         wait_for(vcx, &view, |_| {
-            daemon.commands.lock().iter().any(|record| record.executed_prompt)
+            daemon
+                .commands
+                .lock()
+                .iter()
+                .any(|record| record.executed_prompt)
+        });
+        read_app(vcx, &view, |waku| {
+            assert!(waku.pending_transcript_prompts(session_id).next().is_none());
+            let session = waku
+                .state
+                .sessions
+                .iter()
+                .find(|s| s.id == session_id)
+                .unwrap();
+            let user_messages: Vec<_> = session
+                .messages
+                .iter()
+                .filter(|message| message.role == MessageRole::User)
+                .collect();
+            assert_eq!(user_messages.len(), 1);
+            assert_eq!(user_messages[0].id, preview_id);
         });
         let commands = daemon.commands.lock();
         let executions: Vec<_> = commands.iter().filter(|record| record.executed_prompt).collect();

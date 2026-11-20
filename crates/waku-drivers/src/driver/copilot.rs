@@ -449,6 +449,7 @@ async fn run_inner(launch: CopilotRun) -> anyhow::Result<()> {
                         match session.send(message).await {
                             Ok(_) => {
                                 let _ = events.send(DriverEvent::SteerAccepted {
+                                    submission_id: None,
                                     message: text,
                                     sent_by_task: None,
                                     hidden: false,

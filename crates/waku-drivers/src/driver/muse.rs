@@ -551,6 +551,7 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut WorkerSta
             match worker.service.call("turn/steer", params) {
                 Ok(_) => {
                     let _ = worker.events.send(DriverEvent::SteerAccepted {
+                        submission_id: None,
                         message: text,
                         sent_by_task: None,
                         hidden: false,
@@ -559,6 +560,7 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut WorkerSta
                 }
                 Err(error) => {
                     let _ = worker.events.send(DriverEvent::SteerRejected {
+                        submission_id: None,
                         message: text,
                         reason: error.message(),
                         reason_i18n: None,

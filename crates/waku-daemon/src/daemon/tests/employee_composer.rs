@@ -156,6 +156,13 @@ fn employee_composer_bypasses_soft_hard_and_zero_model_caps_once() {
         };
         steer().unwrap();
         steer().unwrap();
+        assert!(
+            backend
+                .agent
+                .has_pending_steer_matching(employee, |pending| {
+                    pending.submission_id == Some(steer_id) && pending.prompt == "Steer once"
+                })
+        );
         assert_eq!(
             capture
                 .steers

@@ -5032,6 +5032,8 @@ transcript.interrupted_after:
   en: Interrupted after %{duration}
 transcript.sending_prompt:
   en: Sending prompt…
+transcript.employee_prompt_unconfirmed:
+  en: Delivery could not be confirmed. Check the transcript before sending again.
 transcript.working_for:
   en: Working for %{duration}
 transcript.checking_changes:

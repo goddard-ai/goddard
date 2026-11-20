@@ -4903,6 +4903,8 @@ pub enum DriverEvent {
     /// [`DriverEvent::PromptSubmitted`] when the steer came through the
     /// daemon's scoped agent commands.
     SteerAccepted {
+        /// Submission identity supplied by the daemon when known.
+        submission_id: Option<Uuid>,
         message: String,
         sent_by_task: Option<Uuid>,
         /// The steer carried daemon-injected context rather than user or
@@ -4922,6 +4924,8 @@ pub enum DriverEvent {
     /// The provider could not steer the running turn (for example it ended
     /// before the request arrived). The app decides the fallback.
     SteerRejected {
+        /// Submission identity supplied by the daemon when known.
+        submission_id: Option<Uuid>,
         message: String,
         reason: String,
         /// The i18n semantic behind `reason`, when the daemon composed it
@@ -5042,6 +5046,7 @@ impl DriverEvent {
         pair: (String, crate::protocol::WireTranslation),
     ) -> Self {
         Self::SteerRejected {
+            submission_id: None,
             message,
             reason: pair.0,
             reason_i18n: Some(pair.1),
