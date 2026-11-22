@@ -1549,6 +1549,8 @@ enum RightPanelOwner {
     /// The Projects page, keyed by the project it is scoped to. Admits only
     /// issue/PR details and project-rooted files.
     Projects(Uuid),
+    /// Project files opened from a view without a workspace.
+    ProjectFiles(Uuid),
     /// The notification inbox — a page in the same "claims the main area"
     /// sense; it admits issue/PR details only.
     Inbox,
@@ -3798,6 +3800,7 @@ pub struct Waku {
     /// `active_right_panel_owner` to drive the swap; diverges from it only
     /// between a flag change and the sync that follows.
     right_panel_live_owner: RightPanelOwner,
+    project_files_panel: Option<(RightPanelOwner, Uuid)>,
     right_panel_surfaces: Vec<RightPanelSurface>,
     /// Content behind the live strip's `PastedText` surfaces — atom
     /// snapshots and blob reads, parked with the strip on an owner swap.
@@ -8046,6 +8049,7 @@ impl Waku {
                 computer_use_preview_position: None,
                 right_panel_states: HashMap::new(),
                 right_panel_live_owner: RightPanelOwner::Bare,
+                project_files_panel: None,
                 right_panel_surfaces: Vec::new(),
                 right_panel_pasted_texts: HashMap::new(),
                 side_chat_views: HashMap::new(),

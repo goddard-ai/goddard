@@ -5818,6 +5818,16 @@ impl Waku {
     /// same flags `navigation_location` reads — a page beats the selection
     /// parked underneath it.
     pub(super) fn active_right_panel_owner(&self) -> RightPanelOwner {
+        let owner = self.main_right_panel_owner();
+        match self.project_files_panel {
+            Some((origin, project_id)) if origin == owner => {
+                RightPanelOwner::ProjectFiles(project_id)
+            }
+            _ => owner,
+        }
+    }
+
+    pub(super) fn main_right_panel_owner(&self) -> RightPanelOwner {
         if let Some((key, _)) = self.boss_ui.page {
             RightPanelOwner::Boss(key)
         } else if let Some(key) = self.boss_chat_key() {
@@ -5850,6 +5860,9 @@ impl Waku {
             }
         }
         let owner = self.active_right_panel_owner();
+        if !matches!(owner, RightPanelOwner::ProjectFiles(_)) {
+            self.project_files_panel = None;
+        }
         if owner == self.right_panel_live_owner {
             self.sync_boss_tasks_panel(cx);
             return;
@@ -5867,7 +5880,10 @@ impl Waku {
     /// is reconstructed on restore and remains present while user tabs come
     /// and go. Boss pages do not claim the chat's strip.
     pub(super) fn sync_boss_tasks_panel(&mut self, cx: &mut Context<Self>) {
-        let Some(key) = self.boss_chat_key().filter(|_| self.boss_ui.page.is_none()) else {
+        let Some(key) = self.boss_chat_key().filter(|key| {
+            self.boss_ui.page.is_none()
+                && self.active_right_panel_owner() == RightPanelOwner::Boss(*key)
+        }) else {
             return;
         };
         // The queued backlog starts folded — seeded once per daemon before
@@ -5908,6 +5924,12 @@ impl Waku {
     /// strip otherwise follows the managed-session surface rules. The boss's
     /// own chat remains restricted to its managed panel surfaces.
     pub(super) fn git_panel_owner_allowed(&self) -> bool {
+        if matches!(
+            self.active_right_panel_owner(),
+            RightPanelOwner::ProjectFiles(_)
+        ) {
+            return false;
+        }
         if !self.managed_panel_owner() {
             return true;
         }
@@ -6002,6 +6024,10 @@ impl Waku {
                     | RightPanelSurface::Files
                     | RightPanelSurface::File(_)
                     | RightPanelSurface::FileAtRef { .. }
+            ),
+            RightPanelOwner::ProjectFiles(_) => matches!(
+                surface,
+                RightPanelSurface::Files | RightPanelSurface::File(_)
             ),
             RightPanelOwner::Inbox => matches!(surface, RightPanelSurface::GitHub(_)),
             RightPanelOwner::Boss(key) => {
@@ -6154,6 +6180,7 @@ impl Waku {
                 | RightPanelOwner::Drafts
                 | RightPanelOwner::Automations
                 | RightPanelOwner::Inbox
+                | RightPanelOwner::ProjectFiles(_)
         ) {
             self.state.right_panel_visible = self.right_panel_visible;
         }
@@ -6696,6 +6723,29 @@ impl Waku {
         self.select_right_panel_file(relative_path, true, cx);
     }
 
+    pub(super) fn project_file_search_root(&self, project_id: Uuid) -> Option<PathBuf> {
+        let project = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)?;
+        // File indexes and editors share path-based routing. If another
+        // host wins that lookup, the path cannot safely identify this project.
+        (self.daemon_key_for_path(&project.path) == self.daemons.project_owner(project_id))
+            .then(|| project.path.clone())
+    }
+
+    pub(super) fn dismiss_project_files_panel(&mut self, cx: &mut Context<Self>) {
+        if self.project_files_panel.take().is_some() {
+            self.sync_right_panel_owner(cx);
+        }
+    }
+
+    pub(super) fn show_project_files_panel(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
+        self.project_files_panel = Some((self.main_right_panel_owner(), project_id));
+        self.sync_right_panel_owner(cx);
+    }
+
     pub(super) fn open_file_finder_tab(&mut self, relative_path: String, cx: &mut Context<Self>) {
         let surface = RightPanelSurface::File(relative_path.clone());
         if !self.right_panel_owner_allows(&surface) {
@@ -6993,6 +7043,12 @@ impl Waku {
             self.right_panel_pending_terminal_focus = None;
             self.right_panel_pending_browser_focus = None;
             self.set_right_panel_visible(false, cx);
+            if matches!(
+                self.right_panel_live_owner,
+                RightPanelOwner::ProjectFiles(_)
+            ) {
+                self.dismiss_project_files_panel(cx);
+            }
         }
         if let Some(id) = side_chat_id {
             self.side_chat_views.remove(&id);
@@ -7039,6 +7095,23 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if matches!(
+            self.right_panel_live_owner,
+            RightPanelOwner::ProjectFiles(_)
+        ) && self.right_panel_focus.contains_focused(window, cx)
+            && let Some(active) = self.right_panel_active_surface
+        {
+            self.close_right_panel_surface(active, cx);
+            if self.settings_page.is_some()
+                && !matches!(
+                    self.right_panel_live_owner,
+                    RightPanelOwner::ProjectFiles(_)
+                )
+            {
+                window.focus(&self.settings_focus, cx);
+            }
+            return;
+        }
         // The floating terminal card is the lightest layer over the
         // column. ⌘W with the card's terminal focused kills the shell —
         // asking first while a command runs, like the standalone page;
@@ -9208,7 +9281,7 @@ impl Waku {
             );
         }
 
-        if self.active_right_panel_surface().is_some() {
+        if self.active_right_panel_surface().is_some() && self.settings_page.is_none() {
             let maximized = self.fullscreen_surface.is_some();
             let focus = self.transcript_control_focus("right-panel-maximize-toggle", cx);
             let (icon_path, label) = if maximized {
@@ -11628,8 +11701,8 @@ impl Waku {
     /// The maximized panel layer is on screen this frame — the mode is
     /// active or its exit slide is still traveling.
     pub(super) fn panel_fullscreen_active(&self) -> bool {
-        self.live_deliverable_page().is_none()
-            && self.boss_ui.page.is_none()
+        self.settings_page.is_none()
+            && self.right_panel_permitted_on_main_screen()
             && (self.fullscreen_surface.is_some() || self.panel_fullscreen_slide.is_some())
     }
 
@@ -11638,6 +11711,9 @@ impl Waku {
     /// the surface goes away (tab close, surface switch, panel hide) is
     /// reconciled per frame in `settle_panel_slides`.
     pub(super) fn toggle_panel_fullscreen(&mut self, cx: &mut Context<Self>) {
+        if self.settings_page.is_some() {
+            return;
+        }
         let entering = self.fullscreen_surface.is_none();
         self.fullscreen_surface = if entering {
             self.active_right_panel_surface()
@@ -14649,6 +14725,7 @@ impl Waku {
                 .iter()
                 .find(|project| project.id == project_id)
                 .map(|project| project.path.clone()),
+            RightPanelOwner::ProjectFiles(project_id) => self.project_file_search_root(project_id),
             RightPanelOwner::Boss(key) => {
                 // An armed sidebar deliverable roots the boss chat's file
                 // surfaces at the path the boss published — its preview

@@ -1,1 +1,1 @@
-- Cmd+P asks you to choose a project when the current view has no file search context.
+- When the current view has no workspace, Cmd+P lets you pick a project and open a file beside that view without creating a draft.

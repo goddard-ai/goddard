@@ -533,6 +533,8 @@ project_switcher.recently_used:
   en: Recently used
 file_finder.project_placeholder:
   en: Choose a project to search…
+file_finder.project_unavailable:
+  en: This project’s folder cannot be uniquely matched to its host.
 file_finder.no_projects:
   en: Add a project to search its files
 project_switcher.terminal_placeholder:

@@ -704,6 +704,17 @@ impl Render for Waku {
                 .on_action(cx.listener(Self::new_task_in_action))
                 .on_action(cx.listener(Self::toggle_command_palette_action))
                 .on_action(cx.listener(Self::toggle_file_finder_action))
+                .when(
+                    matches!(
+                        self.right_panel_live_owner,
+                        RightPanelOwner::ProjectFiles(_)
+                    ) && self.right_panel_visible,
+                    |content| {
+                        content
+                            .on_action(cx.listener(Self::close_window_or_right_panel_tab_action))
+                            .on_action(cx.listener(Self::save_right_panel_file_action))
+                    },
+                )
                 .on_action(cx.listener(Self::toggle_big_picture_action))
                 .on_action(cx.listener(Self::open_resume_picker_action))
                 .on_action(cx.listener(Self::run_project_script_action))
@@ -738,7 +749,33 @@ impl Render for Waku {
                 .on_modifiers_changed(cx.listener(Self::sidebar_shortcuts_modifiers_changed))
                 .on_modifiers_changed(cx.listener(Self::keyboard_options_modifiers_changed))
                 .capture_key_down(cx.listener(Self::sidebar_shortcuts_key_down))
-                .child(self.render_settings(window, cx))
+                .child(
+                    div()
+                        .size_full()
+                        .flex()
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .child(self.render_settings(window, cx)),
+                        )
+                        .when(
+                            matches!(
+                                self.right_panel_live_owner,
+                                RightPanelOwner::ProjectFiles(_)
+                            ) && self.right_panel_visible,
+                            |row| {
+                                row.child(
+                                    self.right_panel_pane.clone().cached(
+                                        StyleRefinement::default()
+                                            .flex_none()
+                                            .w(px(panels.right_panel_content))
+                                            .h_full(),
+                                    ),
+                                )
+                            },
+                        ),
+                )
                 .children(toast)
                 .children(command_palette)
                 .children(qa_setup)

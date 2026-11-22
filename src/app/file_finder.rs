@@ -68,6 +68,7 @@ pub fn init(cx: &mut App) {
 pub(super) struct FileFinderUi {
     search: Entity<TextInput>,
     open: bool,
+    project: Option<(RightPanelOwner, Uuid)>,
     focus_generation: u64,
     previous_focus: Option<FocusHandle>,
     /// The `mention_files` key `files` was listed from — the active files
@@ -97,6 +98,7 @@ impl FileFinderUi {
         Self {
             search,
             open: false,
+            project: None,
             focus_generation: 0,
             previous_focus: None,
             root: None,
@@ -336,18 +338,38 @@ impl Waku {
         if self.file_finder.open {
             self.close_file_finder(window, cx);
         } else {
-            self.open_file_finder(window, cx);
+            self.open_file_finder(None, window, cx);
         }
     }
 
-    pub(super) fn open_file_finder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.resolve_right_panel_files_root(cx).is_none() {
-            self.toggle_file_finder_project_switcher(window, cx);
-            return;
+    pub(super) fn open_file_finder(
+        &mut self,
+        project_id: Option<Uuid>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(id) = project_id {
+            if self.project_file_search_root(id).is_none() {
+                self.show_toast(tr!("file_finder.project_unavailable"));
+                cx.notify();
+                return;
+            }
+            if let waku_client::DaemonKey::Remote(host) = self.daemons.project_owner(id)
+                && self.daemon_for_project(id).is_none()
+            {
+                self.use_remote_host(host, cx);
+                self.show_toast(tr!("command_palette.sync_host_offline"));
+                cx.notify();
+                return;
+            }
+        } else {
+            if self.file_finder_root(cx).is_none() {
+                self.toggle_file_finder_project_switcher(window, cx);
+                return;
+            }
+            self.sync_right_panel_files_root(cx);
         }
-        // Land the panel's files slice on that same root first, so a confirm
-        // opens the file under the root its listing came from.
-        self.sync_right_panel_files_root(cx);
+        self.file_finder.project = project_id.map(|id| (self.main_right_panel_owner(), id));
         // One picker at a time; closing first restores the palette's recorded
         // focus so the finder captures the element that was really focused.
         if self.command_palette.is_open() {
@@ -381,9 +403,9 @@ impl Waku {
             .search
             .update(cx, |input, cx| input.clear(cx));
         self.refresh_file_finder_results(cx);
-        // Kick the shared index so a cold workspace starts loading; the
-        // results refresh again when it lands.
-        self.refresh_composer_sources(cx);
+        if project_id.is_none() {
+            self.refresh_composer_sources(cx);
+        }
 
         // Closing an open GPUI menu can call its toggle observers back into
         // this entity, so release this action listener's mutable borrow first.
@@ -420,6 +442,7 @@ impl Waku {
             return;
         }
         self.file_finder.open = false;
+        self.file_finder.project = None;
         self.file_finder.focus_generation = self.file_finder.focus_generation.wrapping_add(1);
         if let Some(previous_focus) = self.file_finder.previous_focus.take() {
             window.focus(&previous_focus, cx);
@@ -444,6 +467,24 @@ impl Waku {
         cx.notify();
     }
 
+    fn file_finder_root(&self, cx: &App) -> Option<PathBuf> {
+        if let Some((origin, project_id)) = self.file_finder.project {
+            if origin != self.main_right_panel_owner() {
+                return None;
+            }
+            return self.project_file_search_root(project_id);
+        }
+        if self.settings_page.is_some()
+            && !matches!(
+                self.active_right_panel_owner(),
+                RightPanelOwner::ProjectFiles(_)
+            )
+        {
+            return None;
+        }
+        self.resolve_right_panel_files_root(cx)
+    }
+
     /// Recompute the drawn rows from the files root's listing. Runs on a
     /// keystroke and when the index lands or swaps underneath an open finder —
     /// never from `render`. A root that drifted under an open finder clears
@@ -453,12 +494,11 @@ impl Waku {
         if !self.file_finder.open {
             return;
         }
-        let root = match self.resolve_right_panel_files_root(cx) {
+        let root = match self.file_finder_root(cx) {
             Some(path) => {
-                let listing = if matches!(
-                    self.active_right_panel_owner(),
-                    RightPanelOwner::Session(_)
-                ) {
+                let listing = if self.file_finder.project.is_none()
+                    && matches!(self.active_right_panel_owner(), RightPanelOwner::Session(_))
+                {
                     let session_listing = self.selected_session().map(|session| {
                         let listing = Self::workspace_files_listing(&session.workspace);
                         let cache_key = (session.id, path.clone());
@@ -608,6 +648,15 @@ impl Waku {
             return;
         };
         let relative_path = row.item.path.clone();
+        if self.file_finder_root(cx).as_ref()
+            != self.file_finder.root.as_ref().map(|(root, _)| root)
+        {
+            self.refresh_file_finder_results(cx);
+            return;
+        }
+        if let Some((_, project_id)) = self.file_finder.project {
+            self.show_project_files_panel(project_id, cx);
+        }
         let query = self.file_finder.search.read(cx).content().to_owned();
         let (_, line, column) = split_position_suffix(&query);
         self.right_panel_pending_file_focus = Some(PendingFileFocus {

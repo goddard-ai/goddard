@@ -698,6 +698,7 @@ impl Waku {
         let focus = browser.detail_focus.clone();
         // Details open in the right panel — one tab per project, its content
         // keyed to `browser.detail` so moving between items reuses the tab.
+        self.dismiss_project_files_panel(cx);
         self.remove_parked_github_surfaces(project_id);
         self.open_right_panel_surface(RightPanelSurface::GitHub(project_id), cx);
         window.focus(&focus, cx);

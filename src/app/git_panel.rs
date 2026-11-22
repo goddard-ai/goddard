@@ -621,9 +621,14 @@ impl Waku {
     /// so the parked boss chat panel must not occupy the right-side slot
     /// until that surface is left.
     pub(super) fn right_panel_content_visible(&self) -> bool {
-        self.right_panel_visible
-            && self.live_deliverable_page().is_none()
-            && self.boss_ui.page.is_none()
+        self.right_panel_visible && self.right_panel_permitted_on_main_screen()
+    }
+
+    pub(super) fn right_panel_permitted_on_main_screen(&self) -> bool {
+        matches!(
+            self.right_panel_live_owner,
+            RightPanelOwner::ProjectFiles(_)
+        ) || (self.live_deliverable_page().is_none() && self.boss_ui.page.is_none())
     }
 
     /// The remembered width of whichever panel owns the slot — the Git

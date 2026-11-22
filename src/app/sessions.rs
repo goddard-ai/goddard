@@ -2878,6 +2878,15 @@ impl Waku {
         self.state
             .projects
             .retain(|project| project.id != project_id);
+        if self
+            .project_files_panel
+            .is_some_and(|(_, id)| id == project_id)
+        {
+            self.dismiss_project_files_panel(cx);
+        }
+        self.right_panel_states
+            .remove(&RightPanelOwner::ProjectFiles(project_id));
+        self.refresh_file_finder_results(cx);
         Project::resolve_display_names(&mut self.state.projects);
         self.project_switcher.project_removed(project_id);
         for session_id in session_ids {
@@ -4518,6 +4527,7 @@ impl Waku {
                 | RightPanelOwner::Drafts
                 | RightPanelOwner::Automations
                 | RightPanelOwner::Inbox
+                | RightPanelOwner::ProjectFiles(_)
         ) {
             self.state.right_panel_visible = self.right_panel_visible;
         }

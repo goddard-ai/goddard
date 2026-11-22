@@ -1013,30 +1013,7 @@ impl Waku {
                     .iter()
                     .any(|project| project.id == project_id)
             {
-                // The project draft owns the strip that will hold the file tab.
-                self.create_session_for(project_id, self.state.last_provider, cx);
-                if let Some(pending) = self.pending_session_activation.as_ref()
-                    && pending.deferred.is_some()
-                    && self.state.sessions.iter().any(|session| {
-                        session.id == pending.session_id && session.project_id == project_id
-                    })
-                {
-                    self.request_session_activation(
-                        pending.session_id,
-                        SessionActivationTransition::Visit,
-                        cx,
-                    );
-                }
-                if self
-                    .selected_session()
-                    .is_some_and(|session| session.project_id == project_id)
-                    && self.resolve_right_panel_files_root(cx).is_some()
-                {
-                    if self.settings_page.take().is_some() {
-                        window.focus(&self.composer_focus(cx), cx);
-                    }
-                    self.open_file_finder(window, cx);
-                }
+                self.open_file_finder(Some(project_id), window, cx);
             }
             cx.notify();
             return;
