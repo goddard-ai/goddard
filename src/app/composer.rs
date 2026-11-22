@@ -1667,21 +1667,23 @@ impl Waku {
         let theme = Theme::current(cx);
         let session = controls.session;
         let provider = session.map(|session| session.provider).unwrap_or_default();
-        let auto_route = session.is_some_and(|session| session.auto_route);
-        let routed = session.is_some_and(|session| session.route_decision.is_some());
+        let auto_route = session.is_some_and(routing::pending_auto_route);
+        let decision = session.and_then(|session| session.route_decision.as_ref());
         let selected_model = session.and_then(|session| self.catalog_model_id_for_session(session));
         let session_key = session
             .map(|session| self.daemons.session_owner(session.id))
             .unwrap_or(waku_client::DaemonKey::Local);
         let selected_model_name = if auto_route {
             tr!("models.auto")
-        } else if routed {
-            tr!(
-                "models.auto_routed",
-                model = self.model_display_name_on(session_key, provider, selected_model)
-            )
         } else {
-            self.model_display_name_on(session_key, provider, selected_model)
+            let model = self.model_display_name_on(session_key, provider, selected_model);
+            match decision {
+                Some(decision) if routing::is_start_fallback(decision) => {
+                    tr!("models.auto_fallback", model = model)
+                }
+                Some(_) => tr!("models.auto_routed", model = model),
+                None => model,
+            }
         };
         let picker_enabled = controls.model_pickers
             && session.is_some_and(|session| session.can_choose_model(provider));
@@ -2462,7 +2464,7 @@ impl Waku {
             ModelPickerTarget::Composer | ModelPickerTarget::SideChat(_)
         ) && self
             .model_picker_session()
-            .is_some_and(|session| session.auto_route)
+            .is_some_and(routing::pending_auto_route)
     }
 
     /// Move the picker's drawn selection. Nothing is focused: the filter field
@@ -2561,7 +2563,7 @@ impl Waku {
         let model = self.model_metadata_for_session(session)?;
         // Auto (Jev) chooses the effort for each turn, so don't offer a
         // manual effort control while that route is active.
-        let show_reasoning_effort = !session.auto_route;
+        let show_reasoning_effort = !routing::pending_auto_route(session);
         if (!show_reasoning_effort || model.reasoning_efforts.is_empty())
             && model.service_tiers.is_empty()
             && model.context_windows.is_empty()

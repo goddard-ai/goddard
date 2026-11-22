@@ -253,7 +253,7 @@ pub(super) fn start_driver(
     // workspace before starting the runtime: connect_remote immediately asks
     // for a task-view snapshot, which requires a daemon-owned row. Await the
     // save response here; the ordinary queued UI save cannot order this.
-    if let Some((project, mut session)) = task_registration {
+    let registered_session = if let Some((project, mut session)) = task_registration {
         session.provider = provider;
         session.model.clone_from(&options.model);
         session
@@ -261,7 +261,7 @@ pub(super) fn start_driver(
             .clone_from(&options.reasoning_effort);
         session.service_tier.clone_from(&options.service_tier);
         session.context_window.clone_from(&options.context_window);
-        match daemon.client().request(
+        let registered = match daemon.client().request(
             Uuid::nil(),
             Uuid::nil(),
             waku_client::Command::SaveTaskState {
@@ -271,17 +271,23 @@ pub(super) fn start_driver(
                 session_tails: Vec::new(),
             },
         )? {
-            waku_client::ResponsePayload::TaskStateSaved { sessions }
-                if sessions.iter().any(|session| session.id == session_id) => {}
-            _ => anyhow::bail!("the daemon did not register the task before startup"),
+            waku_client::ResponsePayload::TaskStateSaved { sessions } => sessions
+                .into_iter()
+                .find(|session| session.id == session_id),
+            _ => None,
         }
-    }
+        .ok_or_else(|| anyhow::anyhow!("the daemon did not register the task before startup"))?;
+        Some(Box::new(registered.list_projection()))
+    } else {
+        None
+    };
 
     let (event_tx, events) = driver::event_channel(event_wake);
     let handle = driver::start_remote(daemon, session_id, provider, options, event_tx)?;
     Ok(PreparedDriver {
         handle,
         events,
+        registered_session,
         hydrated_session: None,
         transcript_window: None,
     })
@@ -481,6 +487,7 @@ fn attach_driver(
     Ok(Some(PreparedDriver {
         handle,
         events,
+        registered_session: None,
         hydrated_session,
         transcript_window: None,
     }))
@@ -956,7 +963,7 @@ pub(super) fn prepare_submission(
     // boundary as Git work, otherwise the last spinner frame visibly freezes
     // just before Stop appears. A routed start prepends the evaluation call:
     // same boundary, one extra daemon round trip.
-    let mut route_decision = None;
+    let mut started_route = None;
     let driver = driver_start.map(|start| -> anyhow::Result<PreparedDriver> {
         match start {
             routing::SessionStartPlan::Direct(request) => {
@@ -966,9 +973,9 @@ pub(super) fn prepare_submission(
                 })
             }
             routing::SessionStartPlan::Routed(plan) => {
-                let (decision, driver) =
+                let (route, driver) =
                     plan.route_and_start(project_path.to_path_buf(), &stage, task_registration)?;
-                route_decision = decision;
+                started_route = Some(route);
                 Ok(driver)
             }
         }
@@ -980,7 +987,7 @@ pub(super) fn prepare_submission(
         lfs_warning,
         worktree_restored,
         driver,
-        route_decision,
+        started_route,
         turn_route,
     })
 }
@@ -6683,7 +6690,7 @@ impl Waku {
     ) {
         if submission.configuration.is_none()
             && let Some(session) = self.state.sessions.iter().find(|s| s.id == session_id)
-            && !session.auto_route
+            && !routing::pending_auto_route(session)
         {
             submission.configuration = Some(self.prompt_configuration(session));
         }
@@ -7080,7 +7087,7 @@ impl Waku {
             lfs_warning: _,
             worktree_restored,
             driver,
-            route_decision: _,
+            started_route: _,
             turn_route: _,
         } = prepared;
         if !self
@@ -8913,7 +8920,7 @@ impl Waku {
                 .workspace_path_for_session(session)
                 .map(std::path::Path::to_path_buf)
                 .unwrap_or_default();
-            if session.auto_route
+            if routing::pending_auto_route(session)
                 && !self.managed_session_is_boss(self.daemons.session_owner(session.id), session.id)
             {
                 self.route_start_plan_for_session(
@@ -9304,7 +9311,7 @@ impl Waku {
             lfs_warning,
             worktree_restored,
             driver: prepared_driver,
-            route_decision,
+            started_route,
             turn_route,
         } = prepared;
         // The turn began at accept time; it must still be the untouched one
@@ -9347,22 +9354,15 @@ impl Waku {
             return;
         }
 
-        // An Auto submission's decision lands ahead of the provider start:
-        // the session adopts the routed provider, model, and remembered
-        // traits so transcript, chip, and session options all agree with what
-        // is about to run — the same fields `choose_model` maintains, plus
-        // the decision record itself.
-        if let Some(decision) = route_decision {
+        // Persist the configuration that startup actually used, including
+        // provider defaults and fallback requests.
+        if let Some(routing::StartedRoute {
+            decision,
+            service_tier,
+            context_window,
+        }) = started_route
+        {
             let target = decision.target.clone();
-            let (remembered_effort, tier, window) = target
-                .model
-                .as_deref()
-                .map(|model| self.state.model_traits_for(target.provider, model))
-                .unwrap_or_default();
-            // The route's own effort wins; the remembered triple is the
-            // fallback for targets that name none — same rule the start
-            // request applied.
-            let effort = target.effort.clone().or(remembered_effort);
             let provider_changed = self
                 .state
                 .session_mut(session_id)
@@ -9375,9 +9375,9 @@ impl Waku {
                     if provider_changed {
                         session.agent_preset = None;
                     }
-                    session.reasoning_effort.clone_from(&effort);
-                    session.service_tier.clone_from(&tier);
-                    session.context_window.clone_from(&window);
+                    session.reasoning_effort.clone_from(&target.effort);
+                    session.service_tier.clone_from(&service_tier);
+                    session.context_window.clone_from(&context_window);
                     session.updated_at = unix_time();
                     provider_changed
                 })
@@ -9387,9 +9387,9 @@ impl Waku {
             // next draft re-arms routing instead of the resolved model.
             self.state.last_auto_route = true;
             self.state.last_model.clone_from(&target.model);
-            self.state.last_reasoning_effort.clone_from(&effort);
-            self.state.last_service_tier.clone_from(&tier);
-            self.state.last_context_window.clone_from(&window);
+            self.state.last_reasoning_effort = target.effort;
+            self.state.last_service_tier = service_tier;
+            self.state.last_context_window = context_window;
             // Recency belongs to the combo that actually ran — the draft's
             // carryover was only a hint, so the routed selection records here.
             let routed_use = self
@@ -9405,6 +9405,14 @@ impl Waku {
                 self.state
                     .record_model_use(provider, &model_id, effort, fast);
             }
+            // Base the outcome on the daemon's registration. The edit can
+            // advance the metadata revision without undoing concurrent edits.
+            if let Some(Ok(prepared)) = prepared_driver.as_ref()
+                && let Some(registered) = prepared.registered_session.as_deref()
+            {
+                self.sidebar_intents.remember_task(registered);
+            }
+            self.record_selected_configuration(session_id);
             if provider_changed {
                 self.refresh_composer_sources(cx);
             }

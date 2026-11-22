@@ -1,0 +1,1 @@
+- The model picker shows which model started after Auto (Jev) routing, including when the app starts a fallback.

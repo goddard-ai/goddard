@@ -3405,6 +3405,8 @@ models.auto_hint:
   en: select the best provider
 models.auto_routed:
   en: "Auto (Jev) · %{model}"
+models.auto_fallback:
+  en: "%{model} · Fallback"
 models.auto_unavailable:
   en: Auto routing is unavailable. Open Jev settings using the gear to configure it.
 models.auto_missing_credential:

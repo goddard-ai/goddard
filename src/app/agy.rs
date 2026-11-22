@@ -205,7 +205,7 @@ impl Waku {
             lfs_warning,
             worktree_restored,
             driver: _,
-            route_decision: _,
+            started_route: _,
             turn_route: _,
         } = prepared;
         let workspace_changed = self.state.session_mut(session_id).is_some_and(|session| {

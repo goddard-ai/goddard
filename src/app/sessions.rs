@@ -2510,7 +2510,7 @@ impl Waku {
         session.service_tier = parent.service_tier.clone();
         session.context_window = parent.context_window.clone();
         session.agent_preset = parent.agent_preset.clone();
-        session.auto_route = parent.auto_route;
+        session.auto_route = routing::pending_auto_route(&parent);
         // The parent's privacy boundary applies: a side chat of an incognito
         // session is incognito too.
         session.incognito = parent.incognito;
@@ -6555,7 +6555,7 @@ impl Waku {
             return Vec::new();
         };
         let selection = self.model_picker_selection(cx);
-        let auto_route = session.auto_route;
+        let auto_route = routing::pending_auto_route(session);
         let enabled = !session.is_busy();
         self.composer_picker_rows(normalized_query)
             .into_iter()
@@ -7052,6 +7052,7 @@ impl Waku {
         let current = self
             .session_model_combo(session)
             .map(|(model, effort, fast)| (session.provider, model, effort, fast));
+        let auto_route = routing::pending_auto_route(session);
         let mut items = Vec::with_capacity(combos.len() + if auto_available { 1 } else { 0 });
         items.extend(combos.iter().map(|(provider, model, effort, fast)| {
             let catalog_model = self
@@ -7063,7 +7064,7 @@ impl Waku {
                 self.favorite_model_combo(favorite)
                     == (*provider, model.clone(), effort.clone(), *fast)
             });
-            let selected = !session.auto_route
+            let selected = !auto_route
                 && current.as_ref().is_some_and(
                     |(current_provider, current_model, current_effort, current_fast)| {
                         current_provider == provider
@@ -7104,7 +7105,7 @@ impl Waku {
                     row: model_picker::PickerRow::Policy(model_picker::PolicyRowId::AutoFavorite(
                         position,
                     )),
-                    selected: session.auto_route,
+                    selected: auto_route,
                     enabled: true,
                 },
             );

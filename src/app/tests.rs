@@ -14,6 +14,7 @@ use super::model_picker::{
     PickerRow, PolicyRowId, next_picker_highlight, picker_rows, supports_reasoning_default_reset,
 };
 use super::plan_approval::session_plan_approval_sent;
+use super::routing;
 use super::runtime::{
     DeferredSteer, append_queued_steer_preview, expired_employee_operation,
     merge_remote_project_catalog, merge_remote_session_catalog, session_accepts_immediate_steer,
@@ -6963,6 +6964,24 @@ fn model_picker_highlight_seeds_from_the_selected_model() {
 }
 
 #[test]
+fn optimistic_auto_turn_stays_pending_until_provider_start() {
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    session.auto_route = true;
+    session.model = Some("saved-model".into());
+    session.begin_turn("First prompt");
+
+    assert!(routing::pending_auto_route(&session));
+    session.finish_active_turn(TurnStatus::Failed);
+    assert!(routing::pending_auto_route(&session));
+
+    session.begin_turn("Retry");
+    session.mark_active_turn_provider_started();
+    let reopened: AgentSession =
+        serde_json::from_value(serde_json::to_value(&session).unwrap()).unwrap();
+    assert!(!routing::pending_auto_route(&reopened));
+}
+
+#[test]
 fn auto_route_seed_and_filter_follow_the_picker_row() {
     use super::model_picker::{PickerGranularity, picker_selected_row_index};
     use crate::model::ProviderModel;
@@ -10749,6 +10768,111 @@ mod live_employee_approvals {
 
     fn selector(text: String) -> &'static str {
         Box::leak(text.into_boxed_str())
+    }
+
+    #[gpui::test]
+    fn auto_start_records_the_started_model_after_a_route_or_fallback(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use crate::model::ProviderProbe;
+        use waku_protocol::routing::{RouteDecision, RouteTarget};
+
+        cx.skip_drawing();
+        let (_env, directory) = isolated_env();
+        let project = Project::from_path(directory.join("project"));
+        std::fs::create_dir_all(&project.path).unwrap();
+        let daemon = FakeDaemon::start(
+            directory,
+            project.clone(),
+            Vec::new(),
+            boss_state(None, Vec::new()),
+        );
+        let supervisor = DaemonSupervisor::connect(&daemon.address, "test-token".into()).unwrap();
+        let (view, vcx) = test_app(cx, supervisor);
+        for (routed_provider, expected_model, expected_reason) in [
+            (ProviderKind::Codex, "routed-model", "class-map"),
+            (
+                ProviderKind::Claude,
+                "draft-model",
+                "routed-provider-unavailable",
+            ),
+        ] {
+            let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+            session.auto_route = true;
+            session.model = Some("draft-model".into());
+            session.begin_turn("First prompt");
+            let session_id = session.id;
+            *daemon.response_hook.lock() = Some(Arc::new(move |_, command| {
+                let payload = match command {
+                    Command::RouteTask { .. } => ResponsePayload::RouteDecision {
+                        decision: RouteDecision {
+                            target: RouteTarget {
+                                provider: routed_provider,
+                                model: Some("routed-model".into()),
+                                effort: None,
+                            },
+                            class: None,
+                            applied_class: None,
+                            class_confidence: None,
+                            phased: false,
+                            reason: "class-map".into(),
+                            backend: None,
+                            eval_latency_ms: None,
+                        },
+                    },
+                    Command::SaveTaskState { sessions, .. } => {
+                        let session = sessions.iter().find(|session| session.id == session_id)?;
+                        assert!(session.auto_route);
+                        assert!(session.route_decision.is_none());
+                        assert_eq!(session.model.as_deref(), Some(expected_model));
+                        ResponsePayload::TaskStateSaved {
+                            sessions: sessions.clone(),
+                        }
+                    }
+                    Command::Start { options } => {
+                        assert_eq!(options.model.as_deref(), Some(expected_model));
+                        ResponsePayload::Started {
+                            supports_steer: false,
+                            supports_user_input_actions: false,
+                        }
+                    }
+                    _ => return None,
+                };
+                Some(ResponseOutcome::Ok { payload })
+            }));
+            let plan = update_app(vcx, &view, |waku, _, _| {
+                waku.probes.insert(
+                    waku_client::DaemonKey::Local,
+                    vec![ProviderProbe {
+                        provider: ProviderKind::Codex,
+                        installed: true,
+                        path: Some("controlled-provider".into()),
+                        models: Vec::new(),
+                        agent_presets: Vec::new(),
+                    }],
+                );
+                waku.route_start_plan_for_session(
+                    &session,
+                    "First prompt".into(),
+                    &project,
+                    project.path.clone(),
+                )
+                .unwrap()
+            });
+            let (started, driver) = plan
+                .route_and_start(
+                    project.path.clone(),
+                    &None,
+                    Some((project.clone(), session)),
+                )
+                .unwrap();
+            assert_eq!(
+                started.decision.target.model.as_deref(),
+                Some(expected_model)
+            );
+            assert_eq!(started.decision.reason, expected_reason);
+            driver.handle.close();
+        }
     }
 
     fn model_selection_app(

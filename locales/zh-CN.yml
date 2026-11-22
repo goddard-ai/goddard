@@ -2497,6 +2497,7 @@ models.auto: 自动
 models.auto_hint: 自动选择最佳服务商
 models.auto_missing_credential: 所选的 Jev 评估后端没有凭据 — 路由将回退到上次使用的服务商。请在 Jev 设置中添加。
 models.auto_routed: 自动 (Jev) · %{model}
+models.auto_fallback: "%{model} · 回退"
 notifications.confirm_done: "将 %{title} 标为完成？"
 notifications.confirm_done_detail: “标为完成”会删除 GitHub 上的该讨论串 — 无法撤销。
 notifications.empty: 收件箱已清空 — 没有未读

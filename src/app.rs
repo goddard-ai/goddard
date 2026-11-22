@@ -1146,10 +1146,8 @@ struct PreparedSubmission {
     /// `None` reuses an already-live runtime. `Some` contains the result of a
     /// provider process start performed on the background executor.
     driver: Option<anyhow::Result<PreparedDriver>>,
-    /// The routing decision an Auto submission produced — `None` on direct
-    /// starts and on route-RPC failures (which fall back to the draft's own
-    /// provider).
-    route_decision: Option<waku_protocol::routing::RouteDecision>,
+    /// The model and traits used by a successful Auto start, including a fallback.
+    started_route: Option<routing::StartedRoute>,
     /// A confident Auto routing adjustment, applied before the next prompt.
     turn_route: Option<routing::TurnRouteDecision>,
 }
@@ -1215,6 +1213,8 @@ enum ProviderBinary {
 struct PreparedDriver {
     handle: DriverHandle,
     events: Receiver<driver::DriverEventBatch>,
+    /// The daemon's accepted baseline for a first-start metadata edit.
+    registered_session: Option<Box<AgentSession>>,
     /// Stored session detail fetched while attaching to a skeleton's runtime:
     /// driver events are transcript writes, so the detail has to land before
     /// they do or what they build is never persistable.

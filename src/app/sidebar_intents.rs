@@ -283,7 +283,7 @@ impl SidebarIntents {
         }
         operation_id
     }
-    fn remember_task(&self, session: &AgentSession) {
+    pub(super) fn remember_task(&self, session: &AgentSession) {
         for field in [
             waku_protocol::task_metadata::TaskMetadataField::Title,
             waku_protocol::task_metadata::TaskMetadataField::Placement,

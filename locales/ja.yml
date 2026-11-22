@@ -2545,6 +2545,7 @@ models.auto: 自動
 models.auto_hint: 最適なプロバイダーを選択
 models.auto_missing_credential: 選択した Jev 評価バックエンドに認証情報がありません — ルーティングは最後に使ったプロバイダーにフォールバックします。Jev 設定で追加してください。
 models.auto_routed: "自動（Jev）· %{model}"
+models.auto_fallback: "%{model} · 代替"
 notifications.confirm_done: "%{title} を完了にしますか？"
 notifications.confirm_done_detail: 完了にすると GitHub 上のスレッドが削除されます — 元に戻せません。
 notifications.empty: 受信トレイは空です — 未読なし
