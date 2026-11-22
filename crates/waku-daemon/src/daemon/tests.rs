@@ -6833,7 +6833,7 @@ fn workspace_transition_recovers_as_restart_interruption() {
     let token = backend.agent.mint(employee_id);
     // Reopen the persisted Boss document, as daemon startup does. The
     // interrupted employee must be recoverable rather than skipped as expired.
-    backend.boss = Arc::new(crate::boss::BossService::open(root.join("boss")).unwrap());
+    backend.boss = Arc::new(reopen_boss_database(&backend));
     assert!(
         backend
             .boss
@@ -9936,8 +9936,7 @@ fn employee_purpose_admission_defaults_and_control_preserve_lifecycle() {
         panic!("expected summon");
     };
     let path = root.join("boss/boss.json");
-    let mut document: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let mut document = serde_json::to_value(backend.boss.document()).unwrap();
     let employee = document["employees"]
         .as_array_mut()
         .unwrap()
@@ -10645,8 +10644,7 @@ fn a_queued_employee_holds_until_the_human_chooses_the_employee_base() {
     // no canonical marker, and two candidates whose text identifies
     // neither.
     let path = root.join("boss/boss.json");
-    let mut doc: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let mut doc = serde_json::to_value(backend.boss.document()).unwrap();
     let object = doc.as_object_mut().unwrap();
     object.remove("employeePersonaId");
     let personas = object["personas"].as_array_mut().unwrap();
@@ -14253,7 +14251,7 @@ fn a_restart_resume_leads_with_the_continuation_note() {
     }
     // Reopen the persisted Boss document, as daemon startup does — the
     // working employee is restart-interrupted and recovery expires it.
-    backend.boss = Arc::new(crate::boss::BossService::open(root.join("boss")).unwrap());
+    backend.boss = Arc::new(reopen_boss_database(&backend));
     let (recover, pending) = crossbeam_channel::bounded(1);
     backend.boss.set_recover_employee(Arc::new(move |id| {
         recover.send(id).unwrap();
@@ -14727,7 +14725,7 @@ fn queued_tickets_survive_restart_with_their_goals() {
         )
         .unwrap();
 
-    let reopened = crate::boss::BossService::open(root.join("boss")).unwrap();
+    let reopened = reopen_boss_database(&backend);
     let employee = reopened.employee(session_id).unwrap();
     assert_eq!(employee.lifecycle(), EmployeeLifecycle::Queued);
     assert!(!employee.expired());
@@ -15652,7 +15650,7 @@ fn a_wave_reports_once_when_every_member_settles() {
         1
     );
     // The resolution survives reopening the Boss document.
-    let reopened = crate::boss::BossService::open(root.join("boss")).unwrap();
+    let reopened = reopen_boss_database(&backend);
     let reopened_document = reopened.document();
     let wave = reopened_document
         .waves
@@ -20742,6 +20740,14 @@ fn chain_reports(backend: &WakuBackend, session_id: Uuid) -> Vec<String> {
         )
         .filter(|content| content.contains("Employee chain"))
         .collect()
+}
+
+fn reopen_boss_database(backend: &WakuBackend) -> crate::boss::BossService {
+    crate::boss::BossService::open_database(
+        backend.boss.root().to_owned(),
+        backend.task_store.path().to_owned(),
+    )
+    .unwrap()
 }
 
 fn reopen_backend(root: &Path) -> WakuBackend {

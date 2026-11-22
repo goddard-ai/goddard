@@ -79,7 +79,7 @@ fn instruction_pins_preserve_human_provenance_and_survive_rotation() {
         )
         .unwrap();
     let outbound = backend.boss_outbound_prompt(old, "Continue supervising.".into());
-    assert!(outbound.contains("Wait for the user's restart confirmation"));
+    assert!(outbound.contains("Keep supervising the repair"));
     assert!(outbound.contains("<goddard-provider-context>"));
     assert!(outbound.contains(human));
     assert!(outbound.contains("The user confirms the daemon restart"));
