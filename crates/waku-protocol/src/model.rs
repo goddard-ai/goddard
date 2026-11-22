@@ -112,8 +112,7 @@ impl ProviderKind {
     /// stdio channel: DeepSeek and Muse multiplex every session on one
     /// resident host process, OpenCode speaks loopback HTTP
     /// to a server the daemon must reach over TCP, Copilot's SDK owns its
-    /// process spawn, and Antigravity is its own terminal TUI with no
-    /// daemon driver at all.
+    /// process spawn. Antigravity ACP runs on the daemon host.
     pub fn supports_sandbox(self) -> bool {
         matches!(
             self,
@@ -210,8 +209,8 @@ impl ProviderKind {
     }
 
     /// Whether Resume can enumerate this provider's native sessions at all.
-    /// Antigravity conversations live in its own TUI with no readable store,
-    /// so it is excluded statically rather than discovered by probing.
+    /// Antigravity resumes Goddard-owned ACP tasks through their saved cursor.
+    /// The provider catalog import path is separate.
     pub fn supports_session_catalog(self) -> bool {
         !matches!(self, Self::Antigravity)
     }
@@ -365,9 +364,7 @@ impl ProviderKind {
     /// Kimi's ACP `session/fork` copies a whole session and takes no turn
     /// count, and Fx, Devin, Droid, and Goose expose no turn-aware fork or
     /// truncation method.
-    /// Antigravity is terminal-backed: its sessions are its own TUI, not
-    /// Goddard turns. None of them can reproduce Goddard's "drop the last N
-    /// turns" semantics without corrupting history.
+    /// Antigravity ACP also has no turn-aware truncation method.
     /// Copilot is present: `sessions.fork` truncates at an event boundary, and
     /// rewinding resumes the task on the truncated fork.
     pub fn supports_conversation_rollback(self) -> bool {
@@ -1875,6 +1872,9 @@ pub struct AgentSession {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub side_chat_of: Option<Uuid>,
     pub provider: ProviderKind,
+    /// Older Antigravity tasks ran in the desktop terminal. New tasks use ACP.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub antigravity_acp: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     /// A same-provider model change to note after this session's next visible
@@ -2137,6 +2137,7 @@ impl AgentSession {
             workspace_move: None,
             side_chat_of: None,
             provider,
+            antigravity_acp: provider == ProviderKind::Antigravity,
             model: None,
             pending_model_switch: None,
             runtime_mode: RuntimeMode::default(),
@@ -2210,6 +2211,7 @@ impl AgentSession {
             // row out of the task list.
             side_chat_of: self.side_chat_of,
             provider: self.provider,
+            antigravity_acp: self.antigravity_acp,
             model: self.model.clone(),
             pending_model_switch: self.pending_model_switch.clone(),
             runtime_mode: self.runtime_mode,
@@ -2538,6 +2540,13 @@ impl AgentSession {
             .last()
             .map(|turn| turn.completed_at.unwrap_or(turn.started_at))
             .filter(|_| self.has_started());
+    }
+
+    pub fn uses_antigravity_terminal(&self) -> bool {
+        self.detail_loaded
+            && self.provider == ProviderKind::Antigravity
+            && !self.antigravity_acp
+            && self.has_started()
     }
 
     pub fn has_started(&self) -> bool {
@@ -2973,6 +2982,8 @@ impl AgentSession {
         atoms: Vec<MessageAtom>,
         hidden: bool,
     ) -> Uuid {
+        // A draft can switch to Antigravity before its first turn.
+        self.antigravity_acp |= self.provider == ProviderKind::Antigravity;
         let id = Uuid::new_v4();
         let now = unix_time();
         self.turns.push(AgentTurn {

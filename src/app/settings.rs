@@ -10414,7 +10414,6 @@ impl Waku {
                                 Self::probes_on(&this.probes, waku_client::DaemonKey::Local),
                                 &this.state.disabled_providers,
                                 None,
-                                this.daemon.is_remote(),
                                 kind,
                             ) {
                                 this.refresh_provider_model_discovery(kind);
@@ -10463,7 +10462,6 @@ impl Waku {
             .trim()
             .to_ascii_lowercase();
         let searching = !normalized_query.is_empty();
-        let remote = self.daemon.is_remote();
         let probes = Self::probes_on(&self.probes, waku_client::DaemonKey::Local).to_vec();
         let disabled_providers = self.state.disabled_providers.clone();
         let current = current.cloned();
@@ -10560,7 +10558,7 @@ impl Waku {
                     ProviderKind::ALL
                         .into_iter()
                         .filter(|kind| {
-                            picker_lists_provider(&probes, &disabled_providers, None, remote, *kind)
+                            picker_lists_provider(&probes, &disabled_providers, None, *kind)
                                 && section_rows.iter().any(|row| {
                                     picker_row_section(row) == PickerSection::Provider(*kind)
                                 })

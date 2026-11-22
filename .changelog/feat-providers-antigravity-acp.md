@@ -1,0 +1,1 @@
+- New Antigravity tasks use Goddard’s chat and tool approvals with a current Antigravity CLI. Existing Antigravity tasks still open in the terminal.

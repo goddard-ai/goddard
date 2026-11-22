@@ -786,11 +786,10 @@ impl Render for Waku {
             .then(|| self.render_permission(cx))
             .flatten();
         let approval_visible = permission.is_some();
-        // A started Antigravity session shows its TUI terminal as the whole
-        // surface — no transcript, no composer.
-        let agy_surface = self.selected_session().is_some_and(|session| {
-            session.provider == ProviderKind::Antigravity && session.has_started()
-        });
+        // Legacy Antigravity tasks show their terminal in the chat area.
+        let agy_surface = self
+            .selected_session()
+            .is_some_and(|session| session.uses_antigravity_terminal());
         let composer_mounted = self.composer_mounted();
         let (deliverable_header, deliverable_page) = self
             .render_deliverable_preview_page(window, cx)

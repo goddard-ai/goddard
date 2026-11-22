@@ -255,6 +255,7 @@ pub(super) fn start_driver(
     // save response here; the ordinary queued UI save cannot order this.
     let registered_session = if let Some((project, mut session)) = task_registration {
         session.provider = provider;
+        session.antigravity_acp |= provider == ProviderKind::Antigravity;
         session.model.clone_from(&options.model);
         session
             .reasoning_effort
@@ -730,6 +731,7 @@ pub(super) fn merge_session_catalog_row(
         &remote,
     );
     local.metadata_revision = local.metadata_revision.max(remote.metadata_revision);
+    local.antigravity_acp |= remote.antigravity_acp;
     local.agent_rename_allowed = remote.agent_rename_allowed;
     local.title = remote.title;
     local.auto_title_is_prompt = if remote.detail_loaded {
@@ -3173,20 +3175,15 @@ impl Waku {
             .sessions
             .iter()
             .find(|session| session.id == session_id)
-            && session.provider == ProviderKind::Antigravity
+            && session.uses_antigravity_terminal()
         {
-            // Antigravity owns an app-local TUI, not a daemon runtime. Its
-            // saved provider cursor must arrive before the TUI can resume.
-            if session.detail_loaded && self.pending_session_cancels.remove(&session_id) {
+            // Legacy Antigravity tasks own an app-local terminal.
+            if self.pending_session_cancels.remove(&session_id) {
                 self.cancel_session_turn(session_id, cx);
                 return;
             }
             if self.state.selected_session == Some(session_id) {
-                if session.detail_loaded {
-                    self.ensure_agy_terminal(session_id, cx);
-                } else {
-                    self.ensure_session_loaded(session_id, cx);
-                }
+                self.ensure_agy_terminal(session_id, cx);
             }
             return;
         }
@@ -3427,17 +3424,6 @@ impl Waku {
                 .unwrap_or(&self.state.disabled_providers),
             waku_client::DaemonKey::Local => &self.state.disabled_providers,
         }
-    }
-
-    /// Whether a daemon cannot host a local PTY — a remote host's supervisor,
-    /// or a remote-attached primary daemon in whole-app remote mode. A
-    /// disconnected remote still counts: its sessions stay remote.
-    pub(super) fn daemon_key_is_remote(&self, key: waku_client::DaemonKey) -> bool {
-        key.is_remote()
-            || self
-                .daemons
-                .supervisor(key)
-                .is_some_and(|daemon| daemon.is_remote())
     }
 
     /// The daemon the model picker's reads and writes describe — the target
@@ -5332,7 +5318,6 @@ impl Waku {
             Self::probes_on(&self.probes, key),
             self.disabled_providers_on(key),
             locked_provider,
-            self.daemon_key_is_remote(key),
             self.provider_detection_checked_at.contains_key(&key),
         )
     }
@@ -8419,7 +8404,7 @@ impl Waku {
                 // their existing in-memory send and recovery path.
                 && !session.incognito
                 && !session.boss_managed
-                && session.provider != ProviderKind::Antigravity
+                && !session.uses_antigravity_terminal()
                 && (remote_runtime.is_some() || (runtime.is_none() && session.has_started()))
                 && !self.submission_preparations.contains(&session_id)
                 && !self.control_runtime_starts.contains(&session_id)
@@ -8839,10 +8824,7 @@ impl Waku {
             self.enqueue_follow_up_submission(session_id, submission, cx);
             return;
         }
-        // Antigravity sessions have no driver: the prompt launches the
-        // CLI's own TUI in the session's terminal instead.
-        if session.provider == ProviderKind::Antigravity {
-            self.submit_agy_submission(session_id, submission, cx);
+        if session.uses_antigravity_terminal() {
             return;
         }
         let prompt = submission.prompt.clone();
@@ -9369,6 +9351,7 @@ impl Waku {
                 .map(|session| {
                     let provider_changed = session.provider != target.provider;
                     session.provider = target.provider;
+                    session.antigravity_acp |= target.provider == ProviderKind::Antigravity;
                     session.model.clone_from(&target.model);
                     session.route_decision = Some(decision);
                     session.auto_route = false;

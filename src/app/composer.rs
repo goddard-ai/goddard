@@ -1743,7 +1743,6 @@ impl Waku {
                                 Self::probes_on(&this.probes, picker_key),
                                 this.disabled_providers_on(picker_key),
                                 locked_provider,
-                                this.daemon_key_is_remote(picker_key),
                                 kind,
                             ) {
                                 this.refresh_provider_model_discovery_on(picker_key, kind);
@@ -1845,7 +1844,6 @@ impl Waku {
         let picker_key = self.model_picker_daemon_key();
         let probes = Self::probes_on(&self.probes, picker_key).to_vec();
         let disabled_providers = self.disabled_providers_on(picker_key).to_vec();
-        let remote = self.daemon_key_is_remote(picker_key);
         let pending_discoveries = self.provider_model_discoveries_pending.clone();
         let search = self.model_picker.search.clone();
         let locked_provider = self.model_picker_locked_provider();
@@ -1910,7 +1908,7 @@ impl Waku {
         let rail_providers = ProviderKind::ALL
             .into_iter()
             .filter(|kind| {
-                picker_lists_provider(&probes, &disabled_providers, locked_provider, remote, *kind)
+                picker_lists_provider(&probes, &disabled_providers, locked_provider, *kind)
                     && section_rows
                         .iter()
                         .any(|row| picker_row_section(row) == PickerSection::Provider(*kind))
@@ -1938,7 +1936,6 @@ impl Waku {
                     &probes,
                     &disabled_providers,
                     locked_provider,
-                    remote,
                     kind,
                 )
         }) {
@@ -6025,9 +6022,9 @@ impl Waku {
             && !self.drafts_page
             && !self.automations_page
             && self.boss_ui.page.is_none()
-            && !self.selected_session().is_some_and(|session| {
-                session.provider == ProviderKind::Antigravity && session.has_started()
-            })
+            && !self
+                .selected_session()
+                .is_some_and(|session| session.uses_antigravity_terminal())
             && self.selected_friend_watch().is_none()
     }
 

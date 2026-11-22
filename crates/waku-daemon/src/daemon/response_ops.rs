@@ -46,10 +46,14 @@ impl WakuBackend {
                 "the target provider's resume cursor changed"
             );
         }
-        let restarted = target_entry.is_some() && request.resume_cursor.is_none();
+        let resume_cursor = request
+            .resume_cursor
+            .filter(|_| target != ProviderKind::Antigravity || switched.antigravity_acp);
+        let restarted = target_entry.is_some() && resume_cursor.is_none();
         suspended.retain(|entry| entry.provider != target);
         if let Some(cursor) = switched.provider_cursor.take()
             && cursor.provider() != target
+            && (cursor.provider() != ProviderKind::Antigravity || switched.antigravity_acp)
         {
             let provider = cursor.provider();
             suspended.retain(|entry| entry.provider != provider);
@@ -66,7 +70,8 @@ impl WakuBackend {
             route_decision: None,
         }
         .apply(&mut switched);
-        switched.provider_cursor = request.resume_cursor;
+        switched.antigravity_acp |= target == ProviderKind::Antigravity;
+        switched.provider_cursor = resume_cursor;
         switched.provider_session_id = None;
         switched.pending_model_switch = None;
         switched.agent_preset = None;

@@ -709,13 +709,6 @@ pub fn start_local(
     events: DriverEventSender,
 ) -> anyhow::Result<DriverHandle> {
     let inner: Arc<dyn DriverControl> = match provider {
-        // Antigravity has no driver: its sessions are the CLI's own TUI
-        // running in a client-owned terminal, so there is nothing for the
-        // daemon to supervise. Reaching this arm means a client asked the
-        // daemon to start one anyway.
-        ProviderKind::Antigravity => {
-            anyhow::bail!("Antigravity sessions are terminal-backed and have no daemon driver")
-        }
         ProviderKind::Codex => Arc::new(codex::CodexDriver::start(options, events)?),
         ProviderKind::Pi => Arc::new(pi::PiDriver::start(pi::PiFlavor::Pi, options, events)?),
         ProviderKind::OhMyPi => {
@@ -724,7 +717,8 @@ pub fn start_local(
         // Cursor, Devin, Fx, Grok, Kimi Code, Droid, and Goose all serve a
         // long-lived ACP session, which is the only way their Supervised mode
         // can actually ask the user rather than silently forcing or denying.
-        ProviderKind::Cursor
+        ProviderKind::Antigravity
+        | ProviderKind::Cursor
         | ProviderKind::Devin
         | ProviderKind::Fx
         | ProviderKind::Grok

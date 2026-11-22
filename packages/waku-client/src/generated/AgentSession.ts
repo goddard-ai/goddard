@@ -80,7 +80,11 @@ workspace_move?: WorkspaceMove | null,
  * parent's right panel, and deleted when the parent is archived or
  * removed.
  */
-side_chat_of?: string | null, provider: ProviderKind, model?: string | null,
+side_chat_of?: string | null, provider: ProviderKind,
+/**
+ * Older Antigravity tasks ran in the desktop terminal. New tasks use ACP.
+ */
+antigravity_acp?: boolean, model?: string | null,
 /**
  * A same-provider model change to note after this session's next visible
  * user prompt. Kept pending so choosing a model alone doesn't add a row.

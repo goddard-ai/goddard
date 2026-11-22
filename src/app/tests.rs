@@ -8376,24 +8376,17 @@ fn the_picker_is_empty_only_once_detection_has_answered() {
 
     // An unsettled first pass reads as "not known yet", so the composer keeps
     // showing the remembered model instead of flashing an empty state.
-    assert!(!picker_has_no_providers(
-        &undetected,
-        &[],
-        None,
-        false,
-        false
-    ));
+    assert!(!picker_has_no_providers(&undetected, &[], None, false));
     // Once it settles, the same probes really do mean nothing is installed.
-    assert!(picker_has_no_providers(&undetected, &[], None, false, true));
+    assert!(picker_has_no_providers(&undetected, &[], None, true));
     // One detected CLI is enough to keep the picker populated...
-    assert!(!picker_has_no_providers(&detected, &[], None, false, true));
+    assert!(!picker_has_no_providers(&detected, &[], None, true));
     // ...until it is switched off, which empties the picker just as surely as
     // never having been installed.
     assert!(picker_has_no_providers(
         &detected,
         &[ProviderKind::Claude],
         None,
-        false,
         true
     ));
     // A session already locked to that provider keeps it, switched off or not.
@@ -8401,7 +8394,6 @@ fn the_picker_is_empty_only_once_detection_has_answered() {
         &detected,
         &[ProviderKind::Claude],
         Some(ProviderKind::Claude),
-        false,
         true
     ));
 }
@@ -8526,18 +8518,11 @@ fn the_list_draws_only_installed_providers_the_settings_left_on() {
 
     // An undetected CLI and a switched-off provider both leave the rail
     // outright, rather than sitting in it dimmed.
-    assert!(!picker_lists_provider(
-        &probes,
-        &[],
-        None,
-        false,
-        ProviderKind::Cursor
-    ));
+    assert!(!picker_lists_provider(&probes, &[], None, ProviderKind::Cursor));
     assert!(!picker_lists_provider(
         &probes,
         &[ProviderKind::Claude],
         None,
-        false,
         ProviderKind::Claude
     ));
 
@@ -8547,7 +8532,6 @@ fn the_list_draws_only_installed_providers_the_settings_left_on() {
         &probes,
         &[],
         Some(ProviderKind::Codex),
-        false,
         ProviderKind::Claude
     ));
 
@@ -8557,7 +8541,6 @@ fn the_list_draws_only_installed_providers_the_settings_left_on() {
         &probes,
         &[ProviderKind::Claude],
         Some(ProviderKind::Claude),
-        false,
         ProviderKind::Claude
     ));
 }

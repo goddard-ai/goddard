@@ -78,7 +78,7 @@ struct AcpLaunch {
 
 fn launch_for(provider: ProviderKind, reasoning_effort: Option<&str>) -> anyhow::Result<AcpLaunch> {
     match provider {
-        ProviderKind::Cursor => Ok(AcpLaunch {
+        ProviderKind::Antigravity | ProviderKind::Cursor => Ok(AcpLaunch {
             args: vec!["acp".into()],
             env: Vec::new(),
         }),
@@ -1024,7 +1024,19 @@ async fn run_sdk_connection(
             )
             .await?;
 
-            if let Some(mode_id) = desired_access_mode(provider, modes.as_ref(), mode) {
+            if provider == ProviderKind::Antigravity {
+                // A resumed CLI session may have a different access mode.
+                // Confirm the requested mode before dispatching any prompt.
+                let mode_id = match mode {
+                    RuntimeMode::Ask | RuntimeMode::FullAccess => "default",
+                    RuntimeMode::AutoAcceptEdits => "accept-edits",
+                    RuntimeMode::Auto => "auto",
+                };
+                connection
+                    .send_request(SetSessionModeRequest::new(session_id.clone(), mode_id))
+                    .block_task()
+                    .await?;
+            } else if let Some(mode_id) = desired_access_mode(provider, modes.as_ref(), mode) {
                 // Mode selection is opportunistic: an agent can advertise a
                 // mode but reject a later transition without invalidating the
                 // session itself.
@@ -2180,6 +2192,68 @@ fn set_model_params(
     params
 }
 
+async fn apply_antigravity_model(
+    connection: &ConnectionTo<Agent>,
+    session_id: &SessionId,
+    session_config: &mut Option<Vec<SessionConfigOption>>,
+    model: Option<&str>,
+    effort: Option<&str>,
+    allow_model_fallback: bool,
+) -> anyhow::Result<()> {
+    let mut effort = effort;
+    if let Some(model) = model {
+        let option = advertised_model_option(session_config.as_deref().unwrap_or_default())
+            .ok_or_else(|| anyhow!("Antigravity did not advertise its model configuration"))?;
+        let values = session_config_select_values(option);
+        // The CLI picker folds IDs like gpt-oss-120b-medium into a model and
+        // effort. ACP still advertises packed IDs for some models.
+        let packed = format!("{model}-{}", effort.unwrap_or("medium"));
+        let value = if values.contains(&model) {
+            model
+        } else if values.contains(&packed.as_str()) {
+            effort = None;
+            packed.as_str()
+        } else if let Some((base, level)) = model.rsplit_once('-')
+            && matches!(level, "low" | "medium" | "high")
+            && values.contains(&base)
+        {
+            effort = effort.or(Some(level));
+            base
+        } else if allow_model_fallback {
+            return Ok(());
+        } else {
+            anyhow::bail!("Antigravity did not advertise model {model}");
+        };
+        if session_config_current_value(option) != Some(value) {
+            let response = connection
+                .send_request(SetSessionConfigOptionRequest::new(
+                    session_id.clone(),
+                    option.id.clone(),
+                    value,
+                ))
+                .block_task()
+                .await?;
+            *session_config = Some(response.config_options);
+        }
+    }
+    if let Some(effort) = effort
+        && let Some(option) =
+            session_effort_config_option(session_config.as_deref().unwrap_or_default())
+        && session_config_current_value(option) != Some(effort)
+    {
+        let response = connection
+            .send_request(SetSessionConfigOptionRequest::new(
+                session_id.clone(),
+                option.id.clone(),
+                effort,
+            ))
+            .block_task()
+            .await?;
+        *session_config = Some(response.config_options);
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn apply_model(
     connection: &ConnectionTo<Agent>,
@@ -2193,6 +2267,27 @@ async fn apply_model(
     allow_model_fallback: bool,
     events: &DriverEventSender,
 ) -> bool {
+    if provider == ProviderKind::Antigravity {
+        return match apply_antigravity_model(
+            connection,
+            session_id,
+            session_config,
+            model,
+            reasoning_effort,
+            allow_model_fallback,
+        )
+        .await
+        {
+            Ok(()) => true,
+            Err(error) => {
+                let _ = events.send(DriverEvent::localized_error(localized!(
+                    "errors.select_model",
+                    error = error
+                )));
+                false
+            }
+        };
+    }
     let Some(model) = model else {
         return true;
     };

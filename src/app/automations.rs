@@ -2130,7 +2130,6 @@ impl Waku {
                                     Self::probes_on(&this.probes, waku_client::DaemonKey::Local),
                                     &this.state.disabled_providers,
                                     None,
-                                    this.daemon.is_remote(),
                                     kind,
                                 ) {
                                     this.refresh_provider_model_discovery(kind);

@@ -819,6 +819,7 @@ impl Waku {
         session.auto_title = switched.auto_title;
         session.auto_title_is_prompt = switched.auto_title_is_prompt;
         session.provider_cursor = switched.provider_cursor;
+        session.antigravity_acp = switched.antigravity_acp;
         session.suspended_provider_sessions = switched.suspended_provider_sessions;
         session.pending_provider_context = switched.pending_provider_context;
         session.provider_session_id = None;

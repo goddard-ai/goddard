@@ -116,6 +116,7 @@ pub(super) fn preserve_task_view_projection(existing: &AgentSession, incoming: &
         .transcript_blocks
         .clone_from(&existing.transcript_blocks);
     incoming.runtime_event_cursor = existing.runtime_event_cursor;
+    incoming.antigravity_acp |= existing.antigravity_acp;
     if incoming.provider == existing.provider {
         incoming
             .provider_cursor

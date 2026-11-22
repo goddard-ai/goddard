@@ -1690,9 +1690,8 @@ impl Waku {
         if let Some(session) = self.selected_session()
             && session.has_started()
         {
-            // Antigravity has no daemon runtime to attach to — its surface
-            // is the TUI terminal, ensured and focused instead.
-            if session.provider == ProviderKind::Antigravity && session.detail_loaded {
+            // Reopen and focus the terminal for legacy Antigravity tasks.
+            if session.uses_antigravity_terminal() {
                 self.agy_last_visible.insert(session_id, Instant::now());
                 self.ensure_agy_terminal(session_id, cx);
                 if let Some(terminal) = self.agy_terminal(session_id) {
@@ -5400,11 +5399,10 @@ impl Waku {
             || self.selected_terminal.is_some()
             || self.projects_page.is_some()
             || self.boss_ui.page.is_some()
-            // A started Antigravity session has no composer — keystrokes
-            // belong to its TUI terminal or nowhere.
-            || self.selected_session().is_some_and(|session| {
-                session.provider == ProviderKind::Antigravity && session.has_started()
-            })
+            // Keystrokes belong to the terminal on legacy Antigravity tasks.
+            || self
+                .selected_session()
+                .is_some_and(|session| session.uses_antigravity_terminal())
         {
             return;
         }
@@ -5596,9 +5594,9 @@ impl Waku {
             || self.automations_page
             || self.boss_ui.page.is_some()
             || self.selected_friend_watch().is_some()
-            || self.selected_session().is_some_and(|session| {
-                session.provider == ProviderKind::Antigravity && session.has_started()
-            })
+            || self
+                .selected_session()
+                .is_some_and(|session| session.uses_antigravity_terminal())
         {
             return;
         }

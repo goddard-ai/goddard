@@ -191,14 +191,8 @@ pub(super) fn picker_lists_provider(
     probes: &[ProviderProbe],
     disabled_providers: &[ProviderKind],
     locked_provider: Option<ProviderKind>,
-    remote: bool,
     kind: ProviderKind,
 ) -> bool {
-    // Antigravity's surface is a local PTY running the CLI's TUI — a remote
-    // daemon cannot host it, so the tab does not exist there.
-    if remote && kind == ProviderKind::Antigravity {
-        return false;
-    }
     let installed = probes
         .iter()
         .any(|probe| probe.provider == kind && probe.installed);
@@ -234,12 +228,11 @@ pub(super) fn picker_has_no_providers(
     probes: &[ProviderProbe],
     disabled_providers: &[ProviderKind],
     locked_provider: Option<ProviderKind>,
-    remote: bool,
     detection_settled: bool,
 ) -> bool {
     detection_settled
         && !ProviderKind::ALL.into_iter().any(|kind| {
-            picker_lists_provider(probes, disabled_providers, locked_provider, remote, kind)
+            picker_lists_provider(probes, disabled_providers, locked_provider, kind)
         })
 }
 

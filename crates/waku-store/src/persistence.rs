@@ -2948,6 +2948,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         boss_managed,
         planning,
         provider: serde_json::from_value(serde_json::Value::String(provider)).ok()?,
+        antigravity_acp: false,
         model,
         pending_model_switch: None,
         // Hydration replaces these; the list never reads them.
@@ -3041,6 +3042,7 @@ pub fn apply_session_detail(session: &mut AgentSession, stored: AgentSession) {
     session.workspace = stored.workspace;
     session.side_chat_of = stored.side_chat_of;
     session.provider_cursor = stored.provider_cursor;
+    session.antigravity_acp = stored.antigravity_acp;
     session.suspended_provider_sessions = stored.suspended_provider_sessions;
     session.pending_provider_context = stored.pending_provider_context;
     session.runtime_mode = stored.runtime_mode;
@@ -5316,6 +5318,32 @@ mod tests {
         let mut restored = reopened.load().unwrap();
         reopened.hydrate(&mut restored.sessions[0]).unwrap();
         assert_eq!(restored.sessions[0].queued_messages, vec![pending]);
+
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn antigravity_tasks_keep_their_transport_after_hydration() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let project_id = state.sessions[0].project_id;
+        let mut legacy = AgentSession::new(project_id, ProviderKind::Antigravity);
+        legacy.antigravity_acp = false;
+        legacy.push_message(MessageRole::User, "terminal prompt");
+        let mut acp = AgentSession::new(project_id, ProviderKind::Antigravity);
+        acp.begin_turn("ACP prompt before the provider returns a session ID");
+        let expected = [(legacy.id, true), (acp.id, false)];
+        state.sessions = vec![legacy, acp];
+        store.save(&mut state).unwrap();
+
+        let reopened = store_in(&directory);
+        let mut restored = reopened.load().unwrap();
+        for (id, terminal) in expected {
+            let session = restored.session_mut(id).unwrap();
+            reopened.hydrate(session).unwrap();
+            assert_eq!(session.uses_antigravity_terminal(), terminal);
+        }
 
         fs::remove_dir_all(directory).ok();
     }

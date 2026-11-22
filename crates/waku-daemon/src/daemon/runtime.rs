@@ -81,6 +81,16 @@ impl WakuBackend {
                 options.provider_cursor = None;
                 options.read_own_transcript = true;
             }
+            if provider == ProviderKind::Antigravity {
+                let mut state = self.task_state.lock();
+                if let Some(session) = state.sessions.iter_mut().find(|s| s.id == session_id) {
+                    self.task_store.hydrate(session)?;
+                    anyhow::ensure!(
+                        !session.uses_antigravity_terminal(),
+                        "this Antigravity task opens in the desktop terminal"
+                    );
+                }
+            }
             if provider == ProviderKind::Codex {
                 let mut state = self.task_state.lock();
                 if let Some(session) = state.sessions.iter_mut().find(|s| s.id == session_id)
