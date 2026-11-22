@@ -39,7 +39,8 @@ const MAX_BUFFERED_EVENTS_PER_RUNTIME: usize = 4096;
 fn request_timeout(command: &Command) -> Duration {
     match command {
         Command::Workspace { operation } => match operation {
-            WorkspaceOperation::CaptureTurn { .. }
+            WorkspaceOperation::RecoverTaskWorkspace { .. }
+            | WorkspaceOperation::CaptureTurn { .. }
             | WorkspaceOperation::CaptureTurnStart { .. }
             | WorkspaceOperation::CreateWorktree { .. }
             | WorkspaceOperation::CreateWorktreeFromCheckout { .. }
@@ -83,6 +84,12 @@ struct ClientInner {
     /// Whether the daemon can place `goddard-agent` on a session's PATH —
     /// the scoped read surface's reachability, reported in the handshake.
     agent_cli_available: bool,
+    task_views_available: bool,
+    /// Bounded transcript reads (`readTranscriptWindow`/`Payload`/`find`)
+    /// and compact task-view payloads, reported in the handshake.
+    transcript_windows_available: bool,
+    landing_queue_available: bool,
+    task_view_generation: std::sync::atomic::AtomicU64,
     pending: Mutex<HashMap<Uuid, Sender<Result<ResponsePayload, RpcError>>>>,
     sessions: Mutex<HashMap<(Uuid, Uuid), Sender<SequencedEvent>>>,
     /// Friend-session watchers: deliver every event for the session
@@ -97,6 +104,7 @@ struct ClientInner {
     automations_subscribers: Mutex<Vec<Sender<waku_protocol::automations::AutomationsState>>>,
     /// `ReviewChanged` broadcasts — the origin URL whose QA state moved.
     review_subscribers: Mutex<Vec<Sender<String>>>,
+    landing_subscribers: Mutex<Vec<Sender<(Uuid, u64)>>>,
     /// `(session_id, revoked)` — a watched friend session's stream ended.
     friend_session_closed_subscribers: Mutex<Vec<Sender<(Uuid, bool)>>>,
     /// `bossSpeechRequested` broadcasts — `(request_id, parts)` for the
@@ -278,7 +286,156 @@ pub struct DaemonClient {
     inner: Arc<ClientInner>,
 }
 
+/// An enqueued RPC whose acknowledgement can be awaited off the UI thread.
+/// Dropping it releases the waiter; it does not cancel accepted daemon work.
+pub struct PendingRequest {
+    request_id: Uuid,
+    response: Receiver<Result<ResponsePayload, RpcError>>,
+    deadline: Option<Instant>,
+    inner: std::sync::Weak<ClientInner>,
+}
+
+impl PendingRequest {
+    pub fn wait(self) -> anyhow::Result<ResponsePayload> {
+        let outcome = match self.deadline {
+            Some(deadline) => self
+                .response
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .map_err(|error| anyhow!("timed out waiting for Goddard daemon: {error}"))?,
+            None => self
+                .response
+                .recv()
+                .map_err(|error| anyhow!("Goddard daemon connection closed: {error}"))?,
+        };
+        outcome.map_err(anyhow::Error::new)
+    }
+}
+
+impl Drop for PendingRequest {
+    fn drop(&mut self) {
+        if let Some(inner) = self.inner.upgrade() {
+            inner.pending.lock().remove(&self.request_id);
+        }
+    }
+}
+
 impl DaemonClient {
+    pub fn set_task_view(
+        &self,
+        session_id: Uuid,
+        runtime_id: Uuid,
+        detail: bool,
+    ) -> anyhow::Result<()> {
+        self.set_task_view_payloads(
+            session_id,
+            runtime_id,
+            detail,
+            waku_protocol::transcript::TaskViewPayloadInterest::All,
+        )
+    }
+
+    /// `Compact` asks the daemon to strip bulk activity fields from detail
+    /// events; the caller range-reads expanded payloads instead. Ignored by
+    /// daemons predating transcript windows — they see the legacy shape.
+    pub fn set_task_view_payloads(
+        &self,
+        session_id: Uuid,
+        runtime_id: Uuid,
+        detail: bool,
+        payloads: waku_protocol::transcript::TaskViewPayloadInterest,
+    ) -> anyhow::Result<()> {
+        if !self.task_views_available() {
+            return Ok(());
+        }
+        let generation = self
+            .inner
+            .task_view_generation
+            .fetch_add(1, Ordering::AcqRel)
+            + 1;
+        match self.request(
+            session_id,
+            runtime_id,
+            Command::SetTaskView {
+                detail,
+                generation,
+                payloads,
+            },
+        )? {
+            ResponsePayload::Ack => Ok(()),
+            _ => bail!("invalid task-view acknowledgement"),
+        }
+    }
+
+    pub fn task_views_available(&self) -> bool {
+        self.inner.task_views_available
+    }
+
+    /// Whether the connected daemon serves bounded transcript windows,
+    /// payload ranges, and daemon-side find (`readTranscriptWindow` et al.).
+    pub fn landing_queue_available(&self) -> bool {
+        self.inner.landing_queue_available
+    }
+
+    pub fn subscribe_landing_queue(&self) -> Receiver<(Uuid, u64)> {
+        let (sender, receiver) = unbounded();
+        self.inner.landing_subscribers.lock().push(sender);
+        receiver
+    }
+
+    pub fn transcript_windows_available(&self) -> bool {
+        self.inner.transcript_windows_available
+    }
+
+    /// One bounded slice of the flattened transcript — the task-open,
+    /// history-page, and search-reveal read. Callers gate on
+    /// [`Self::transcript_windows_available`] and fall back to
+    /// `HydrateSession` when the daemon predates windows.
+    pub fn read_transcript_window(
+        &self,
+        request: waku_protocol::transcript::TranscriptWindowRequest,
+    ) -> anyhow::Result<waku_protocol::transcript::TranscriptWindow> {
+        match self.request(
+            Uuid::nil(),
+            Uuid::nil(),
+            Command::ReadTranscriptWindow { request },
+        )? {
+            ResponsePayload::TranscriptWindow { window } => Ok(window),
+            _ => bail!("invalid transcript-window response"),
+        }
+    }
+
+    /// Range-read one lazy transcript field — a message body's continuation
+    /// or an activity's bulk payload.
+    pub fn read_transcript_payload(
+        &self,
+        request: waku_protocol::transcript::TranscriptPayloadRequest,
+    ) -> anyhow::Result<waku_protocol::transcript::TranscriptPayload> {
+        match self.request(
+            Uuid::nil(),
+            Uuid::nil(),
+            Command::ReadTranscriptPayload { request },
+        )? {
+            ResponsePayload::TranscriptPayload { payload } => Ok(payload),
+            _ => bail!("invalid transcript-payload response"),
+        }
+    }
+
+    /// Daemon-side occurrence search over the whole retained transcript —
+    /// conversation bodies and lazy tool fields — without paging history.
+    pub fn find_transcript(
+        &self,
+        request: waku_protocol::transcript::TranscriptFindRequest,
+    ) -> anyhow::Result<waku_protocol::transcript::TranscriptFindResult> {
+        match self.request(
+            Uuid::nil(),
+            Uuid::nil(),
+            Command::FindTranscript { request },
+        )? {
+            ResponsePayload::TranscriptFind { result } => Ok(result),
+            _ => bail!("invalid transcript-find response"),
+        }
+    }
+
     pub fn connect(address: &str, token: String) -> anyhow::Result<Self> {
         Self::connect_with_resume(address, token, Vec::new())
     }
@@ -333,15 +490,30 @@ impl DaemonClient {
             },
         )?;
         let hello = read_server_message(&mut socket)?;
-        let (daemon_version, daemon_commit, agent_cli_available) = match hello {
+        let (
+            daemon_version,
+            daemon_commit,
+            agent_cli_available,
+            task_views_available,
+            transcript_windows_available,
+            landing_queue_available,
+        ) = match hello {
             ServerMessage::Hello {
                 protocol_version,
                 daemon_version,
                 daemon_commit,
                 agent_cli_available,
-            } if protocol_version == PROTOCOL_VERSION => {
-                (daemon_version, daemon_commit, agent_cli_available)
-            }
+                task_views_available,
+                transcript_windows_available,
+                landing_queue_available,
+            } if protocol_version == PROTOCOL_VERSION => (
+                daemon_version,
+                daemon_commit,
+                agent_cli_available,
+                task_views_available,
+                transcript_windows_available,
+                landing_queue_available,
+            ),
             ServerMessage::Hello {
                 protocol_version, ..
             } => bail!(
@@ -362,6 +534,10 @@ impl DaemonClient {
             daemon_version,
             daemon_commit,
             agent_cli_available,
+            task_views_available,
+            transcript_windows_available,
+            landing_queue_available,
+            task_view_generation: std::sync::atomic::AtomicU64::new(0),
             pending: Mutex::new(HashMap::new()),
             sessions: Mutex::new(HashMap::new()),
             session_watchers: Mutex::new(HashMap::new()),
@@ -372,6 +548,7 @@ impl DaemonClient {
             pairing_subscribers: Mutex::new(Vec::new()),
             automations_subscribers: Mutex::new(Vec::new()),
             review_subscribers: Mutex::new(Vec::new()),
+            landing_subscribers: Mutex::new(Vec::new()),
             friend_session_closed_subscribers: Mutex::new(Vec::new()),
             speech_subscribers: Mutex::new(Vec::new()),
             wireframe_subscribers: Mutex::new(Vec::new()),
@@ -637,9 +814,34 @@ impl DaemonClient {
         command: Command,
         timeout: Option<Duration>,
     ) -> anyhow::Result<ResponsePayload> {
+        self.begin_request_with_timeout(session_id, runtime_id, command, timeout)?
+            .wait()
+    }
+
+    /// Enqueue without waiting for socket I/O or the daemon's response.
+    /// The response deadline starts here, including time until `wait` runs.
+    /// Keep a client handle alive while awaiting the returned request.
+    pub fn begin_request(
+        &self,
+        session_id: Uuid,
+        runtime_id: Uuid,
+        command: Command,
+    ) -> anyhow::Result<PendingRequest> {
+        let timeout = request_timeout(&command);
+        self.begin_request_with_timeout(session_id, runtime_id, command, Some(timeout))
+    }
+
+    fn begin_request_with_timeout(
+        &self,
+        session_id: Uuid,
+        runtime_id: Uuid,
+        command: Command,
+        timeout: Option<Duration>,
+    ) -> anyhow::Result<PendingRequest> {
         if self.inner.disconnected.load(Ordering::Acquire) {
             bail!("Goddard daemon is disconnected");
         }
+        let deadline = timeout.map(|timeout| Instant::now() + timeout);
         let request_id = Uuid::new_v4();
         let (response, response_rx) = bounded(1);
         self.inner.pending.lock().insert(request_id, response);
@@ -658,21 +860,12 @@ impl DaemonClient {
             self.inner.pending.lock().remove(&request_id);
             bail!("Goddard daemon connection is closed");
         }
-        let outcome = match timeout {
-            Some(timeout) => match response_rx.recv_timeout(timeout) {
-                Ok(outcome) => outcome,
-                Err(error) => {
-                    self.inner.pending.lock().remove(&request_id);
-                    return Err(anyhow!("timed out waiting for Goddard daemon: {error}"));
-                }
-            },
-            // A dropped sender means the connection died — the disconnect
-            // path resolves every pending waiter with an error first.
-            None => response_rx
-                .recv()
-                .map_err(|error| anyhow!("Goddard daemon connection closed: {error}"))?,
-        };
-        outcome.map_err(|error| anyhow!(error.localized_message()))
+        Ok(PendingRequest {
+            request_id,
+            response: response_rx,
+            deadline,
+            inner: Arc::downgrade(&self.inner),
+        })
     }
 
     pub fn notify(
@@ -684,18 +877,29 @@ impl DaemonClient {
         if self.inner.disconnected.load(Ordering::Acquire) {
             bail!("Goddard daemon is disconnected");
         }
-        self.inner
-            .bulk
-            .send(ClientMessage::Request(Request {
-                // The nil request id is reserved for fire-and-forget controls;
-                // the daemon executes them in the runtime mailbox but does
-                // not allocate or send a response.
-                request_id: Uuid::nil(),
-                session_id,
-                runtime_id,
-                command,
-            }))
-            .map_err(|_| anyhow!("Goddard daemon connection is closed"))
+        // A concrete runtime's controls share request ordering: a later
+        // acknowledged prompt must not overtake Stop, Close or a response.
+        // Background polling may lag without changing lifecycle state.
+        let ordered = !runtime_id.is_nil() && !matches!(command, Command::RefreshBackgroundWork);
+        let message = ClientMessage::Request(Request {
+            // Notifications still allocate no response/cache entry.
+            request_id: Uuid::nil(),
+            session_id,
+            runtime_id,
+            command,
+        });
+        let failed = if ordered {
+            self.inner
+                .outgoing
+                .send(Outgoing::Message(message))
+                .is_err()
+        } else {
+            self.inner.bulk.send(message).is_err()
+        };
+        if failed {
+            bail!("Goddard daemon connection is closed");
+        }
+        Ok(())
     }
 
     pub fn last_sequences(&self) -> Vec<ReplayCursor> {
@@ -935,6 +1139,12 @@ fn run_client(
                             .lock()
                             .retain(|subscriber| subscriber.send(state.clone()).is_ok());
                     }
+                    ServerMessage::LandingQueueChanged { queue_id, revision } => {
+                        inner
+                            .landing_subscribers
+                            .lock()
+                            .retain(|subscriber| subscriber.send((queue_id, revision)).is_ok());
+                    }
                     ServerMessage::ReviewChanged { origin_url } => {
                         inner
                             .review_subscribers
@@ -983,6 +1193,7 @@ fn run_client(
                             .lock()
                             .retain(|subscriber| subscriber.send((session_id, revoked)).is_ok());
                     }
+                    ServerMessage::IdleShutdown { .. } => {}
                     ServerMessage::ShuttingDown => break,
                     ServerMessage::Hello { .. }
                     | ServerMessage::Rejected { .. }
@@ -1038,6 +1249,7 @@ fn fail_connection(inner: &ClientInner) {
         let _ = response.send(Err(RpcError {
             message: "Goddard daemon disconnected".into(),
             i18n: None,
+            code: None,
         }));
     }
     // Closing the desktop transport is not evidence that a daemon-owned
@@ -1118,20 +1330,103 @@ mod tests {
     use super::*;
 
     #[test]
+    fn concrete_runtime_controls_stay_between_admitted_prompts() {
+        // Exercise the actual producers and transport selector with the I/O
+        // owner paused. No socket timing can hide an overtaking control.
+        let (outgoing, outgoing_rx) = unbounded();
+        let (bulk, bulk_rx) = unbounded();
+        let client = DaemonClient {
+            inner: Arc::new(ClientInner {
+                outgoing,
+                bulk,
+                address: "fixture".into(),
+                daemon_version: "fixture".into(),
+                daemon_commit: None,
+                agent_cli_available: false,
+                task_views_available: false,
+                transcript_windows_available: false,
+                landing_queue_available: false,
+                task_view_generation: std::sync::atomic::AtomicU64::new(0),
+                pending: Mutex::new(HashMap::new()),
+                sessions: Mutex::new(HashMap::new()),
+                session_watchers: Mutex::new(HashMap::new()),
+                pending_events: Mutex::new(HashMap::new()),
+                task_state_subscribers: Mutex::new(Vec::new()),
+                settings_subscribers: Mutex::new(Vec::new()),
+                friends_subscribers: Mutex::new(Vec::new()),
+                pairing_subscribers: Mutex::new(Vec::new()),
+                automations_subscribers: Mutex::new(Vec::new()),
+                review_subscribers: Mutex::new(Vec::new()),
+                landing_subscribers: Mutex::new(Vec::new()),
+                friend_session_closed_subscribers: Mutex::new(Vec::new()),
+                speech_subscribers: Mutex::new(Vec::new()),
+                wireframe_subscribers: Mutex::new(Vec::new()),
+                wireframe_comment_subscribers: Mutex::new(Vec::new()),
+                boss_browse_subscribers: Mutex::new(Vec::new()),
+                last_sequences: Mutex::new(HashMap::new()),
+                disconnected: AtomicBool::new(false),
+            }),
+        };
+        let session_id = Uuid::new_v4();
+        let runtime_id = Uuid::new_v4();
+        let prompt = |text: &str| Command::Prompt {
+            prompt: text.into(),
+            runtime_mode: None,
+            turn_id: None,
+            message_id: None,
+            hidden: false,
+            attachments: Vec::new(),
+        };
+        let first = client
+            .begin_request(session_id, runtime_id, prompt("first"))
+            .unwrap();
+        client
+            .notify(session_id, runtime_id, Command::Cancel)
+            .unwrap();
+        let second = client
+            .begin_request(session_id, runtime_id, prompt("second"))
+            .unwrap();
+        let order: Vec<_> = (0..3)
+            .map(|_| match next_outgoing(&outgoing_rx, &bulk_rx).unwrap() {
+                Outgoing::Message(ClientMessage::Request(request)) => match request.command {
+                    Command::Prompt { prompt, .. } => prompt,
+                    Command::Cancel => "cancel".into(),
+                    other => panic!("unexpected {other:?}"),
+                },
+                _ => panic!("unexpected transport control"),
+            })
+            .collect();
+        assert_eq!(order, ["first", "cancel", "second"]);
+        assert_eq!(client.inner.pending.lock().len(), 2);
+        drop((first, second));
+        assert!(
+            client.inner.pending.lock().is_empty(),
+            "abandoned waiters leaked"
+        );
+    }
+
+    #[test]
     fn worktree_bound_commands_get_the_longer_timeout() {
         let cwd = PathBuf::from("/tmp/waku-test");
         let session_id = Uuid::new_v4();
 
         for operation in [
+            WorkspaceOperation::RecoverTaskWorkspace {
+                session_id,
+                path: None,
+                restore: true,
+            },
             WorkspaceOperation::CaptureTurnStart {
                 cwd: cwd.clone(),
                 session_id,
                 turn_count: 1,
+                history_generation: None,
             },
             WorkspaceOperation::CaptureTurn {
                 cwd: cwd.clone(),
                 session_id,
                 turn_count: 1,
+                identity: None,
                 untouched: false,
             },
             WorkspaceOperation::CreateWorktree {
@@ -1189,6 +1484,7 @@ mod tests {
         assert_eq!(request_timeout(&Command::AttachSession), REQUEST_TIMEOUT);
         assert_eq!(
             request_timeout(&Command::Prompt {
+                runtime_mode: None,
                 prompt: String::new(),
                 turn_id: None,
                 message_id: None,
@@ -1225,6 +1521,9 @@ mod tests {
                                     daemon_version: "test".into(),
                                     daemon_commit: None,
                                     agent_cli_available: false,
+                                    task_views_available: false,
+                                    transcript_windows_available: false,
+                                    landing_queue_available: false,
                                 },
                             )
                             .unwrap();
@@ -1330,6 +1629,9 @@ mod tests {
                         daemon_version: "test".into(),
                         daemon_commit: None,
                         agent_cli_available: false,
+                        task_views_available: false,
+                        transcript_windows_available: false,
+                        landing_queue_available: false,
                     })
                     .unwrap()
                     .into(),

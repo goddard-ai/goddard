@@ -88,6 +88,13 @@ auto_prompts: Array<AutoPromptRule>,
  */
 boss_experiment_enabled: boolean,
 /**
+ * Experimental opt-in for Counsel — the human's persistent adviser
+ * chat, its recommendations, and its Boss handoffs, nested under the
+ * Boss experiment: both flags must be on before Counsel opens or
+ * operates. Off by default in every build, development included.
+ */
+counsel_experiment_enabled: boolean,
+/**
  * Disable automatic rotation of settled Boss chats. Off by default, including release builds.
  */
 boss_rotation_disabled: boolean,

@@ -2,13 +2,14 @@ import type {
   AgentSession,
   MessageAttachment,
   Project,
+  PromptConfiguration,
   ProviderKind,
   ProviderSessionHistory,
   ProviderSessionSummary,
   RuntimeMode,
   SequencedEvent,
 } from '@waku/client';
-import { appendQueuedSteerPreview, attachmentPromptToken, queuedMessageIsManagedGoal } from '@waku/client';
+import { appendQueuedSteerPreview, attachmentPromptToken, promptConfigurationForSession, queuedMessageIsManagedGoal } from '@waku/client';
 
 export interface MobileRuntimeClock {
   nowSeconds: () => number;
@@ -148,6 +149,7 @@ export function queueSubmission(
   providerPromptOverride?: string,
   hidden = false,
   queuedId?: string,
+  configuration?: PromptConfiguration,
 ): AgentSession {
   const now = clock.nowSeconds();
   const visiblePrompt = prompt.trim();
@@ -167,6 +169,7 @@ export function queueSubmission(
       {
         id: queuedId ?? clock.randomUUID(),
         content: providerPrompt,
+        configuration: configuration ?? promptConfigurationForSession(session),
         display_content:
           attachments.length || providerPrompt !== visiblePrompt ? visiblePrompt : null,
         attachments,
@@ -188,8 +191,9 @@ export function queueSteerSubmission(
   attachments: MessageAttachment[] = [],
   providerPromptOverride?: string,
   queuedId?: string,
+  configuration?: PromptConfiguration,
 ): AgentSession {
-  const queued = queueSubmission(session, prompt, clock, attachments, providerPromptOverride, false, queuedId);
+  const queued = queueSubmission(session, prompt, clock, attachments, providerPromptOverride, false, queuedId, configuration);
   const entry = queued.queued_messages?.at(-1);
   return entry ? appendQueuedSteerPreview(queued, entry) : queued;
 }

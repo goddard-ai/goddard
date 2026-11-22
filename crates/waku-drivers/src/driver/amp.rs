@@ -302,6 +302,7 @@ impl AmpDriver {
                             match written {
                                 Ok(()) => {
                                     let _ = writer_events.send(DriverEvent::SteerAccepted {
+                                        submission_id: None,
                                         message: text,
                                         sent_by_task: None,
                                         hidden: false,

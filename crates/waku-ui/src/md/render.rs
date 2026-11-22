@@ -742,6 +742,7 @@ pub fn flatten(
             prefix: Rc::default(),
             suffix: Rc::default(),
             fragments: flat.fragments,
+            chips: Vec::new(),
         }),
     }
 }
@@ -1761,6 +1762,7 @@ pub struct Ctx<'a> {
     /// chat glyph — the planning sessions' compass.
     mention_glyphs: Rc<HashMap<Uuid, &'static str>>,
     now: Instant,
+    pasted_text_payloads: Rc<Vec<waku_protocol::model::MessageAtom>>,
 }
 
 impl<'a> Ctx<'a> {
@@ -1807,6 +1809,7 @@ impl<'a> Ctx<'a> {
             mention_avatars: Rc::default(),
             mention_glyphs: Rc::default(),
             now: Instant::now(),
+            pasted_text_payloads: Rc::default(),
         }
     }
 
@@ -1820,6 +1823,14 @@ impl<'a> Ctx<'a> {
 
     pub fn with_link_handler(mut self, handler: LinkHandler) -> Self {
         self.link_handler = Some(handler);
+        self
+    }
+
+    pub fn with_pasted_text_payloads(
+        mut self,
+        atoms: Rc<Vec<waku_protocol::model::MessageAtom>>,
+    ) -> Self {
+        self.pasted_text_payloads = atoms;
         self
     }
 
@@ -2028,6 +2039,7 @@ impl<'a> Ctx<'a> {
             mention_avatars: self.mention_avatars.clone(),
             mention_glyphs: self.mention_glyphs.clone(),
             now: Instant::now(),
+            pasted_text_payloads: self.pasted_text_payloads.clone(),
         }
     }
 
@@ -2064,14 +2076,33 @@ impl<'a> Ctx<'a> {
     /// `> ## Title`.
     fn copy_spec(&self, flat: &Rc<FlatText>) -> Rc<CopySpec> {
         let container = self.copy_lead.take().or_else(|| self.copy_margin());
-        match container {
-            None => flat.copy.clone(),
-            Some(prefix) => {
-                let mut spec = (*flat.copy).clone();
-                spec.prefix = Rc::from(format!("{prefix}{}", spec.prefix));
-                Rc::new(spec)
-            }
+        let chips: Vec<_> = flat
+            .links
+            .iter()
+            .filter_map(|(range, url)| {
+                let index = url
+                    .strip_prefix(PASTED_TEXT_LINK_PREFIX)?
+                    .parse::<usize>()
+                    .ok()?;
+                let atom = self.pasted_text_payloads.get(index)?;
+                Some((
+                    range.clone(),
+                    crate::clipboard::ClipboardAtom::PastedText {
+                        text: atom.payload.clone(),
+                        category: None,
+                    },
+                ))
+            })
+            .collect();
+        if container.is_none() && chips.is_empty() {
+            return flat.copy.clone();
         }
+        let mut spec = (*flat.copy).clone();
+        if let Some(prefix) = container {
+            spec.prefix = Rc::from(format!("{prefix}{}", spec.prefix));
+        }
+        spec.chips = chips;
+        Rc::new(spec)
     }
 
     /// Flatten through the cache when one is wired: a settled block reuses its
@@ -2701,6 +2732,89 @@ pub fn plain_text(
     let key = ctx.next_key();
     let flat = ctx.flat(key.index, || flatten_plain(text, family, weight, color));
     text_element(&flat, key, ctx)
+}
+
+/// Selectable notice text with clickable bare web URLs and literal formatting.
+pub fn notice_text(text: impl Into<SharedString>, color: Hsla, ctx: &Ctx) -> AnyElement {
+    let key = ctx.next_key();
+    let flat = ctx.flat(key.index, || {
+        let mut flat = flatten_plain(text, ctx.families.ui.clone(), FontWeight::NORMAL, color);
+        let Some(base_run) = flat.runs.first().cloned() else {
+            return flat;
+        };
+        let mut cursor = 0;
+        let mut runs = Vec::new();
+        for range in super::parser::bare_web_url_ranges(&flat.text) {
+            if cursor < range.start {
+                runs.push(TextRun {
+                    len: range.start - cursor,
+                    ..base_run.clone()
+                });
+            }
+            runs.push(TextRun {
+                len: range.len(),
+                underline: Some(UnderlineStyle {
+                    color: Some(color),
+                    thickness: px(1.0),
+                    wavy: false,
+                }),
+                ..base_run.clone()
+            });
+            cursor = range.end;
+            flat.links
+                .push((range.clone(), flat.text[range].to_owned()));
+        }
+        if cursor > 0 {
+            if cursor < flat.text.len() {
+                runs.push(TextRun {
+                    len: flat.text.len() - cursor,
+                    ..base_run
+                });
+            }
+            flat.runs = runs;
+        }
+        flat
+    });
+    let body = text_element(&flat, key.clone(), ctx);
+    if flat.links.is_empty() {
+        return body;
+    }
+    let handler = ctx
+        .link_handler
+        .clone()
+        .unwrap_or_else(|| Rc::new(|url, _, cx| cx.open_url(url)));
+    let menu = ctx.context_menu.clone();
+    div()
+        .id(SharedString::from(format!(
+            "{}-notice-links-{}",
+            key.row, key.index
+        )))
+        .min_w_0()
+        .tab_index(0)
+        .focus_visible(|style| style.bg(ctx.palette.selection))
+        .on_key_down(move |event: &KeyDownEvent, window, cx| {
+            if !matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                return;
+            }
+            if let [(_, url)] = flat.links.as_slice() {
+                handler(url, window, cx);
+            } else if let Some(menu) = &menu {
+                menu.set_context_items(
+                    flat.links
+                        .iter()
+                        .map(|(_, url)| {
+                            let url = url.clone();
+                            let handler = handler.clone();
+                            MenuItem::new(url.clone(), move |window, cx| handler(&url, window, cx))
+                        })
+                        .collect(),
+                );
+                menu.open_context_menu(window, cx);
+            }
+            cx.stop_propagation();
+        })
+        .child(body)
+        .into_any_element()
 }
 
 /// A zero-size canvas that clears the frame's registry. Paint it *before* any
@@ -3407,22 +3521,35 @@ fn render_block(block: &Block, ctx: &Ctx) -> AnyElement {
     ctx.starts_block.set(true);
     match block {
         Block::Paragraph { runs } => {
+            // Match the visible prefix across inline emphasis without changing
+            // the source or treating code examples as summary prose.
+            let is_summary = runs
+                .iter()
+                .take_while(|run| !run.style.code && !run.style.math)
+                .flat_map(|run| run.text.bytes())
+                .take(b"Put simply: ".len())
+                .eq(b"Put simply: ".iter().copied());
             let key = ctx.next_key();
             let flat = ctx.flat(key.index, || {
                 flatten(
                     runs,
                     ctx.palette,
                     &ctx.families,
-                    FontWeight::NORMAL,
+                    if is_summary {
+                        FontWeight::BOLD
+                    } else {
+                        FontWeight::NORMAL
+                    },
                     ctx.palette.text,
                     &ctx.session_mentions,
                 )
             });
+            let scale = if is_summary { 1.14 } else { 1.0 };
             div()
                 .w_full()
                 .min_w_0()
-                .text_size(px(ctx.metrics.text_size))
-                .line_height(px(ctx.metrics.line_height))
+                .text_size(px(ctx.metrics.text_size * scale))
+                .line_height(px(ctx.metrics.line_height * scale))
                 .child(text_element(&flat, key, ctx))
                 .into_any_element()
         }
@@ -3474,6 +3601,7 @@ fn render_block(block: &Block, ctx: &Ctx) -> AnyElement {
                     prefix: Rc::from("$$"),
                     suffix: Rc::from("$$"),
                     fragments: Vec::new(),
+                    chips: Vec::new(),
                 });
                 flat
             });
@@ -3687,7 +3815,10 @@ fn render_image(url: &str, alt: &str, ctx: &Ctx) -> AnyElement {
 
     let decoded = decode_data_url(url);
     let resolved = if decoded.is_none() {
-        ctx.image_resolver.as_ref().and_then(|resolve| resolve(url))
+        ctx.image_resolver
+            .as_ref()
+            .and_then(|resolve| resolve(url))
+            .or_else(|| local_image_path(url))
     } else {
         None
     };
@@ -3720,6 +3851,19 @@ fn render_image(url: &str, alt: &str, ctx: &Ctx) -> AnyElement {
                 .object_fit(gpui::ObjectFit::ScaleDown),
         )
         .into_any_element()
+}
+
+// Strings are URI image sources in GPUI; local files must use its path source.
+// Keep this lexical: GPUI loads the file asynchronously, outside rendering.
+fn local_image_path(source: &str) -> Option<PathBuf> {
+    if Path::new(source).is_absolute() {
+        return Some(PathBuf::from(source));
+    }
+    url::Url::parse(source)
+        .ok()
+        .filter(|url| url.scheme() == "file")?
+        .to_file_path()
+        .ok()
 }
 
 const CODE_COPY_FEEDBACK_DURATION: Duration = Duration::from_secs(3);
@@ -3875,6 +4019,7 @@ fn render_code_block_toned(
                 prefix: Rc::from(format!("```{}\n", language.unwrap_or(""))),
                 suffix: Rc::from("\n```"),
                 fragments: Vec::new(),
+                chips: Vec::new(),
             }),
         }
     });
@@ -4580,6 +4725,18 @@ mod tests {
     use crate::md::parser;
     use gpui::TestAppContext;
 
+    #[test]
+    fn local_markdown_images_use_file_sources() {
+        let path = "/Users/alec/dev/reports/thread screenshot.png";
+        assert_eq!(local_image_path(path), Some(PathBuf::from(path)));
+        assert_eq!(
+            local_image_path("file:///Users/alec/dev/reports/thread%20screenshot.png"),
+            Some(PathBuf::from(path))
+        );
+        assert_eq!(local_image_path("https://example.com/image.png"), None);
+        assert_eq!(local_image_path("data:image/png;base64,aGVsbG8="), None);
+    }
+
     fn palette() -> Palette {
         Palette::from_theme(&Theme::dark())
     }
@@ -4732,6 +4889,84 @@ mod tests {
                 ("gone".to_owned(), "~~gone~~".to_owned()),
             ]
         );
+    }
+
+    #[test]
+    fn transcript_paste_chip_selection_keeps_its_payload() {
+        use crate::clipboard::{ChipContent, ClipboardAtom};
+        use waku_protocol::model::{MESSAGE_ATOM_END as E, MESSAGE_ATOM_OPEN as O, MessageAtom};
+        let mut view = MarkdownView::new();
+        view.set_transcript_text_with_atom_links(
+            &format!("before {O}Pasted text{E} after"),
+            false,
+            true,
+            true,
+        );
+        let colors = palette();
+        let flat = Rc::new(flatten(
+            &runs_of(view.parser.text()),
+            &colors,
+            &Fonts::default(),
+            FontWeight::NORMAL,
+            colors.text,
+            &[],
+        ));
+        let ctx = Ctx::new(
+            "message",
+            &colors,
+            Metrics::USER_MESSAGE,
+            TranscriptSelection::default(),
+        )
+        .with_pasted_text_payloads(Rc::new(vec![MessageAtom {
+            label: "Pasted text".into(),
+            payload: "tiny".into(),
+            session_id: None,
+        }]));
+        let cached = ctx.with_cache(&view);
+        let copy = cached.copy_spec(&flat);
+        let mut selection = super::super::selection::Selection::default();
+        selection.begin_with_span(
+            TextKey::new("message", 0),
+            Rc::from(flat.text.as_ref()),
+            0..flat.text.len(),
+            copy.clone(),
+        );
+        let rich = ChipContent::from_clipboard(&selection.clipboard_item().unwrap()).unwrap();
+        assert_eq!(
+            rich.text,
+            format!("before {} after", crate::input::INLINE_ATOM_MARKER)
+        );
+        assert_eq!(
+            rich.atoms,
+            vec![(
+                7,
+                ClipboardAtom::PastedText {
+                    text: "tiny".into(),
+                    category: None
+                }
+            )]
+        );
+        let chip = &copy.chips[0].0;
+        selection.begin_with_span(
+            TextKey::new("message", 0),
+            Rc::from(flat.text.as_ref()),
+            chip.clone(),
+            copy.clone(),
+        );
+        assert_eq!(
+            ChipContent::from_clipboard(&selection.clipboard_item().unwrap())
+                .unwrap()
+                .atoms
+                .len(),
+            1
+        );
+        selection.begin_with_span(
+            TextKey::new("message", 0),
+            Rc::from(flat.text.as_ref()),
+            chip.start..chip.start + flat.text[chip.start..].chars().next().unwrap().len_utf8(),
+            copy,
+        );
+        assert!(ChipContent::from_clipboard(&selection.clipboard_item().unwrap()).is_none());
     }
 
     #[test]

@@ -51,7 +51,7 @@ Bindings with direct-command counterparts:
   speak(parts | "utterance"), browse(url[, title]), terminal(title,cwd[,command])
   upsertPersona(#{name,markdown,id?,pinnedFiles?,permissions?,icon?,defaultPurpose?})
   setEmployeeIcon(sessionId, icon | ()), rename(name), renameEmployee(sessionId,name), regenerateAvatar([sessionId])
-  memory(#{type:TYPE,bucket,...}) — listBuckets/createBucket/overview/record/submitSummary/scan/zoomBucket; content operations name the bucket.
+  memory(#{type:TYPE,bucket,...}) — listBuckets/createBucket/overview/record (propose)/confirm/submitSummary/scan/zoomBucket; content operations name the bucket.
   automation(#{type:TYPE,...}) — list/create/update/delete/pause/resume
   help() — runtime binding help
 
@@ -80,6 +80,12 @@ fn group(path: &str) -> &str {
 
 fn authority(path: &str) -> &str {
     match path {
+        "boss counsel handoff" => {
+            "Counsel-only, during a human turn with an explicit handoff instruction"
+        }
+        p if p.starts_with("boss counsel ") => {
+            "Counsel chat or the human only; approving, deferring, and dismissing require the client’s human controls, and delivering an approval is Counsel’s alone"
+        }
         p if p.starts_with("boss instructions ") => {
             "Only the live Boss chat or a human; employees and planning sessions cannot modify user obligations"
         }
@@ -101,7 +107,7 @@ fn authority(path: &str) -> &str {
             "Context-dependent; employees need granted knowledge or their own artifact access"
         }
         p if p.starts_with("boss memory ") || p.starts_with("memory ") => {
-            "Context-dependent; only granted buckets; create/migrate are Boss-only"
+            "Only granted buckets; creation and migration preview are Boss-only; direct import is human-only"
         }
         p if p.starts_with("computer ") => {
             "Context-dependent; Computer Use must be enabled and granted; read the bundled Computer Use skill first; existing approval prompts apply"
@@ -133,6 +139,21 @@ fn authority(path: &str) -> &str {
 
 fn purpose(path: &str) -> &str {
     match path {
+        "boss counsel view" => {
+            "Inspect Counsel recommendations, decisions, and linked Boss handoffs."
+        }
+        "boss counsel propose" => {
+            "Draft a source-backed next action for the human to review and send to Boss."
+        }
+        "boss counsel send" => {
+            "Deliver a human-approved recommendation to Boss; Counsel-only, bound to the approved revision."
+        }
+        "boss counsel handoff" => {
+            "Relay a direct instruction from the human to Boss, including during an active turn."
+        }
+        "boss counsel complete" => {
+            "Record concrete reported evidence that an approved instruction is complete."
+        }
         "boss instructions list" => {
             "Inspect active instructions, review candidates, sources and retirement evidence."
         }
@@ -171,7 +192,7 @@ fn purpose(path: &str) -> &str {
         "boss report-blocker" => "Interrupt your supervisor only when external action is needed.",
         "boss plan finalize" => "Freeze the human-approved plan and create its tracked work items.",
         "boss deliverable publish" => {
-            "Store a durable Boss-facing artifact or reference for review."
+            "Store a durable Boss-facing artifact or reference for review; prints the stored record and its deliverable:<id> artifact reference."
         }
         "boss open" => "Human-only: open or configure the Boss session.",
         "create" => "Create a separate task only when the human requests it.",
@@ -294,6 +315,9 @@ fn purpose(path: &str) -> &str {
         }
         p if p.starts_with("boss persona ") => {
             "Inspect or maintain role instructions and shipped-default state."
+        }
+        "memory confirm" | "boss memory confirm" => {
+            "Save the exact proposal after reconsidering the returned memory rules; only its original caller can confirm it."
         }
         "memory record" | "boss memory record" => waku_protocol::boss::MEMORY_RECORDING_GUIDANCE,
         p if p.contains(" memory ") || p.starts_with("memory ") => {

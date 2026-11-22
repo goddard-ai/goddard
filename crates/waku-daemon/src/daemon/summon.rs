@@ -107,6 +107,9 @@ impl WakuBackend {
     }
 
     pub(super) fn deliver_pending_agent_prompts(&self) {
+        let Ok(_admission) = self.idle_shutdown.enter() else {
+            return;
+        };
         let events = self.event_source.lock().clone();
         for target in self.agent_queue_targets() {
             if self.session_quarantined(target) {
@@ -199,6 +202,7 @@ impl WakuBackend {
     /// lineage and only marks — a refresh can no longer stack a duplicate
     /// reminder on every pass.
     pub(super) fn deliver_outcome_reminders(&self, now: u64) -> anyhow::Result<()> {
+        let _admission = self.idle_shutdown.enter()?;
         let due = self.boss.scan_outcome_reminders(now)?;
         if due.is_empty() {
             return Ok(());
@@ -208,33 +212,20 @@ impl WakuBackend {
         };
         let session = self.boss_active_alias(session);
         let document = self.boss.document();
-        let lines: Vec<String> = due
+        let references: Vec<_> = due
             .iter()
             .filter_map(|id| document.outcomes.iter().find(|task| task.id == *id))
-            .map(|task| {
-                let latest = task
-                    .handoffs
-                    .last()
-                    .map(|handoff| format!("latest: {}", handoff.intent))
-                    .unwrap_or_else(|| "no work assigned yet".to_string());
-                let unattended = task
-                    .unattended_since
-                    .map(|since| {
-                        outcome_reminder_duration(
-                            now.saturating_sub(since.max(task.last_activity_at)),
-                        )
-                    })
-                    .unwrap_or_else(|| "a while".to_string());
-                format!("• {} — unattended {unattended}; {latest}", task.outcome)
+            .filter_map(|task| {
+                Some(crate::model::OutcomeReminderTask {
+                    task_id: task.id,
+                    unattended_since: task.unattended_since?,
+                    last_activity_at: task.last_activity_at,
+                })
             })
             .collect();
-        if lines.is_empty() {
+        let Some(prompt) = outcome_reminder_prompt(&document, &references, now) else {
             return Ok(());
-        }
-        let prompt = format!(
-            "These tasks have no active assignment or recorded waiting reason:\n{}",
-            lines.join("\n")
-        );
+        };
         let batch = outcome_reminder_batch(&document.outcomes, &due);
         let events = self.event_source.lock().clone();
         // A parked chip or a delivered row on any generation of this Boss
@@ -243,15 +234,10 @@ impl WakuBackend {
         let result = if self.boss_lineage_message_landed(session, batch) {
             Ok(())
         } else {
-            self.queue_agent_prompt_with_id(
-                session,
-                prompt,
-                None,
-                false,
-                Some(batch),
-                None,
-                &events,
-            )
+            let mut message = crate::model::QueuedMessage::agent(prompt, None);
+            message.id = batch;
+            message.outcome_reminder = references;
+            self.queue_agent_message(session, message, &events)
         };
         match result {
             Ok(()) => self.boss.mark_outcomes_reminded(&due, now),
@@ -320,6 +306,9 @@ impl WakuBackend {
     /// Repeat while progress is made so a released slot can admit another
     /// ticket without waiting for the next wakeup.
     pub(crate) fn run_summon_scheduler(&self) {
+        let Ok(_admission) = self.idle_shutdown.enter() else {
+            return;
+        };
         if self.memory_guard.host_critical() {
             return;
         }
@@ -503,7 +492,15 @@ impl WakuBackend {
         &self,
         employee: &waku_protocol::boss::BossEmployee,
     ) -> anyhow::Result<bool> {
-        if self.memory_guard.host_critical() || self.memory_guard.paused(employee.session_id) {
+        if let Err(error) = self.memory_guard.check_admission(employee.session_id) {
+            // A held fence denies like any capacity check — the ticket
+            // records the same truthful reason instead of waiting blank.
+            self.boss.record_blocked(
+                employee.session_id,
+                vec![waku_protocol::boss::AdmissionBlocker::HostResources {
+                    detail: format!("{error:#}"),
+                }],
+            )?;
             return Ok(false);
         }
         let lifecycle = self.runtime_lifecycles.session(employee.session_id);
@@ -588,7 +585,17 @@ impl WakuBackend {
                 return Ok(true);
             }
         }
-        if let Err(error) = self.boss.validate_plan_binding(employee) {
+        // A requeue behind an already-started session is a revival, not
+        // a first dispatch: the assignment's scope gates settled when it
+        // first admitted, so a since-closed outcome cannot strand the
+        // prompts that re-admitted the record.
+        let revival = self.employee_session_started(session_id);
+        let binding_check = if revival {
+            self.boss.validate_revived_plan_binding(employee)
+        } else {
+            self.boss.validate_plan_binding(employee)
+        };
+        if let Err(error) = binding_check {
             self.record_queued_plan_failure(employee, error.clone())?;
             self.boss.record_blocked(
                 session_id,
@@ -612,8 +619,11 @@ impl WakuBackend {
         // A linked assignment holds at the queue head until its readiness
         // lands — the finishing assignment waits on settled siblings
         // and handoff decisions, an ordinary one on its prerequisites.
-        // Each pass re-evaluates; the hold reads as ordinary Waiting work.
-        if !self.boss.assignment_ready(employee) {
+        // Readiness orders a first dispatch only; a revival already began
+        // the assignment, so a settled outcome cannot strand its parked
+        // prompts. Each pass re-evaluates; the hold reads as ordinary
+        // Waiting work.
+        if !revival && !self.boss.assignment_ready(employee) {
             self.boss.record_blocked(
                 session_id,
                 vec![waku_protocol::boss::AdmissionBlocker::OutcomeWait {
@@ -662,9 +672,12 @@ impl WakuBackend {
             self.boss.record_blocked(session_id, attempt.blockers)?;
             return Ok(false);
         }
-        let dispatching =
-            self.boss
-                .mark_dispatching(session_id, ticket.generation, Some(reservation_id));
+        let dispatching = self.boss.mark_dispatching(
+            session_id,
+            ticket.generation,
+            Some(reservation_id),
+            revival,
+        );
         let dispatching = match dispatching {
             Ok(marked) => marked,
             Err(error) => {
@@ -799,6 +812,18 @@ impl WakuBackend {
         }
     }
 
+    /// Whether the employee's session already ran — the read that marks a
+    /// requeued ticket as a revival rather than a first dispatch. Stored
+    /// sessions and hydrated transcripts count; an unstarted shell or a
+    /// missing record does not.
+    fn employee_session_started(&self, session_id: Uuid) -> bool {
+        self.task_state
+            .lock()
+            .sessions
+            .iter()
+            .any(|session| session.id == session_id && session.has_started())
+    }
+
     /// The persisted launch for a granted ticket. Fresh summons adopt the
     /// envelope — assignment plus every prompt parked while queued — onto
     /// the shell and start the provider; re-admitted employees (revival,
@@ -813,12 +838,17 @@ impl WakuBackend {
         ticket: &waku_protocol::boss::SummonTicket,
     ) -> anyhow::Result<bool> {
         let session_id = employee.session_id;
+        self.verify_local_retry_dispatch(session_id)?;
         self.consume_transferred_prompts(session_id)?;
         let current = self
             .boss
             .employee(session_id)
             .ok_or_else(|| anyhow!("employee is missing"))?;
-        self.boss.validate_plan_binding(&current)?;
+        if self.employee_session_started(session_id) {
+            self.boss.validate_revived_plan_binding(&current)?;
+        } else {
+            self.boss.validate_plan_binding(&current)?;
+        }
         anyhow::ensure!(
             current.plan_binding == employee.plan_binding,
             "assignment binding changed before dispatch"
@@ -844,6 +874,13 @@ impl WakuBackend {
             state.sessions[index].has_started()
         };
         if started {
+            let document = self.boss.document();
+            let chain_context = document.chains.iter().find_map(|chain| {
+                let step = &chain.steps[chain.current_step];
+                let attempt = step.attempts.last()?;
+                (attempt.employee_id == Some(session_id) && step.attempts.len() > 1)
+                    .then(|| self.compose_chain_prompt(chain, chain.current_step, attempt, None))
+            });
             // A requeue (a setModel reticket, a prompt-parked revival) can
             // carry a selection the session record predates — the ticket is
             // the committed target, so provider/model/effort sync here and
@@ -935,6 +972,12 @@ impl WakuBackend {
                 session.provider = ticket.provider;
                 session.model = Some(ticket.model.clone());
                 session.reasoning_effort = ticket.reasoning_effort.clone();
+                if let Some(context) = chain_context {
+                    let previous = session.pending_provider_context.take().unwrap_or_default();
+                    session.pending_provider_context = Some(format!(
+                        "{previous}\n\nThe user resumed this employee. This is a new chain attempt; use the following attempt identity instead of earlier instructions.\n{context}"
+                    ));
+                }
                 // The shell keeps its last admission's terminal status past
                 // requeue — a failed verdict would ride the sidebar row
                 // through dispatch until the next prompt lands, so the
@@ -1131,6 +1174,9 @@ impl WakuBackend {
                 format!("{:?}", employee.lifecycle()).to_lowercase()
             );
         }
+        if let Some(adopter) = adopter {
+            self.verify_retry_repair_adoption(&state, &adopt, owner_id, adopter)?;
+        }
         if let Some(adopter) = adopter
             && let SessionWorkspace::Worktree { adopted_by, .. } =
                 &mut state.sessions[index].workspace
@@ -1322,6 +1368,7 @@ impl WakuBackend {
     /// reverts to the queue — replaying it would double-dispatch, and
     /// reporting it would mourn a job that never ran.
     pub(crate) fn recover_boss_employee(&self, session_id: Uuid) -> anyhow::Result<()> {
+        let _admission = self.idle_shutdown.enter()?;
         use waku_protocol::boss::EmployeeLifecycle;
         let Some(entry) = self.boss.employee(session_id) else {
             return Ok(());
@@ -1555,27 +1602,58 @@ impl WakuBackend {
         employee.plan_id = plan_binding.as_ref().map(|binding| binding.plan_id);
         employee.item_id = item;
         employee.plan_binding = plan_binding;
-        // The task shell lands before the roster does — a client that
-        // opens the new employee immediately finds the assignment's
-        // session, still unstarted: no worktree, no runtime, no claims.
-        self.create_employee_shell(&employee, &resolved, &ticket)?;
-        let session_id = employee.session_id;
-        // Outcome validation and publication share the employee's admission
-        // transaction, including a new parent and its finishing designation.
-        let employee = match self.boss.enqueue_assignment(
-            employee,
-            ticket,
-            new_outcome,
-            finishes_outcome,
-            after_success,
-            prerequisites,
-        ) {
-            Ok(employee) => employee,
-            Err(error) => {
-                self.remove_session_shell(session_id);
-                return Err(error);
-            }
+        let employee = if self.boss.uses_database() {
+            let session_id = employee.session_id;
+            let session = self.employee_session_shell(&employee, &resolved, &ticket)?;
+            let employee = {
+                let mut state = self.task_state.lock();
+                state.push_session(session);
+                let batch = self.task_store.save_batch(&mut state);
+                let mut host = self.task_store.session_commit(&batch);
+                match self.boss.enqueue_assignment_with(
+                    employee,
+                    ticket,
+                    new_outcome,
+                    finishes_outcome,
+                    after_success,
+                    prerequisites,
+                    Some(&mut host),
+                ) {
+                    Ok(employee) => {
+                        state.unmark_sessions_dirty(&batch.dirty_ids);
+                        employee
+                    }
+                    Err(error) => {
+                        state.sessions.retain(|session| session.id != session_id);
+                        state.unmark_sessions_dirty(&std::collections::HashSet::from([session_id]));
+                        return Err(error);
+                    }
+                }
+            };
+            self.boss.notify_session_commit();
+            employee
+        } else {
+            self.create_employee_shell(&employee, &resolved, &ticket)?;
+            let session_id = employee.session_id;
+            // Outcome validation and publication share the employee's admission
+            // transaction, including a new parent and its finishing designation.
+            let employee = match self.boss.enqueue_assignment(
+                employee,
+                ticket,
+                new_outcome,
+                finishes_outcome,
+                after_success,
+                prerequisites,
+            ) {
+                Ok(employee) => employee,
+                Err(error) => {
+                    self.remove_session_shell(session_id);
+                    return Err(error);
+                }
+            };
+            employee
         };
+        let session_id = employee.session_id;
         self.post_summon_marker(supervisor, &employee, events)?;
         self.wake_summon_queue();
         Ok((session_id, true))
@@ -1773,6 +1851,19 @@ impl WakuBackend {
         resolved: &ResolvedAgentSelection,
         ticket: &waku_protocol::boss::SummonTicket,
     ) -> anyhow::Result<()> {
+        let session = self.employee_session_shell(employee, resolved, ticket)?;
+        let mut state = self.task_state.lock();
+        state.push_session(session);
+        self.task_store.save(&mut state)?;
+        Ok(())
+    }
+
+    fn employee_session_shell(
+        &self,
+        employee: &waku_protocol::boss::BossEmployee,
+        resolved: &ResolvedAgentSelection,
+        ticket: &waku_protocol::boss::SummonTicket,
+    ) -> anyhow::Result<AgentSession> {
         let project_id = match self.chain_employee_project(employee)? {
             Some((id, _)) => id,
             None => {
@@ -1795,10 +1886,7 @@ impl WakuBackend {
         session.reasoning_effort = resolved.reasoning_effort.clone();
         session.service_tier = resolved.service_tier.clone();
         session.context_window = resolved.context_window.clone();
-        let mut state = self.task_state.lock();
-        state.push_session(session);
-        self.task_store.save(&mut state)?;
-        Ok(())
+        Ok(session)
     }
 
     /// Drop a task shell whose admission never committed — best-effort
@@ -1896,6 +1984,14 @@ impl WakuBackend {
                 );
                 return Ok(false);
             }
+            if let Some(reason) = self
+                .boss
+                .document()
+                .employee_prompt_control(session_id)
+                .reason
+            {
+                bail!("{reason}");
+            }
             anyhow::ensure!(
                 employee.lifecycle() != EmployeeLifecycle::Finishing,
                 "employee is finishing; try again once it has settled"
@@ -1916,7 +2012,7 @@ impl WakuBackend {
                     Ok(true)
                 }
                 EmployeeLifecycle::Expired => {
-                    self.requeue_employee(session_id, |ticket, started| {
+                    self.requeue_employee(session_id, None, |ticket, started| {
                         if started {
                             ticket.prompt.clear();
                             ticket.pending_prompts.push(prompt.clone());
@@ -1946,9 +2042,23 @@ impl WakuBackend {
                             AgentPromptDelivery::Interrupt | AgentPromptDelivery::Steer,
                             Some(driver),
                         ) => {
-                            self.send_agent_steer(&driver, session_id, prompt.clone(), None);
+                            self.send_agent_steer_with_id(
+                                &driver,
+                                session_id,
+                                prompt.clone(),
+                                None,
+                                Some(submission_id),
+                            );
                         }
-                        _ => self.queue_agent_prompt(session_id, prompt.clone(), None, events)?,
+                        _ => self.queue_agent_prompt_with_id(
+                            session_id,
+                            prompt.clone(),
+                            None,
+                            false,
+                            Some(submission_id),
+                            None,
+                            events,
+                        )?,
                     }
                     self.boss.update_employee_ticket(session_id, |ticket| {
                         if let Some(receipt) = ticket
@@ -1993,10 +2103,18 @@ impl WakuBackend {
             let lifecycle = self.runtime_lifecycles.session(session_id);
             let _owner = lifecycle.lock();
             self.boss.require_control(caller, session_id)?;
-            Ok(
-                self.boss.employee_lifecycle(session_id) == Some(EmployeeLifecycle::Queued)
-                    && self.boss.force_start_employee(session_id)?,
-            )
+            if self.boss.employee_lifecycle(session_id) != Some(EmployeeLifecycle::Queued) {
+                return Ok(false);
+            }
+            // A human press is the explicit continue the memory guard's
+            // pause fence exists to wait for — the same acknowledgment a
+            // task `Start` or a human `resume` already carries. A boss or
+            // supervisor press keeps the fence and reports the wait reason;
+            // admission itself never clears it.
+            if caller.is_none() {
+                self.memory_guard.user_resume(session_id)?;
+            }
+            self.boss.force_start_employee(session_id)
         })?;
         if queued {
             if let Some(employee) = self.boss.employee(session_id) {
@@ -2190,7 +2308,7 @@ impl WakuBackend {
                 .employee_including_retired(session_id)
                 .and_then(|employee| employee.expiry.map(|expiry| expiry.cause))
                 .unwrap_or(waku_protocol::boss::ExpiryCause::Finished);
-            self.requeue_employee(session_id, |ticket, started| {
+            self.requeue_employee(session_id, caller, |ticket, started| {
                 ticket.provider = provider;
                 ticket.model = model_id.clone();
                 ticket.reasoning_effort = effort.clone();
@@ -2326,7 +2444,7 @@ impl WakuBackend {
         }
         let removed = self.remove_runtime(session_id, None, false);
         drop_detached(removed);
-        self.requeue_employee(session_id, |ticket, started| {
+        self.requeue_employee(session_id, caller, |ticket, started| {
             ticket.provider = provider;
             ticket.model = model_id.clone();
             ticket.reasoning_effort = effort.clone();
@@ -2351,15 +2469,26 @@ impl WakuBackend {
     pub(super) fn requeue_employee(
         &self,
         session_id: Uuid,
+        caller: Option<Uuid>,
         adjust: impl FnOnce(&mut waku_protocol::boss::SummonTicket, bool),
     ) -> anyhow::Result<()> {
         let lifecycle = self.runtime_lifecycles.session(session_id);
         let _owner = lifecycle.lock();
         // Role validation precedes the parked-prompt move so a rejected
         // resume leaves the queue mirror untouched.
+        // Human intervention may reopen the latest attempt; autonomous senders
+        // retain chain retry limits and reconciliation requirements.
+        if caller.is_some() && chain_exec::chain_binding(&self.boss, session_id).is_some() {
+            bail!("chain attempts requeue through chain controls; direct resume requires a human");
+        }
         self.boss.ensure_employee_role(session_id)?;
-        if chain_exec::chain_binding(&self.boss, session_id).is_some() {
-            bail!("chain attempts requeue through chain controls");
+        if let Some(reason) = self
+            .boss
+            .document()
+            .employee_prompt_control(session_id)
+            .reason
+        {
+            bail!("{reason}");
         }
         let (base, started) = self.ticket_base_for(session_id)?;
         let already_transferred = self
@@ -2458,18 +2587,17 @@ impl WakuBackend {
     /// partial work before any parked instruction runs, and the parked
     /// set drains behind it in order. A live record refuses: prompts
     /// reach it directly.
-    pub(super) fn resume_employee(&self, session_id: Uuid) -> anyhow::Result<()> {
+    pub(super) fn resume_employee(
+        &self,
+        session_id: Uuid,
+        caller: Option<Uuid>,
+    ) -> anyhow::Result<()> {
         let employee = self
             .boss
             .employee_including_retired(session_id)
             .ok_or_else(|| anyhow!("{session_id} is not a Boss employee"))?;
         if !employee.expired() {
             bail!("employee {session_id} is still live — prompt it instead of resuming");
-        }
-        if chain_exec::chain_binding(&self.boss, session_id).is_some() {
-            bail!(
-                "chain attempts resume through chain controls — boss chain control resume or retry"
-            );
         }
         let expiry = employee.expiry.as_ref();
         let cause = expiry
@@ -2482,7 +2610,7 @@ impl WakuBackend {
         if let Some(question) = expiry.and_then(|expiry| expiry.pending_question.as_deref()) {
             prompt.push_str(&format!(" Your unanswered question was: \"{question}\""));
         }
-        self.requeue_employee(session_id, |ticket, _started| {
+        self.requeue_employee(session_id, caller, |ticket, _started| {
             ticket.pending_prompts.insert(0, prompt.clone());
             ticket.resume_count = ticket.resume_count.saturating_add(1);
             ticket.last_resumed_cause = Some(cause);
@@ -2800,6 +2928,69 @@ pub(super) fn outcome_reminder_batch(
         material.extend_from_slice(&reminded_at.to_be_bytes());
     }
     Uuid::new_v5(&Uuid::NAMESPACE_URL, &material)
+}
+
+pub(super) const OUTCOME_REMINDER_HEADER: &str =
+    "These tasks have no active assignment or recorded waiting reason:\n";
+
+/// Rebuild from current state, restricted to the unattended periods this
+/// notification covers. A later period owns its own grace and reminder.
+pub(super) fn outcome_reminder_prompt(
+    document: &waku_protocol::boss::BossState,
+    references: &[crate::model::OutcomeReminderTask],
+    now: u64,
+) -> Option<String> {
+    let lines: Vec<_> = references
+        .iter()
+        .filter_map(|reference| {
+            let task = document
+                .outcomes
+                .iter()
+                .find(|task| task.id == reference.task_id)?;
+            if task.unattended_since != Some(reference.unattended_since)
+                || !task.reminder_eligible(&document.employees, &document.chains, now)
+                || task.last_activity_at != reference.last_activity_at
+            {
+                return None;
+            }
+            // An unhandled chain exception is what keeps this outcome
+            // eligible — name the stall first, then the latest handoff
+            // intent, before falling back to ownership labels.
+            let latest = document
+                .chains
+                .iter()
+                .filter(|chain| chain.request.outcome_id == task.id)
+                .filter_map(|chain| chain.attention.as_ref())
+                .filter(|attention| attention.handled_at.is_none())
+                .next_back()
+                .map(|attention| format!("chain paused — {}", attention.reason))
+                .or_else(|| {
+                    task.handoffs
+                        .last()
+                        .map(|handoff| format!("latest: {}", handoff.intent))
+                })
+                .unwrap_or_else(|| {
+                    if task.assignments.is_empty()
+                        && !document
+                            .chains
+                            .iter()
+                            .any(|chain| chain.request.outcome_id == task.id)
+                    {
+                        "no work assigned yet".to_string()
+                    } else {
+                        "no live work".to_string()
+                    }
+                });
+            let unattended = outcome_reminder_duration(
+                now.saturating_sub(reference.unattended_since.max(task.last_activity_at)),
+            );
+            Some(format!(
+                "• {} — unattended {unattended}; {latest}",
+                task.outcome
+            ))
+        })
+        .collect();
+    (!lines.is_empty()).then(|| format!("{OUTCOME_REMINDER_HEADER}{}", lines.join("\n")))
 }
 
 /// A compact "for 2h 5m"-style label for a reminder's unattended stretch.

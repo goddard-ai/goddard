@@ -38,6 +38,14 @@ pub(crate) enum StableLink {}
 
 #[cfg(not(unix))]
 impl StableLink {
+    pub(crate) fn wake_configuration_wait(&self) {
+        match *self {}
+    }
+
+    pub(crate) fn initial_configuration_confirmed(&self) -> bool {
+        match *self {}
+    }
+
     pub(crate) fn require_available(&self) -> anyhow::Result<()> {
         match *self {}
     }

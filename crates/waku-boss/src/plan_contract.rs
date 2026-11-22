@@ -262,6 +262,16 @@ impl BossService {
         validate_binding(&self.state.lock(), employee)
     }
 
+    /// Binding validation for a revival requeue or a live runtime
+    /// dispatch. The first dispatch's scope gates — a live outcome, an
+    /// open plan, a pending item — already ran and describe work that
+    /// has settled, not authority revoked, so a since-closed record
+    /// cannot strand the prompts that re-admitted the employee. Owner,
+    /// links, revision, and digest still verify.
+    pub fn validate_revived_plan_binding(&self, employee: &BossEmployee) -> ContractResult<()> {
+        validate_revived_binding(&self.state.lock(), employee)
+    }
+
     /// Keep authority validation and a nonblocking runtime dispatch in one
     /// state lease. Revocation/rebinding cannot win a check/send race. The
     /// callback must only enqueue provider input and must not call Boss APIs.
@@ -317,7 +327,7 @@ impl BossService {
                 "runtime assignment authority changed; review a fresh attempt",
             ));
         }
-        validate_binding(&state, current)?;
+        validate_revived_binding(&state, current)?;
         Ok(dispatch())
     }
 
@@ -332,15 +342,27 @@ impl BossService {
     }
 }
 
+fn assignment_outcome<'a>(
+    state: &'a BossState,
+    outcome_id: Option<Uuid>,
+) -> ContractResult<Option<&'a BossOutcome>> {
+    outcome_id
+        .map(|id| {
+            state
+                .outcomes
+                .iter()
+                .find(|outcome| outcome.id == id)
+                .ok_or_else(|| {
+                    failure(PlanFailureKind::Lifecycle, "assignment outcome is missing")
+                })
+        })
+        .transpose()
+}
+
 fn attached_plan(state: &BossState, outcome_id: Option<Uuid>) -> ContractResult<Option<Uuid>> {
-    let Some(id) = outcome_id else {
+    let Some(outcome) = assignment_outcome(state, outcome_id)? else {
         return Ok(None);
     };
-    let outcome = state
-        .outcomes
-        .iter()
-        .find(|outcome| outcome.id == id)
-        .ok_or_else(|| failure(PlanFailureKind::Lifecycle, "assignment outcome is missing"))?;
     if outcome.terminal() {
         return Err(failure(
             PlanFailureKind::Lifecycle,
@@ -498,13 +520,40 @@ fn approved_revision<'a>(
 }
 
 pub(super) fn validate_binding(state: &BossState, employee: &BossEmployee) -> ContractResult<()> {
-    let attached = attached_plan(
+    validate_binding_mode(state, employee, true)
+}
+
+/// The revival variant drops only the first-dispatch scope gates — a
+/// settled outcome, a closed plan, or a finished item describes work
+/// that already ran, not revoked authority. Requeued revivals and live
+/// runtime dispatches still verify binding owner, links, revision, and
+/// digest through here.
+pub(super) fn validate_revived_binding(
+    state: &BossState,
+    employee: &BossEmployee,
+) -> ContractResult<()> {
+    validate_binding_mode(state, employee, false)
+}
+
+fn validate_binding_mode(
+    state: &BossState,
+    employee: &BossEmployee,
+    first_dispatch: bool,
+) -> ContractResult<()> {
+    let outcome = assignment_outcome(
         state,
         employee
             .assignment
             .as_ref()
             .map(|assignment| assignment.outcome_id),
     )?;
+    if first_dispatch && outcome.is_some_and(|outcome| outcome.terminal()) {
+        return Err(failure(
+            PlanFailureKind::Lifecycle,
+            "assignment outcome is closed; reopen it before dispatch",
+        ));
+    }
+    let attached = outcome.and_then(|outcome| outcome.plan_id);
     let Some(binding) = &employee.plan_binding else {
         if employee.plan_id.is_some() || employee.item_id.is_some() || attached.is_some() {
             return Err(failure(
@@ -522,7 +571,9 @@ pub(super) fn validate_binding(state: &BossState, employee: &BossEmployee) -> Co
         ));
     }
     let plan = binding_plan(state, binding)?;
-    validate_scope(plan, employee.item_id)?;
+    if first_dispatch {
+        validate_scope(plan, employee.item_id)?;
+    }
     if employee.assignment_kind == PlanAssignmentKind::Implementation
         || binding.revision_id.is_some()
     {
@@ -1197,6 +1248,97 @@ mod tests {
                 .approved_revisions
                 .len(),
             2
+        );
+    }
+
+    /// The revival variant drops the first-dispatch scope gates — settled
+    /// outcome, closed plan, finished item — while keeping the binding's
+    /// owner, link, revision, and digest verification.
+    #[test]
+    fn revived_binding_skips_settled_scope_but_keeps_integrity() {
+        let fixture = Fixture::new();
+        let plan = fixture.plan("settled", "approved bytes");
+        let plan = fixture.approve(&plan, 1);
+        let outcome = fixture
+            .service
+            .create_outcome(None, "Settled task", "criteria")
+            .unwrap();
+        fixture
+            .service
+            .attach_plan(None, outcome.id, &plan.plan_file)
+            .unwrap();
+        let mut employee = fixture.employee(&plan, PlanAssignmentKind::Implementation);
+        employee.item_id = Some(plan.items[0].id);
+        employee.assignment = fixture
+            .service
+            .assignment_admission(Some(outcome.id), None, false, None, Vec::new(), None)
+            .unwrap();
+        fixture.service.add_employee(employee.clone()).unwrap();
+        fixture
+            .service
+            .set_plan_item_state(None, &plan.plan_file, plan.items[0].id, PlanItemState::Done)
+            .unwrap();
+        assert_eq!(
+            fixture
+                .service
+                .validate_plan_binding(&employee)
+                .unwrap_err()
+                .kind,
+            PlanFailureKind::Item
+        );
+        fixture
+            .service
+            .validate_revived_plan_binding(&employee)
+            .unwrap();
+        fixture
+            .service
+            .set_outcome_state(
+                None,
+                outcome.id,
+                OutcomeState::Cancelled,
+                Some("superseded".into()),
+            )
+            .unwrap();
+        assert_eq!(
+            fixture
+                .service
+                .validate_plan_binding(&employee)
+                .unwrap_err()
+                .kind,
+            PlanFailureKind::Lifecycle
+        );
+        fixture
+            .service
+            .validate_revived_plan_binding(&employee)
+            .unwrap();
+        fixture
+            .service
+            .set_plan_outcome(None, &plan.plan_file, PlanOutcome::Completed)
+            .unwrap();
+        assert_eq!(
+            fixture
+                .service
+                .validate_plan_binding(&employee)
+                .unwrap_err()
+                .kind,
+            PlanFailureKind::Lifecycle
+        );
+        fixture
+            .service
+            .validate_revived_plan_binding(&employee)
+            .unwrap();
+        // Settled scope is the only relaxation: a foreign or tampered
+        // binding still fails the revival check.
+        let mut tampered = employee.plan_binding.clone().unwrap();
+        tampered.content_digest = Some("wrong".into());
+        employee.plan_binding = Some(tampered);
+        assert_eq!(
+            fixture
+                .service
+                .validate_revived_plan_binding(&employee)
+                .unwrap_err()
+                .kind,
+            PlanFailureKind::Integrity
         );
     }
 }

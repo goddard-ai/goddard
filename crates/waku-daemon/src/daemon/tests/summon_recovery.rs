@@ -1,10 +1,19 @@
 use super::*;
 use waku_protocol::boss::{EmployeeLifecycle, NewOutcome};
 
+// These three fixtures deliberately read or obstruct the legacy JSON host.
+// Restart/replay and atomic-admission tests below retain the production SQLite host.
+fn file_summon_test_backend(root: &Path) -> (WakuBackend, Uuid) {
+    let (mut backend, boss) = summon_test_backend(root);
+    backend.boss = Arc::new(crate::boss::BossService::open(root.join("boss")).unwrap());
+    backend.boss.set_session_id(boss).unwrap();
+    (backend, boss)
+}
+
 #[test]
 fn new_outcome_and_finisher_are_published_with_the_employee() {
     let root = std::env::temp_dir().join(format!("summon-atomic-{}", Uuid::new_v4()));
-    let (backend, boss) = summon_test_backend(&root);
+    let (backend, boss) = file_summon_test_backend(&root);
     set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 0, 0);
     let snapshots = Arc::new(Mutex::new(Vec::<waku_protocol::boss::BossState>::new()));
     let saved = snapshots.clone();
@@ -78,7 +87,7 @@ fn new_outcome_and_finisher_are_published_with_the_employee() {
 fn rejected_new_outcome_summons_leave_no_orphan_work() {
     for rejection in ["conflicting intent", "unknown persona", "missing project"] {
         let root = std::env::temp_dir().join(format!("summon-rejection-{}", Uuid::new_v4()));
-        let (backend, boss) = summon_test_backend(&root);
+        let (backend, boss) = file_summon_test_backend(&root);
         let mut operation = summon_op(
             &backend,
             &root,
@@ -138,7 +147,7 @@ fn rejected_new_outcome_summons_leave_no_orphan_work() {
 #[test]
 fn failed_summon_commit_keeps_outcome_and_employee_unadmitted() {
     let root = std::env::temp_dir().join(format!("summon-write-failure-{}", Uuid::new_v4()));
-    let (backend, boss) = summon_test_backend(&root);
+    let (backend, boss) = file_summon_test_backend(&root);
     let state_path = backend.boss.root().join("boss.json");
     let previous = Arc::new(Mutex::new(None));
     let saved = previous.clone();
@@ -240,6 +249,83 @@ fn summon_request_id_survives_retirement_and_restart() {
         .unwrap_err();
     assert!(error.to_string().contains("already used"), "{error:#}");
     assert!(backend.boss.document().employees.is_empty());
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn database_admission_commits_session_employee_and_outcome_together() {
+    let root = std::env::temp_dir().join(format!("summon-shared-{}", Uuid::new_v4()));
+    let (mut backend, boss) = summon_test_backend(&root);
+    backend.boss = Arc::new(
+        crate::boss::BossService::open_database(root.join("boss"), root.join("app.db")).unwrap(),
+    );
+    backend.boss.set_session_id(boss).unwrap();
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 0, 0);
+    let connection = rusqlite::Connection::open(root.join("app.db")).unwrap();
+    connection.execute_batch("CREATE TRIGGER reject_employee BEFORE INSERT ON boss_records WHEN NEW.collection='employees' BEGIN SELECT RAISE(ABORT, 'admission failure'); END;").unwrap();
+    let mut operation = summon_op(
+        &backend,
+        &root,
+        "atomic admission",
+        ProviderKind::Codex,
+        Some("gpt-5.5"),
+    );
+    if let BossOperation::Summon {
+        new_outcome,
+        finishes_outcome,
+        ..
+    } = &mut operation
+    {
+        *new_outcome = Some(NewOutcome {
+            outcome: "atomic outcome".into(),
+            success_criteria: "both records exist".into(),
+        });
+        *finishes_outcome = true;
+    }
+    let previous_sessions = backend.task_state.lock().sessions.len();
+    assert!(
+        backend
+            .handle_boss_operation(Some(boss), operation.clone(), &EventSink::detached())
+            .is_err()
+    );
+    assert_eq!(backend.task_state.lock().sessions.len(), previous_sessions);
+    assert!(backend.boss.document().employees.is_empty());
+    assert!(backend.boss.document().outcomes.is_empty());
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT count(*) FROM sessions WHERE boss_managed=1",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        0
+    );
+    connection
+        .execute_batch("DROP TRIGGER reject_employee;")
+        .unwrap();
+    let BossResult::Summoned { session_id, .. } = backend
+        .handle_boss_operation(Some(boss), operation, &EventSink::detached())
+        .unwrap()
+    else {
+        panic!("expected admission")
+    };
+    let loaded = StateStore::daemon(root.join("app.db")).load().unwrap();
+    assert!(
+        loaded
+            .sessions
+            .iter()
+            .any(|session| session.id == session_id)
+    );
+    let reopened =
+        crate::boss::BossService::open_database(root.join("boss"), root.join("app.db")).unwrap();
+    assert_eq!(
+        reopened.document().outcomes[0].finishing_assignment,
+        Some(session_id)
+    );
+    assert!(reopened.employee(session_id).is_some());
+    drop(connection);
     drop(backend);
     std::fs::remove_dir_all(root).unwrap();
 }

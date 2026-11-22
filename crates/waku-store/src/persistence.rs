@@ -18,7 +18,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
+use waku_base::persistence_metrics::WriteMeasurement;
 
 use parking_lot::Mutex;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
@@ -34,12 +35,17 @@ use crate::model::{
     RuntimeEventCursor, RuntimeMode, SessionPlanning, SessionWorkspace, TranscriptNotice,
 };
 use crate::theme::ThemeSettings;
+use waku_protocol::TurnCheckpointIdentity;
 use waku_protocol::computer_use::ComputerAppGrant;
 use waku_protocol::custom_commands::CustomCommand;
 pub use waku_protocol::persistence::{
     ComposerDraft, ComposerDraftAttachment, ComposerDraftChange, ComposerDraftKey,
     ComposerDraftTarget, ComposerDrafts, HistoryMessageMatch, SessionMessageMatch,
     SessionMessageSearchScope,
+};
+use waku_protocol::transcript::{
+    TranscriptFindRequest, TranscriptFindResult, TranscriptPayload, TranscriptPayloadField,
+    TranscriptWindow, TranscriptWindowTarget,
 };
 
 const STATE_VERSION: u32 = 5;
@@ -384,6 +390,11 @@ pub struct PersistedState {
     pub subagents_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
     pub boss_experiment_enabled: bool,
+    /// Counsel experiment flag mirrored from daemon settings. Counsel rides
+    /// on the Boss experiment — both flags must be on — and unlike Boss it
+    /// defaults off in every build, development included.
+    #[serde(default)]
+    pub counsel_experiment_enabled: bool,
     /// Boss rotation policy mirrored from daemon settings.
     #[serde(default)]
     pub boss_rotation_disabled: bool,
@@ -453,6 +464,11 @@ impl PersistedState {
     /// snapshot. A session re-dirtied afterwards keeps its flag.
     pub fn unmark_sessions_dirty(&mut self, ids: &HashSet<Uuid>) {
         self.dirty_sessions.retain(|id| !ids.contains(id));
+    }
+
+    /// Whether the next save batch will include this session's changes.
+    pub fn is_session_dirty(&self, id: Uuid) -> bool {
+        self.dirty_sessions.contains(&id)
     }
 
     pub fn push_session(&mut self, session: AgentSession) {
@@ -542,6 +558,7 @@ impl PersistedState {
             custom_commands: Vec::new(),
             subagents_enabled: default_experiment_enabled(),
             boss_experiment_enabled: default_experiment_enabled(),
+            counsel_experiment_enabled: false,
             boss_rotation_disabled: false,
             boss_rotation_context_threshold: 0.75,
             employee_chat_search_days: default_employee_chat_search_days(),
@@ -701,6 +718,7 @@ impl PersistedState {
             custom_commands: self.custom_commands.clone(),
             subagents_enabled: self.subagents_enabled,
             boss_experiment_enabled: self.boss_experiment_enabled,
+            counsel_experiment_enabled: self.counsel_experiment_enabled,
             boss_rotation_disabled: self.boss_rotation_disabled,
             boss_rotation_context_threshold: self.boss_rotation_context_threshold,
             employee_chat_search_days: self.employee_chat_search_days,
@@ -771,6 +789,7 @@ impl PersistedState {
         self.custom_commands = settings.custom_commands;
         self.subagents_enabled = settings.subagents_enabled;
         self.boss_experiment_enabled = settings.boss_experiment_enabled;
+        self.counsel_experiment_enabled = settings.counsel_experiment_enabled;
         self.boss_rotation_disabled = settings.boss_rotation_disabled;
         self.boss_rotation_context_threshold = settings.boss_rotation_context_threshold;
         self.employee_chat_search_days = settings.employee_chat_search_days;
@@ -962,7 +981,7 @@ fn collect_references(data: &str, scheme: &str, references: &mut HashSet<String>
     }
 }
 
-fn fingerprint(value: &str) -> u64 {
+pub(crate) fn fingerprint(value: &str) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in value.as_bytes() {
         hash ^= u64::from(*byte);
@@ -971,7 +990,7 @@ fn fingerprint(value: &str) -> u64 {
     hash
 }
 
-fn to_io_error(error: impl std::fmt::Display) -> io::Error {
+pub(crate) fn to_io_error(error: impl std::fmt::Display) -> io::Error {
     io::Error::other(error.to_string())
 }
 
@@ -1512,6 +1531,55 @@ pub struct StateStore {
     desktop_files: bool,
 }
 
+struct SessionBatchCommit<'a> {
+    store: &'a StateStore,
+    batch: &'a SaveBatch,
+}
+impl waku_boss::SessionCommit for SessionBatchCommit<'_> {
+    fn database_path(&self) -> &Path {
+        self.store.path()
+    }
+    fn commit(
+        &mut self,
+        write: &mut dyn FnMut(&rusqlite::Transaction<'_>) -> anyhow::Result<()>,
+    ) -> anyhow::Result<()> {
+        self.store
+            .write_batch_joint(self.batch, None, Some(write))?;
+        Ok(())
+    }
+}
+
+// Restore the connection's normal streaming durability policy on success and rollback.
+struct FullSync<'a> {
+    connection: &'a Connection,
+    previous: i64,
+}
+impl<'a> FullSync<'a> {
+    fn new(connection: &'a Connection) -> io::Result<Self> {
+        let previous = connection
+            .pragma_query_value(None, "synchronous", |r| r.get(0))
+            .map_err(to_io_error)?;
+        connection
+            .pragma_update(None, "synchronous", "FULL")
+            .map_err(to_io_error)?;
+        Ok(Self {
+            connection,
+            previous,
+        })
+    }
+}
+impl Drop for FullSync<'_> {
+    fn drop(&mut self) {
+        if self
+            .connection
+            .pragma_update(None, "synchronous", self.previous)
+            .is_err()
+        {
+            eprintln!("could not restore SQLite synchronous policy after shared Boss commit");
+        }
+    }
+}
+
 impl StateStore {
     /// Where the database lives.
     ///
@@ -1829,7 +1897,7 @@ impl StateStore {
                         created_at, updated_at, last_reply_at, archived_at, pinned_at,
                         dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of,
                         agent_rename_allowed, boss_managed, planning, runtime_event_cursor,
-                        friend_peer_id, friend_peer_name, reasoning_effort, config_activation, metadata_revision
+                        friend_peer_id, friend_peer_name, reasoning_effort, config_activation, metadata_revision, history_generation, task_configuration
                  FROM sessions ORDER BY updated_at",
             )
             .map_err(to_io_error)?;
@@ -1863,6 +1931,8 @@ impl StateStore {
                     row.get::<_, Option<String>>(23)?,
                     row.get::<_, Option<String>>(24)?,
                     row.get::<_, i64>(25)?,
+                    row.get::<_, i64>(26)?,
+                    row.get::<_, Option<String>>(27)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -1957,58 +2027,131 @@ impl StateStore {
     /// columns may lag the sessions table (which gets column-only writes), so
     /// callers merge with [`apply_session_detail`] instead of adopting it.
     pub fn load_session_detail(&self, session_id: Uuid) -> io::Result<Option<AgentSession>> {
-        let connection = self.open()?;
-        let id = session_id.to_string();
+        let mut connection = self.open()?;
+        // Keep the detail and message queries on the same WAL snapshot.
+        let transaction = connection.transaction().map_err(to_io_error)?;
+        read_session_detail(&transaction, session_id)
+    }
 
-        let data: Option<String> = connection
+    /// One bounded read of the flattened transcript index. `None` means the
+    /// session has no head row — it predates the index and needs a one-time
+    /// [`StateStore::convert_transcript`] before bounded reads work.
+    pub fn read_transcript_window(
+        &self,
+        session_id: Uuid,
+        target: &TranscriptWindowTarget,
+        max_entries: u32,
+        max_bytes: u32,
+        known_revision: Option<u64>,
+    ) -> io::Result<Option<TranscriptWindow>> {
+        let connection = self.open()?;
+        crate::transcript_index::read_transcript_window(
+            &connection,
+            session_id,
+            target,
+            max_entries,
+            max_bytes,
+            known_revision,
+        )
+    }
+
+    /// Range-read one stored payload field — a message body's continuation
+    /// or an activity's out-of-line bulk field.
+    pub fn read_transcript_payload(
+        &self,
+        session_id: Uuid,
+        entry_id: Uuid,
+        field: TranscriptPayloadField,
+        expected_revision: Option<u64>,
+        offset: u64,
+        limit: u64,
+    ) -> io::Result<Option<TranscriptPayload>> {
+        let connection = self.open()?;
+        crate::transcript_index::read_transcript_payload(
+            &connection,
+            session_id,
+            entry_id,
+            field,
+            expected_revision,
+            offset,
+            limit,
+        )
+    }
+
+    /// Literal search across the whole retained transcript — conversation
+    /// bodies and lazy tool fields — without shipping history to the client.
+    pub fn find_transcript(
+        &self,
+        session_id: Uuid,
+        request: &TranscriptFindRequest,
+    ) -> io::Result<TranscriptFindResult> {
+        let connection = self.open()?;
+        crate::transcript_index::find_transcript(&connection, session_id, request)
+    }
+
+    /// Head revision for cheap "did anything change" checks; `None` when the
+    /// session is unconverted.
+    pub fn transcript_revision(&self, session_id: Uuid) -> io::Result<Option<u64>> {
+        let connection = self.open()?;
+        connection
             .query_row(
-                "SELECT data FROM session_details WHERE session_id = ?1",
-                params![id],
-                |row| row.get(0),
+                "SELECT revision FROM transcript_heads WHERE session_id = ?1",
+                params![session_id.to_string()],
+                |row| row.get::<_, i64>(0),
             )
             .optional()
-            .map_err(to_io_error)?;
-        let Some(data) = data else {
-            return Ok(None);
-        };
-        let mut stored = serde_json::from_str::<AgentSession>(&data).map_err(to_io_error)?;
-        // Detail rows predate worktree names; the list row's migration is
-        // overwritten when the stored workspace is copied over it.
-        stored.workspace.backfill_worktree_name();
+            .map(|revision| revision.map(|revision| revision as u64))
+            .map_err(to_io_error)
+    }
 
+    /// Builds the flattened index for a session saved before the index
+    /// existed. Reads the legacy detail + messages inside one write
+    /// transaction and leaves the head row that marks the session converted.
+    /// Returns false when the session has no detail row at all.
+    pub fn convert_transcript(&self, session_id: Uuid) -> io::Result<bool> {
+        let mut guard = self.storage.lock();
+        let Some(storage) = guard.as_mut() else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "state store is not open",
+            ));
+        };
+        let transaction = storage
+            .connection
+            .unchecked_transaction()
+            .map_err(to_io_error)?;
+        if crate::transcript_index::has_head(&transaction, &session_id.to_string())? {
+            return Ok(true);
+        }
+        let Some(session) = read_session_detail(&transaction, session_id)? else {
+            return Ok(false);
+        };
+        crate::transcript_index::write_transcript_index(&transaction, &session, &[])?;
+        transaction.commit().map_err(to_io_error)?;
+        Ok(true)
+    }
+
+    /// Sessions with a detail row but no index head — the pre-index backlog —
+    /// newest first, so a background sweep converts warm history first.
+    pub fn unconverted_transcripts(&self, limit: usize) -> io::Result<Vec<Uuid>> {
+        let connection = self.open()?;
         let mut statement = connection
             .prepare(
-                "SELECT id, turn_id, role, content, display_content, attachments, atoms,
-                        created_at, streaming, sent_by_task, hidden, notice, context_mark,
-                        report_trigger, reference_context
-                 FROM messages WHERE session_id = ?1 ORDER BY position",
+                "SELECT d.session_id FROM session_details d
+                 LEFT JOIN transcript_heads h ON h.session_id = d.session_id
+                 INNER JOIN sessions s ON s.id = d.session_id
+                 WHERE h.session_id IS NULL
+                 ORDER BY s.updated_at DESC
+                 LIMIT ?1",
             )
             .map_err(to_io_error)?;
-        stored.messages = statement
-            .query_map(params![id], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, Option<String>>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, i64>(7)?,
-                    row.get::<_, i64>(8)?,
-                    row.get::<_, Option<String>>(9)?,
-                    row.get::<_, i64>(10)?,
-                    row.get::<_, Option<String>>(11)?,
-                    row.get::<_, Option<String>>(12)?,
-                    row.get::<_, Option<String>>(13)?,
-                    row.get::<_, Option<String>>(14)?,
-                ))
-            })
+        let ids = statement
+            .query_map(params![limit as i64], |row| row.get::<_, String>(0))
             .map_err(to_io_error)?
-            .filter_map(Result::ok)
-            .filter_map(message_from_row)
+            .filter_map(|row| row.ok())
+            .filter_map(|id| Uuid::parse_str(&id).ok())
             .collect();
-        Ok(Some(stored))
+        Ok(ids)
     }
 
     /// Reads a turn checkpoint from the session detail row without loading
@@ -2048,6 +2191,7 @@ impl StateStore {
         &self,
         session_id: Uuid,
         turn_count: usize,
+        identity: &TurnCheckpointIdentity,
         checkpoint: &Checkpoint,
     ) -> io::Result<Option<Checkpoint>> {
         if checkpoint.turn_count != turn_count {
@@ -2106,12 +2250,21 @@ impl StateStore {
                 "stored checkpoint session id does not match its row",
             ));
         }
+        if session.history_generation != identity.history_generation {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "checkpoint belongs to obsolete task history",
+            ));
+        }
         let Some(turn) = session
             .turns
             .iter_mut()
-            .find(|turn| turn.turn_count == turn_count)
+            .find(|turn| turn.turn_count == turn_count && turn.id == identity.turn_id)
         else {
-            return Ok(None);
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "checkpoint turn was removed or replaced",
+            ));
         };
         if let Some(existing) = turn
             .checkpoint
@@ -2246,7 +2399,7 @@ impl StateStore {
             let data = session_data(&session)?;
             // The EXISTS re-check keeps a session unarchived between the
             // scan and this write from losing payloads it is using again.
-            pruned += transaction
+            let updated = transaction
                 .execute(
                     "UPDATE session_details SET data = ?2
                      WHERE session_id = ?1
@@ -2257,6 +2410,10 @@ impl StateStore {
                     params![session_id, data, archived_before as i64],
                 )
                 .map_err(to_io_error)?;
+            if updated > 0 {
+                pruned += updated;
+                crate::transcript_index::prune_transcript_index(&transaction, &session_id)?;
+            }
         }
         transaction.commit().map_err(to_io_error)?;
         Ok(pruned)
@@ -2329,7 +2486,7 @@ impl StateStore {
         let live_ids = state
             .sessions
             .iter()
-            .filter(|session| session.has_started() && !session.incognito)
+            .filter(|session| (session.has_started() || session.boss_managed) && !session.incognito)
             .map(|session| session.id)
             .collect();
         let persisted = self.persisted_session_ids();
@@ -2342,7 +2499,7 @@ impl StateStore {
             let mut versions = self.metadata_versions.lock();
             versions.retain(|id, _| known_ids.contains(id));
             for session in state.sessions.iter_mut().filter(|session| {
-                session.has_started()
+                (session.has_started() || session.boss_managed)
                     && (dirty.contains(&session.id) || !persisted.contains(&session.id))
             }) {
                 let mut metadata = waku_protocol::task_metadata::TaskMetadata::capture(session);
@@ -2365,7 +2522,7 @@ impl StateStore {
             .sessions
             .iter()
             .filter(|session| {
-                if !session.has_started() || session.incognito {
+                if (!session.has_started() && !session.boss_managed) || session.incognito {
                     return false;
                 }
                 // A skeleton's empty transcript means "not fetched", not
@@ -2404,11 +2561,34 @@ impl StateStore {
         self.write_batch_with_checkpoint(batch, None)
     }
 
+    /// Host for an atomic Boss/session save. The caller retains the task-state
+    /// lock and clears only this batch's dirty marks after a successful commit.
+    pub fn session_commit<'a>(
+        &'a self,
+        batch: &'a SaveBatch,
+    ) -> impl waku_boss::SessionCommit + 'a {
+        SessionBatchCommit { store: self, batch }
+    }
+
     fn write_batch_with_checkpoint(
         &self,
         batch: &SaveBatch,
         checkpoint: Option<(&StableLinkRow, u64)>,
     ) -> io::Result<()> {
+        self.write_batch_joint(batch, checkpoint, None)
+    }
+
+    fn write_batch_joint(
+        &self,
+        batch: &SaveBatch,
+        checkpoint: Option<(&StableLinkRow, u64)>,
+        mut boss: Option<&mut dyn FnMut(&rusqlite::Transaction<'_>) -> anyhow::Result<()>>,
+    ) -> io::Result<()> {
+        let mut measurement = WriteMeasurement::new(if boss.is_some() {
+            "sessions_boss"
+        } else {
+            "sessions"
+        });
         let mut guard = self.storage.lock();
         if guard.is_none() {
             *guard = Some(Storage {
@@ -2439,13 +2619,23 @@ impl StateStore {
             }
         }
 
-        let transaction = storage
-            .connection
-            .unchecked_transaction()
-            .map_err(to_io_error)?;
-
+        let _sync = if boss.is_some() {
+            Some(FullSync::new(&storage.connection)?)
+        } else {
+            None
+        };
         let projects = serde_json::to_string(&batch.projects).map_err(to_io_error)?;
         let projects_fingerprint = fingerprint(&projects);
+        measurement.prepared();
+        let started = Instant::now();
+        let result = rusqlite::Transaction::new_unchecked(
+            &storage.connection,
+            rusqlite::TransactionBehavior::Immediate,
+        );
+        measurement.waited(started.elapsed());
+        let transaction = result.map_err(to_io_error)?;
+        let started = Instant::now();
+        let changes_before = transaction.total_changes();
         if projects_fingerprint != storage.saved_projects {
             transaction
                 .execute("DELETE FROM projects", [])
@@ -2481,6 +2671,23 @@ impl StateStore {
         let mut written_messages = Vec::new();
         let mut persisted_checkpoints = Vec::new();
         for session in &batch.sessions {
+            // A batch can be prepared before rewind and acquire this writer
+            // after its commit. Fence the detail/message/index write in this
+            // same transaction, including after daemon restart.
+            let stored_generation: Option<u64> = transaction
+                .query_row(
+                    "SELECT history_generation FROM sessions WHERE id = ?1",
+                    params![session.id.to_string()],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(to_io_error)?;
+            if stored_generation.is_some_and(|generation| {
+                generation > session.history_generation
+                    || (!session.detail_loaded && generation != session.history_generation)
+            }) {
+                continue;
+            }
             // A skeleton's empty transcript means "not fetched", not "empty".
             // Its promoted list columns may still have changed (for example,
             // an inactive sidebar row was renamed), so update only those and
@@ -2508,15 +2715,29 @@ impl StateStore {
             transaction
                 .execute(UPSERT_SESSION_DETAIL, params![session.id.to_string(), data])
                 .map_err(to_io_error)?;
+            let message_fingerprints: Vec<_> = session
+                .messages
+                .iter()
+                .enumerate()
+                .map(|(position, message)| message_fingerprint(message, position))
+                .collect();
             written_messages.push((
                 session.id,
                 write_messages(
                     &transaction,
                     session,
+                    &message_fingerprints,
                     storage.written_messages.get(&session.id).unwrap_or(&EMPTY),
                 )?,
             ));
             persisted_checkpoints.push((session.id, checkpoint_cache));
+            // The flattened index lives in the same transaction so it can
+            // never disagree with the detail/messages it derives from.
+            crate::transcript_index::write_transcript_index(
+                &transaction,
+                session,
+                &message_fingerprints,
+            )?;
         }
 
         let removed = storage
@@ -2539,12 +2760,23 @@ impl StateStore {
             transaction
                 .execute("DELETE FROM messages WHERE session_id = ?1", params![key])
                 .map_err(to_io_error)?;
+            crate::transcript_index::delete_transcript_index(&transaction, &key)?;
         }
 
         if let Some((applying, sequence)) = checkpoint {
             update_stable_link(&transaction, applying, "live", sequence)?;
         }
-        transaction.commit().map_err(to_io_error)?;
+        if let Some(write) = boss.as_mut() {
+            write(&transaction).map_err(to_io_error)?;
+        }
+        measurement.sample.rows_changed =
+            transaction.total_changes().saturating_sub(changes_before);
+        measurement.worked(started.elapsed());
+        let started = Instant::now();
+        let result = transaction.commit();
+        measurement.committed(started.elapsed());
+        result.map_err(to_io_error)?;
+        measurement.sample.success = true;
         // Now that the rows are durable, and not before.
         storage.saved_projects = projects_fingerprint;
         for session in &batch.sessions {
@@ -2641,6 +2873,8 @@ type SessionColumns = (
     Option<String>,
     Option<String>,
     i64,
+    i64,
+    Option<String>,
 );
 
 /// Builds a list-only session from its columns. `messages`,
@@ -2676,6 +2910,8 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         reasoning_effort,
         config_activation,
         metadata_revision,
+        history_generation,
+        task_configuration,
     ) = row;
     // The column duplicates the detail blob's workspace so list rows can show
     // it. Rows migrated before the column existed or whose JSON fails to parse
@@ -2692,11 +2928,13 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
     // planning rows from the column without hydrating the session.
     let planning =
         planning.and_then(|planning| serde_json::from_str::<SessionPlanning>(&planning).ok());
-    Some(AgentSession {
+    let mut session = AgentSession {
         id: Uuid::parse_str(&id).ok()?,
         metadata_revision: u64::try_from(metadata_revision).ok()?,
+        history_generation: u64::try_from(history_generation).ok()?,
         title,
         auto_title,
+        auto_title_is_prompt: false,
         project_id: Uuid::parse_str(&project_id).ok()?,
         workspace,
         workspace_moved_from: None,
@@ -2710,6 +2948,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         boss_managed,
         planning,
         provider: serde_json::from_value(serde_json::Value::String(provider)).ok()?,
+        antigravity_acp: false,
         model,
         pending_model_switch: None,
         // Hydration replaces these; the list never reads them.
@@ -2743,6 +2982,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         available_commands: Vec::new(),
         thread_goal: None,
         context_usage: None,
+        compaction_monitor: Default::default(),
         runtime_event_cursor,
         // Same duplication story as `runtime_event_cursor`: merges and
         // replay dedup read the confirmed activation mark without a hydrate.
@@ -2760,7 +3000,21 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         // Stored rows are always ordinary sessions — incognito ones never
         // reach the store, so nothing persisted can deserialize as one.
         incognito: false,
-    })
+    };
+    if let Some(configuration) = task_configuration
+        .and_then(|value| {
+            serde_json::from_str::<waku_protocol::task_metadata::TaskMetadataEdit>(&value).ok()
+        })
+        .filter(|edit| {
+            matches!(
+                edit,
+                waku_protocol::task_metadata::TaskMetadataEdit::Configuration { .. }
+            )
+        })
+    {
+        configuration.apply(&mut session);
+    }
+    Some(session)
 }
 
 /// Moves a stored detail row's fields into `session`, keeping the live
@@ -2770,20 +3024,35 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
 /// place so a session loaded on a background thread and one hydrated in place
 /// cannot drift apart.
 pub fn apply_session_detail(session: &mut AgentSession, stored: AgentSession) {
+    let configuration = waku_protocol::task_metadata::TaskMetadataEdit::capture(
+        waku_protocol::task_metadata::TaskMetadataField::Configuration,
+        if stored.metadata_revision > session.metadata_revision {
+            &stored
+        } else {
+            session
+        },
+    );
     // Resolved before the field moves — `environment()` borrows `stored`.
     let stored_environment = stored.environment();
+    session.auto_title_is_prompt =
+        session.auto_title == stored.auto_title && stored.auto_title_is_prompt;
     session.transcript_blocks = stored.transcript_blocks;
     session.turns = stored.turns;
     session.queued_messages = stored.queued_messages;
     session.workspace = stored.workspace;
     session.side_chat_of = stored.side_chat_of;
     session.provider_cursor = stored.provider_cursor;
+    session.antigravity_acp = stored.antigravity_acp;
+    session.suspended_provider_sessions = stored.suspended_provider_sessions;
+    session.pending_provider_context = stored.pending_provider_context;
     session.runtime_mode = stored.runtime_mode;
     // Effort is a list column; a column-only save may be ahead of the blob.
     session.service_tier = stored.service_tier;
     session.context_window = stored.context_window;
     session.context_usage = stored.context_usage;
     session.runtime_event_cursor = stored.runtime_event_cursor;
+    // The lineage belongs to these details, never to a newer list-row echo.
+    session.history_generation = stored.history_generation;
     // The mark is monotonic like `boss_managed`: a column-only save may be
     // ahead of the blob — merge forward only so a stale blob cannot lower
     // it and reopen stale redeliveries.
@@ -2816,6 +3085,7 @@ pub fn apply_session_detail(session: &mut AgentSession, stored: AgentSession) {
     });
     session.details_pruned = stored.details_pruned;
     session.detail_loaded = true;
+    configuration.apply(session);
 }
 
 /// Everything one save writes, snapshotted by [`StateStore::save_batch`] while
@@ -2836,7 +3106,74 @@ pub struct SaveBatch {
     pub dirty_ids: HashSet<Uuid>,
 }
 
-type MessageColumns = (
+/// Detail row + message rows for one session, read on a caller-owned
+/// connection — the body of [`StateStore::load_session_detail`] so
+/// conversion can run inside a write transaction on the same snapshot.
+pub(crate) fn read_session_detail(
+    connection: &Connection,
+    session_id: Uuid,
+) -> io::Result<Option<AgentSession>> {
+    let id = session_id.to_string();
+
+    let data: Option<(String, u64)> = connection
+        .query_row(
+            "SELECT d.data, s.history_generation FROM session_details d
+             INNER JOIN sessions s ON s.id = d.session_id WHERE s.id = ?1",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(to_io_error)?;
+    let Some((data, generation)) = data else {
+        return Ok(None);
+    };
+    let mut stored = serde_json::from_str::<AgentSession>(&data).map_err(to_io_error)?;
+    if stored.history_generation != generation {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "task history header and detail generations disagree",
+        ));
+    }
+    // Detail rows predate worktree names; the list row's migration is
+    // overwritten when the stored workspace is copied over it.
+    stored.workspace.backfill_worktree_name();
+
+    let mut statement = connection
+        .prepare(
+            "SELECT id, turn_id, role, content, display_content, attachments, atoms,
+                    created_at, streaming, sent_by_task, hidden, notice, context_mark,
+                    report_trigger, reference_context
+             FROM messages WHERE session_id = ?1 ORDER BY position",
+        )
+        .map_err(to_io_error)?;
+    stored.messages = statement
+        .query_map(params![id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, i64>(7)?,
+                row.get::<_, i64>(8)?,
+                row.get::<_, Option<String>>(9)?,
+                row.get::<_, i64>(10)?,
+                row.get::<_, Option<String>>(11)?,
+                row.get::<_, Option<String>>(12)?,
+                row.get::<_, Option<String>>(13)?,
+                row.get::<_, Option<String>>(14)?,
+            ))
+        })
+        .map_err(to_io_error)?
+        .filter_map(Result::ok)
+        .filter_map(message_from_row)
+        .collect();
+    Ok(Some(stored))
+}
+
+pub(crate) type MessageColumns = (
     String,
     Option<String>,
     String,
@@ -2854,7 +3191,7 @@ type MessageColumns = (
     Option<String>,
 );
 
-fn message_from_row(row: MessageColumns) -> Option<Message> {
+pub(crate) fn message_from_row(row: MessageColumns) -> Option<Message> {
     let (
         id,
         turn_id,
@@ -3203,6 +3540,7 @@ const UPSERT_MESSAGE: &str = "INSERT INTO messages(
 fn write_messages(
     transaction: &Connection,
     session: &AgentSession,
+    fingerprints: &[u64],
     written: &HashMap<Uuid, u64>,
 ) -> io::Result<HashMap<Uuid, u64>> {
     use rusqlite::types::Value;
@@ -3221,7 +3559,7 @@ fn write_messages(
     for (position, message) in session.messages.iter().enumerate() {
         let message_id = message.id.to_string();
         let stored = stored_ids.remove(&message_id);
-        let fingerprint = message_fingerprint(message, position);
+        let fingerprint = fingerprints[position];
         current.insert(message.id, fingerprint);
         // Another writer may have removed a row this connection still caches.
         if stored && written.get(&message.id) == Some(&fingerprint) {
@@ -3307,7 +3645,7 @@ fn write_messages(
 /// Stand-in for "this connection has written nothing for that session yet".
 static EMPTY: std::sync::LazyLock<HashMap<Uuid, u64>> = std::sync::LazyLock::new(HashMap::new);
 
-fn message_fingerprint(message: &Message, position: usize) -> u64 {
+pub(crate) fn message_fingerprint(message: &Message, position: usize) -> u64 {
     const PRIME: u64 = 0x0000_0100_0000_01b3;
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     let mut fold = |value: u64| {
@@ -3421,8 +3759,8 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          created_at, updated_at, last_reply_at, archived_at, pinned_at,
          dormant_at, dormant_exempt_until, landed_at, workspace, side_chat_of,
          agent_rename_allowed, boss_managed, planning, runtime_event_cursor,
-         friend_peer_id, friend_peer_name, reasoning_effort, config_activation, metadata_revision
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)
+         friend_peer_id, friend_peer_name, reasoning_effort, config_activation, metadata_revision, history_generation, task_configuration
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)
      ON CONFLICT(id) DO UPDATE SET
          project_id    = excluded.project_id,
          title         = CASE WHEN excluded.metadata_revision >= sessions.metadata_revision THEN excluded.title ELSE sessions.title END,
@@ -3448,7 +3786,9 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          friend_peer_name = excluded.friend_peer_name,
          reasoning_effort = excluded.reasoning_effort,
          config_activation = excluded.config_activation,
-         metadata_revision = MAX(sessions.metadata_revision, excluded.metadata_revision)";
+         task_configuration = CASE WHEN excluded.metadata_revision >= sessions.metadata_revision THEN excluded.task_configuration ELSE sessions.task_configuration END,
+         metadata_revision = MAX(sessions.metadata_revision, excluded.metadata_revision),
+         history_generation = MAX(sessions.history_generation, excluded.history_generation)";
 
 const INSERT_PROJECT: &str =
     "INSERT INTO projects(id, name, path, bookmark, position, created_at, temporary, starred, submissions_enabled, qa_branch, friend_peer_id, kind)
@@ -3559,6 +3899,14 @@ fn session_params(session: &AgentSession) -> Vec<rusqlite::types::Value> {
         Value::Integer(
             i64::try_from(session.metadata_revision).expect("metadata revision fits SQLite"),
         ),
+        Value::Integer(
+            i64::try_from(session.history_generation).expect("history generation fits SQLite"),
+        ),
+        serde_json::to_string(&waku_protocol::task_metadata::TaskMetadataEdit::capture(
+            waku_protocol::task_metadata::TaskMetadataField::Configuration,
+            session,
+        ))
+        .map_or(Value::Null, Value::Text),
     ]
 }
 
@@ -3884,6 +4232,67 @@ mod tests {
         TranscriptBlock, TranscriptNoticeStatus,
     };
     use base64::Engine as _;
+
+    #[test]
+    fn joint_boss_session_commit_rolls_back_both_stores_and_retries() {
+        let directory = temporary_directory();
+        std::fs::create_dir_all(&directory).unwrap();
+        let store = StateStore::daemon(directory.join("app.db"));
+        let mut state = PersistedState::fresh(directory.clone());
+        store.save(&mut state).unwrap();
+        let boss =
+            waku_boss::BossService::open_database(directory.join("boss"), store.path().to_owned())
+                .unwrap();
+        let mut session = AgentSession::new(state.projects[0].id, ProviderKind::Codex);
+        session.boss_managed = true;
+        let id = session.id;
+        state.push_session(session);
+        let batch = store.save_batch(&mut state);
+        let connection = store.open().unwrap();
+        for (table, event) in [("sessions", "INSERT"), ("boss_coordinator", "UPDATE")] {
+            connection.execute_batch(&format!("CREATE TRIGGER reject_joint BEFORE {event} ON {table} BEGIN SELECT RAISE(ABORT, 'write failure'); END;")).unwrap();
+            let mut host = store.session_commit(&batch);
+            assert!(boss.set_session_id_with(id, &mut host).is_err());
+            assert_eq!(boss.document().session_id, None);
+            assert_eq!(
+                connection
+                    .query_row(
+                        "SELECT count(*) FROM sessions WHERE id=?1",
+                        [id.to_string()],
+                        |r| r.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                0
+            );
+            connection
+                .execute_batch("DROP TRIGGER reject_joint;")
+                .unwrap();
+        }
+        let mut host = store.session_commit(&batch);
+        boss.set_session_id_with(id, &mut host).unwrap();
+        assert_eq!(boss.document().session_id, Some(id));
+        let loaded = StateStore::daemon(store.path().to_owned()).load().unwrap();
+        assert!(
+            loaded.sessions.iter().any(|session| session.id == id),
+            "unstarted managed chats must survive restart"
+        );
+        let sync: i64 = store
+            .storage
+            .lock()
+            .as_ref()
+            .unwrap()
+            .connection
+            .pragma_query_value(None, "synchronous", |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            sync, 1,
+            "shared FULL policy must not change subsequent streaming saves"
+        );
+        drop(host);
+        drop(connection);
+        drop(store);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 
     fn temporary_directory() -> PathBuf {
         std::env::temp_dir().join(format!("waku-state-{}", Uuid::new_v4()))
@@ -4467,6 +4876,22 @@ mod tests {
         let mut stale_view = state.clone();
         state.sessions[0].title = "Confirmed name".into();
         state.sessions[0].pinned_at = Some(10);
+        let configuration = waku_protocol::PromptConfiguration {
+            provider: ProviderKind::Codex,
+            options: waku_protocol::model::SessionOptions {
+                mode: RuntimeMode::Ask,
+                model: Some("selected-model".into()),
+                reasoning_effort: Some("high".into()),
+                service_tier: Some("fast".into()),
+                context_window: Some("long".into()),
+            },
+        };
+        waku_protocol::task_metadata::TaskMetadataEdit::Configuration {
+            configuration: configuration.clone(),
+            auto_route: false,
+            route_decision: None,
+        }
+        .apply(&mut state.sessions[0]);
         state.sessions[0].metadata_revision = 1;
         state.mark_session_dirty(id);
         store.save(&mut state).unwrap();
@@ -4477,11 +4902,91 @@ mod tests {
         assert_eq!(session.metadata_revision, 1);
         assert_eq!(session.title, "Confirmed name");
         assert_eq!(session.pinned_at, Some(10));
+        assert_eq!(
+            waku_protocol::PromptConfiguration::for_session(session),
+            configuration
+        );
+        assert_eq!(session.model.as_deref(), Some("selected-model"));
+        assert_eq!(session.runtime_mode, RuntimeMode::Ask);
         store.hydrate(session).unwrap();
         assert_eq!(session.metadata_revision, 1);
         assert_eq!(session.title, "Confirmed name");
         assert_eq!(session.pinned_at, Some(10));
+        assert_eq!(
+            waku_protocol::PromptConfiguration::for_session(session),
+            configuration
+        );
+        assert_eq!(session.model.as_deref(), Some("selected-model"));
+        assert_eq!(session.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(session.service_tier.as_deref(), Some("fast"));
+        assert_eq!(session.context_window.as_deref(), Some("long"));
+        assert_eq!(session.runtime_mode, RuntimeMode::Ask);
         fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn configuration_migration_preserves_legacy_permission_and_model_choices() {
+        let connection = Connection::open_in_memory().unwrap();
+        let migration = MIGRATIONS
+            .iter()
+            .position(|(tag, _)| *tag == "0036_gorgeous_cardiac")
+            .unwrap();
+        for (_, sql) in &MIGRATIONS[..migration] {
+            connection.execute_batch(sql).unwrap();
+        }
+        let mut legacy = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        legacy.runtime_mode = RuntimeMode::FullAccess;
+        legacy.model = Some("selected-model".into());
+        legacy.reasoning_effort = Some("high".into());
+        legacy.service_tier = Some("fast".into());
+        legacy.context_window = Some("long".into());
+        legacy.auto_route = true;
+        legacy.history_generation = 1;
+        connection.execute(
+            "INSERT INTO sessions(id, project_id, title, provider, model, reasoning_effort, status,
+                created_at, updated_at, metadata_revision, history_generation) VALUES (?1, ?2, 'Legacy', 'codex', ?3, ?4, 'idle', 1, 1, 7, 1)",
+            params![legacy.id.to_string(), legacy.project_id.to_string(), legacy.model, legacy.reasoning_effort],
+        ).unwrap();
+        connection
+            .execute(
+                "INSERT INTO session_details(session_id, data) VALUES (?1, ?2)",
+                params![
+                    legacy.id.to_string(),
+                    serde_json::to_string(&legacy).unwrap()
+                ],
+            )
+            .unwrap();
+        connection.execute_batch(MIGRATIONS[migration].1).unwrap();
+        let encoded: String = connection
+            .query_row(
+                "SELECT task_configuration FROM sessions WHERE id = ?1",
+                params![legacy.id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let edit: waku_protocol::task_metadata::TaskMetadataEdit =
+            serde_json::from_str(&encoded).unwrap();
+        let mut restored = AgentSession::new(legacy.project_id, ProviderKind::Claude);
+        edit.apply(&mut restored);
+        assert_eq!(
+            waku_protocol::PromptConfiguration::for_session(&restored),
+            waku_protocol::PromptConfiguration::for_session(&legacy)
+        );
+        assert!(restored.auto_route);
+        assert_eq!(
+            connection
+                .query_row("SELECT history_generation FROM sessions", [], |row| row
+                    .get::<_, u64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT metadata_revision FROM sessions", [], |row| row
+                    .get::<_, u64>(0))
+                .unwrap(),
+            7
+        );
     }
 
     #[test]
@@ -4517,6 +5022,35 @@ mod tests {
         assert_eq!(restored.sessions[0].config_activation, Some(activation));
         assert_eq!(restored.sessions[0].metadata_revision, 8);
 
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn provider_title_placeholder_replacement_survives_reload() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        state.sessions[0].begin_turn("Fix image attachment paths");
+        state.sessions[0].set_title_from_prompt("Fix image attachment paths");
+        store.save(&mut state).unwrap();
+
+        let reopened = store_in(&directory);
+        let mut restored = reopened.load().unwrap();
+        reopened.hydrate(&mut restored.sessions[0]).unwrap();
+        assert!(restored.sessions[0].auto_title_is_prompt);
+        assert!(restored.sessions[0].set_provider_title(Some("Repair image attachments".into())));
+        restored.mark_session_dirty(restored.sessions[0].id);
+        reopened.save(&mut restored).unwrap();
+
+        let reopened = store_in(&directory);
+        let mut restored = reopened.load().unwrap();
+        reopened.hydrate(&mut restored.sessions[0]).unwrap();
+        assert!(!restored.sessions[0].auto_title_is_prompt);
+        assert!(!restored.sessions[0].set_provider_title(Some("Proceed With Current Task".into())));
+        assert_eq!(
+            restored.sessions[0].display_title(),
+            "Repair image attachments"
+        );
         fs::remove_dir_all(directory).ok();
     }
 
@@ -4610,6 +5144,10 @@ mod tests {
         state.sessions[0].push_message(MessageRole::Assistant, "an answer");
         state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
         store.save(&mut state).unwrap();
+        let identity = TurnCheckpointIdentity {
+            turn_id: state.sessions[0].turns[0].id,
+            history_generation: state.sessions[0].history_generation,
+        };
 
         // This full-session batch represents a save that started before the
         // independent checkpoint write and still has no checkpoint attached.
@@ -4622,7 +5160,7 @@ mod tests {
         let checkpoint = test_checkpoint(1, "refs/waku/test-turn-1");
         assert_eq!(
             store
-                .save_turn_checkpoint(session_id, 1, &checkpoint)
+                .save_turn_checkpoint(session_id, 1, &identity, &checkpoint)
                 .unwrap(),
             Some(checkpoint.clone())
         );
@@ -4637,6 +5175,63 @@ mod tests {
     }
 
     #[test]
+    fn late_capture_must_not_attach_to_reused_turn_count_after_rewind() {
+        for next_generation in [0, 1] {
+            let directory = temporary_directory();
+            fs::create_dir_all(&directory).unwrap();
+            let store = store_in(&directory);
+            let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+            let session_id = state.sessions[0].id;
+            for prompt in ["Retain", "Remove"] {
+                state.sessions[0].begin_turn(prompt);
+                state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+            }
+            store.save(&mut state).unwrap();
+            let retired_turn_id = state.sessions[0].turns[1].id;
+            let identity = TurnCheckpointIdentity {
+                turn_id: retired_turn_id,
+                history_generation: 0,
+            };
+            // An independent capture already started for old turn two. Its Git
+            // work completes only after rewind and a new turn reuse the count.
+            state.sessions[0].turns.pop();
+            state.sessions[0].history_generation = next_generation;
+            state.mark_session_dirty(session_id);
+            store.save(&mut state).unwrap();
+            state.sessions[0].begin_turn("Replacement");
+            state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+            state.mark_session_dirty(session_id);
+            store.save(&mut state).unwrap();
+            assert_ne!(state.sessions[0].turns[1].id, retired_turn_id);
+            let late = test_checkpoint(2, "refs/waku/removed-turn-snapshot");
+            assert_eq!(
+                store
+                    .save_turn_checkpoint(session_id, 2, &identity, &late)
+                    .unwrap_err()
+                    .kind(),
+                io::ErrorKind::Interrupted
+            );
+            let restored = load_hydrated(&store);
+            let replacement = &restored.sessions[0].turns[1];
+            assert_eq!(restored.sessions[0].history_generation, next_generation);
+            assert!(
+                replacement.checkpoint.is_none(),
+                "late capture for retired turn attached to replacement: {:?}",
+                replacement.checkpoint
+            );
+            let current = TurnCheckpointIdentity::for_turn(&state.sessions[0], 2).unwrap();
+            let fresh = test_checkpoint(2, "refs/waku/replacement-turn-snapshot");
+            assert_eq!(
+                store
+                    .save_turn_checkpoint(session_id, 2, &current, &fresh)
+                    .unwrap(),
+                Some(fresh)
+            );
+            fs::remove_dir_all(directory).ok();
+        }
+    }
+
+    #[test]
     fn a_late_checkpoint_save_does_not_recreate_a_deleted_session() {
         let directory = temporary_directory();
         fs::create_dir_all(&directory).unwrap();
@@ -4646,13 +5241,17 @@ mod tests {
         state.sessions[0].begin_turn("Ask");
         state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
         store.save(&mut state).unwrap();
+        let identity = TurnCheckpointIdentity {
+            turn_id: state.sessions[0].turns[0].id,
+            history_generation: state.sessions[0].history_generation,
+        };
 
         state.sessions.clear();
         store.save(&mut state).unwrap();
         let checkpoint = test_checkpoint(1, "refs/waku/deleted-session-turn-1");
         assert_eq!(
             store
-                .save_turn_checkpoint(session_id, 1, &checkpoint)
+                .save_turn_checkpoint(session_id, 1, &identity, &checkpoint)
                 .unwrap(),
             None
         );
@@ -4721,6 +5320,89 @@ mod tests {
         assert_eq!(restored.sessions[0].queued_messages, vec![pending]);
 
         fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn antigravity_tasks_keep_their_transport_after_hydration() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let project_id = state.sessions[0].project_id;
+        let mut legacy = AgentSession::new(project_id, ProviderKind::Antigravity);
+        legacy.antigravity_acp = false;
+        legacy.push_message(MessageRole::User, "terminal prompt");
+        let mut acp = AgentSession::new(project_id, ProviderKind::Antigravity);
+        acp.begin_turn("ACP prompt before the provider returns a session ID");
+        let expected = [(legacy.id, true), (acp.id, false)];
+        state.sessions = vec![legacy, acp];
+        store.save(&mut state).unwrap();
+
+        let reopened = store_in(&directory);
+        let mut restored = reopened.load().unwrap();
+        for (id, terminal) in expected {
+            let session = restored.session_mut(id).unwrap();
+            reopened.hydrate(session).unwrap();
+            assert_eq!(session.uses_antigravity_terminal(), terminal);
+        }
+
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn a_prepared_batch_cannot_restore_an_older_history_generation() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let id = state.sessions[0].id;
+        for prompt in ["keep this request", "removed request"] {
+            state.sessions[0].begin_turn(prompt);
+            state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        }
+        state.sessions[0].provider_cursor = Some(crate::model::ProviderResumeCursor::Codex {
+            thread_id: "original".into(),
+        });
+        store.save(&mut state).unwrap();
+        state.mark_session_dirty(id);
+        let old = store.save_batch(&mut state);
+        state.sessions[0].truncate_after_turn(1);
+        state.sessions[0].history_generation = 1;
+        state.sessions[0].provider_cursor = Some(crate::model::ProviderResumeCursor::Codex {
+            thread_id: "retained-copy".into(),
+        });
+        state.mark_session_dirty(id);
+        store.save(&mut state).unwrap();
+        let index_revision = store.transcript_revision(id).unwrap();
+        store.write_batch(&old).unwrap();
+        assert_eq!(store.transcript_revision(id).unwrap(), index_revision);
+
+        let reopened = store_in(&directory);
+        let mut restored = reopened.load().unwrap();
+        assert_eq!(restored.sessions[0].history_generation, 1);
+        reopened.hydrate(&mut restored.sessions[0]).unwrap();
+        assert_eq!(restored.sessions[0].history_generation, 1);
+        assert_eq!(restored.sessions[0].turns.len(), 1);
+        assert_eq!(
+            restored.sessions[0].provider_cursor,
+            state.sessions[0].provider_cursor
+        );
+        restored.sessions[0].begin_turn("new request");
+        restored.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        restored.mark_session_dirty(id);
+        reopened.save(&mut restored).unwrap();
+        // Even the other store's already prepared batch cannot lower the
+        // generation or replace the current-generation appended turn.
+        store.write_batch(&old).unwrap();
+        let saved = reopened.load_session_detail(id).unwrap().unwrap();
+        assert_eq!(saved.history_generation, 1);
+        assert_eq!(saved.turns.len(), 2);
+        assert!(saved.messages.iter().any(|m| m.content == "new request"));
+        assert!(
+            !saved
+                .messages
+                .iter()
+                .any(|m| m.content == "removed request")
+        );
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -5003,8 +5685,9 @@ mod tests {
         store.save(&mut state).unwrap();
         assert_eq!(
             rows_written(&store) - before,
-            floor + 1,
-            "a new message costs one row, not the whole transcript"
+            floor + 4,
+            "a new message costs its message row plus transcript-index \
+             entry, turn, and head rows — constant, not the whole transcript"
         );
 
         // Length is not enough to tell rows apart: a typo fix keeps it.
@@ -5018,8 +5701,9 @@ mod tests {
         store.save(&mut state).unwrap();
         assert_eq!(
             rows_written(&store) - before,
-            floor + 1,
-            "an edit that preserves length is still written"
+            floor + 4,
+            "an edit that preserves length is still written — message row \
+             plus index entry, turn, and head rows"
         );
 
         let reopened = store_in(&directory);
@@ -5720,19 +6404,10 @@ mod tests {
         let connection = Connection::open_in_memory().unwrap();
         apply_migrations(&connection).unwrap();
 
-        // Drop the record of the last migration without dropping its tables,
-        // as an interrupted run would leave things. The last migration with
-        // real statements — trailing no-ops replay cleanly and prove nothing.
-        let (last, _) = MIGRATIONS
-            .iter()
-            .rev()
-            .find(|(_, sql)| {
-                sql.lines().any(|line| {
-                    let line = line.trim();
-                    !line.is_empty() && !line.starts_with("--")
-                })
-            })
-            .expect("at least one migration with statements");
+        // The initial schema deliberately cannot replay over existing tables.
+        // Later migrations may be idempotent (including standalone Boss setup),
+        // so choosing the newest migration would not test failure reporting.
+        let (last, _) = &MIGRATIONS[0];
         connection
             .execute("DELETE FROM migrations WHERE tag = ?1", params![last])
             .unwrap();
@@ -6597,6 +7272,26 @@ mod tests {
         assert!(session.last_reply_at >= Some(replied_at));
         session.finish_active_turn(crate::model::TurnStatus::Failed);
         assert!(session.last_reply_at >= Some(replied_at));
+    }
+
+    #[test]
+    fn resuming_an_interrupted_chat_updates_last_reply_at() {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.begin_turn("Ask");
+        session.mark_active_turn_provider_started();
+        session
+            .interrupt_active_turn(crate::model::TurnInterruption::You)
+            .expect("the running turn is interrupted");
+        session.last_reply_at = Some(1);
+
+        let resumed_turn = session.begin_hidden_turn("Continue the current task if able.");
+
+        assert_eq!(session.active_turn_id(), Some(resumed_turn));
+        assert_eq!(
+            session.last_reply_at,
+            Some(session.turns.last().unwrap().started_at)
+        );
+        assert!(session.last_reply_at.unwrap() > 1);
     }
 
     #[test]

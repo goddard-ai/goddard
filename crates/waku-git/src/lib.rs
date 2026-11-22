@@ -8,5 +8,6 @@ pub mod checkpoint;
 pub mod git_branch;
 pub mod git_commit;
 pub mod git_panel;
+pub mod landing_queue;
 pub mod process;
 pub mod worktree;

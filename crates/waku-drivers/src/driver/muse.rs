@@ -551,6 +551,7 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut WorkerSta
             match worker.service.call("turn/steer", params) {
                 Ok(_) => {
                     let _ = worker.events.send(DriverEvent::SteerAccepted {
+                        submission_id: None,
                         message: text,
                         sent_by_task: None,
                         hidden: false,
@@ -559,6 +560,7 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut WorkerSta
                 }
                 Err(error) => {
                     let _ = worker.events.send(DriverEvent::SteerRejected {
+                        submission_id: None,
                         message: text,
                         reason: error.message(),
                         reason_i18n: None,
@@ -1019,6 +1021,21 @@ fn handle_event(
             state
                 .approvals
                 .insert(approval_id.clone(), PendingApproval { requirement_id });
+            if let Some(service) = service
+                && params
+                    .get("toolName")
+                    .and_then(Value::as_str)
+                    .is_some_and(|name| matches!(name, "bash" | "shell" | "execute"))
+                && crate::agent_readonly::readonly_agent_input(params)
+                && let Some(choice) = approval_allow_choice(params)
+            {
+                let _ = service.call("approval/decide", json!({
+                    "commandId": service.mint_command_id(), "sessionId": state.session_id,
+                    "approvalId": approval_id, "choiceId": choice,
+                    "requirementId": params.get("currentRequirementId").cloned().unwrap_or(Value::Null),
+                }));
+                return;
+            }
             // `Auto` never answers blindly: the review replies when a backend
             // is configured and the user does when it is not.
             if state.mode == RuntimeMode::Auto
@@ -1407,7 +1424,7 @@ fn approval_allow_choice(params: &Value) -> Option<String> {
             choice
                 .get("decision")
                 .and_then(Value::as_str)
-                .is_some_and(|decision| decision.starts_with("approved"))
+                .is_some_and(|decision| decision == "approved")
         })?
         .get("choiceId")
         .and_then(Value::as_str)

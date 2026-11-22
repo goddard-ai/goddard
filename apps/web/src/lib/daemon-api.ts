@@ -1,3 +1,4 @@
+import { landingStore } from '@waku/client';
 import type {
   AgentSession,
   AgentInvocation,
@@ -23,6 +24,7 @@ import type {
   ReviewDiffSource,
   ResponsePayload,
   RuntimeMode,
+  TurnCheckpointIdentity,
   SessionMessageMatch,
   SlashCommand,
   SkillsCatalog,
@@ -403,12 +405,14 @@ export async function captureTurnStart(
   cwd: string,
   sessionId: string,
   turnCount: number,
+  historyGeneration: number,
 ): Promise<void> {
   const result = await workspaceRequest(client, {
     type: 'captureTurnStart',
     cwd,
     session_id: sessionId,
     turn_count: turnCount,
+    history_generation: historyGeneration,
   })
   if (result.type !== 'ack') {
     throw new Error('The daemon returned an unexpected checkpoint response')
@@ -421,6 +425,7 @@ export async function captureTurnCheckpoint(
   sessionId: string,
   turnCount: number,
   untouched: boolean,
+  identity: TurnCheckpointIdentity,
 ): Promise<Checkpoint> {
   const result = await workspaceRequest(client, {
     type: 'captureTurn',
@@ -428,6 +433,7 @@ export async function captureTurnCheckpoint(
     session_id: sessionId,
     turn_count: turnCount,
     untouched,
+    identity,
   })
   if (result.type !== 'checkpoint') {
     throw new Error('The daemon returned an unexpected checkpoint response')
@@ -553,7 +559,9 @@ export async function landWorkspace(
   client: WakuClient,
   cwd: string,
   base: string | null,
+  taskId?: string,
 ): Promise<LandOutcome> {
+  if (client.landingQueueAvailable && taskId) return landingStore(client).land(taskId, cwd, base);
   const result = await workspaceRequest(client, { type: 'land', cwd, base, strategy: 'rebase' })
   if (result.type !== 'land') throw new Error('The daemon returned an unexpected land response')
   return result.outcome
@@ -564,7 +572,12 @@ async function workspaceRequest(
   operation: WorkspaceOperation,
 ): Promise<WorkspaceResult> {
   const response = expectResponse(
-    await client.request({ type: 'workspace', operation }),
+    await client.request(
+      { type: 'workspace', operation },
+      undefined,
+      undefined,
+      operation.type === 'land' ? { timeoutMs: null } : {},
+    ),
     'workspace',
   )
   return response.result

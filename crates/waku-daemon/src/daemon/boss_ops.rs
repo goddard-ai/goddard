@@ -72,6 +72,9 @@ impl WakuBackend {
     /// Evaluate whether a user prompt should carry the full work digest.
     /// Failed or unconfigured evaluations keep the always-on brief and header.
     pub(super) fn route_boss_prompt(&self, session_id: Uuid, prompt: &str) {
+        let Ok(admission) = self.idle_shutdown.enter() else {
+            return;
+        };
         let recent_prompts = self.boss.router_snapshot(session_id);
         self.boss.router_note_prompt(session_id, prompt);
         let work = self.boss_work_context();
@@ -91,6 +94,7 @@ impl WakuBackend {
         let _ = std::thread::Builder::new()
             .name("boss-context-router".into())
             .spawn(move || {
+                let _admission = admission;
                 let Ok(evaluation) = evaluate_with_feature(
                     &settings,
                     &secrets,
@@ -175,6 +179,7 @@ impl WakuBackend {
         operation: waku_protocol::boss::BossOperation,
         events: &EventSink,
     ) -> anyhow::Result<waku_protocol::boss::BossResult> {
+        let _admission = self.idle_shutdown.enter()?;
         self.handle_boss_operation_inner(caller, operation, events)
             .or_else(|error| {
                 if let Some(error) = error.downcast_ref::<waku_protocol::boss::PlanContractError>()
@@ -210,6 +215,11 @@ impl WakuBackend {
                 {
                     state.instruction_pins.clear();
                 }
+                if caller.is_some_and(|id| !self.boss.is_counsel(id))
+                    && let waku_protocol::boss::BossResult::State { state } = &mut result
+                {
+                    state.counsel = Default::default();
+                }
                 result
             })
     }
@@ -229,6 +239,24 @@ impl WakuBackend {
         );
         let was_active = self.boss.is_active();
         self.boss.activate()?;
+        if caller.is_some_and(|id| self.boss.is_counsel(id)) {
+            anyhow::ensure!(
+                self.counsel_enabled(),
+                "Counsel is disabled by the experiment setting"
+            );
+            anyhow::ensure!(
+                matches!(
+                    &operation,
+                    BossOperation::Counsel { .. }
+                        | BossOperation::Context
+                        | BossOperation::Roster
+                        | BossOperation::Transcript { .. }
+                        | BossOperation::HistorySearch { .. }
+                        | BossOperation::Projects { .. }
+                ),
+                "Counsel can advise, propose, and relay human instructions through the Counsel commands"
+            );
+        }
         if !was_active {
             self.wake_summon_queue();
             // Chains waiting on admission or a deferred seal resume on the
@@ -236,6 +264,7 @@ impl WakuBackend {
             self.drive_chains();
         }
         match operation {
+            BossOperation::Counsel { action } => self.handle_counsel_operation(caller, action, events),
             BossOperation::InstructionPin { action } => self.handle_instruction_pin(caller, action),
             BossOperation::Chain { action } => {
                 use waku_protocol::chains::{ChainControl, ChainOperation};
@@ -366,7 +395,17 @@ impl WakuBackend {
                         project_bindings = steps.iter().map(|step| step.project_id).collect();
                     }
                     let is_result = matches!(action, ChainOperation::RecordResult { .. });
-                    self.boss.chain_operation_with_preflight(caller, action, Some(&project_bindings), resume)?;
+                    let retry = if let ChainOperation::Control {
+                        chain_id, expected_revision, control: ChainControl::Retry,
+                        source_revision: Some(waku_protocol::chains::ChainBaseSource::Bare(revision)),
+                    } = &action {
+                        let document = self.boss.document();
+                        let chain = document.chains.iter().find(|chain| chain.id == *chain_id)
+                            .ok_or_else(|| anyhow!("unknown chain"))?;
+                        anyhow::ensure!(chain.revision == *expected_revision, "stale chain revision");
+                        self.chain_retry_verification(*chain_id, revision)?
+                    } else { None };
+                    self.boss.chain_operation_with_retry_preflight(caller, action, Some(&project_bindings), resume, retry)?;
                     if is_result {
                         Ok(BossResult::Saved)
                     } else {
@@ -753,6 +792,11 @@ impl WakuBackend {
                 }
                 self.boss.with_operation_lock(|| {
                     self.boss.require_control(caller, session_id)?;
+                    if matches!(&action, EmployeeControl::Prompt { .. } | EmployeeControl::Steer { .. })
+                        && let Some(reason) = self.boss.document().employee_prompt_control(session_id).reason
+                    {
+                        bail!("{reason}");
+                    }
                     if let EmployeeControl::SetPurpose { purpose } = &action {
                         self.boss.set_employee_purpose(session_id, *purpose)?;
                         return Ok(BossResult::Saved);
@@ -933,7 +977,7 @@ impl WakuBackend {
                                     self.boss.set_employee_job_title(session_id, job_title)?;
                                 }
                                 let prompt = prompt.clone();
-                                self.requeue_employee(session_id, |ticket, started| {
+                                self.requeue_employee(session_id, caller, |ticket, started| {
                                     // A session that already ran replays the
                                     // prompt as a new turn behind its parked
                                     // backlog — the transcript owns the
@@ -1041,7 +1085,7 @@ impl WakuBackend {
                     if caller.is_none() {
                         self.memory_guard.user_resume(session_id)?;
                     }
-                    self.resume_employee(session_id)?;
+                    self.resume_employee(session_id, caller)?;
                     Ok(BossResult::Saved)
                 })
             }
@@ -1052,10 +1096,10 @@ impl WakuBackend {
                     anyhow::ensure!(employee.plan_readiness.as_ref().is_some_and(|r|
                         r.phase == waku_protocol::boss::PlanReadinessPhase::Blocked), "required-plan attempt is not blocked");
                     if employee.expired() {
-                        self.resume_employee(session_id)?;
+                        self.resume_employee(session_id, caller)?;
                     } else {
                         self.retire_plan_runtime(session_id, events)?;
-                        self.requeue_employee(session_id, |ticket, _| {
+                        self.requeue_employee(session_id, caller, |ticket, _| {
                             ticket.pending_prompts.push("Retry the same required-plan binding. Preserve existing work; the daemon redelivers the complete approved revision before implementation.".into());
                         })?;
                     }
@@ -1109,7 +1153,7 @@ impl WakuBackend {
                 limit,
                 offset,
             } => {
-                if caller.is_some_and(|id| !self.boss.has_boss_authority(id)) {
+                if caller.is_some_and(|id| !self.boss.is_counsel(id) && !self.boss.has_boss_authority(id)) {
                     bail!("only the boss or a human can search history");
                 }
                 // `None` scopes to the boss's reach — every retained record,
@@ -1133,7 +1177,7 @@ impl WakuBackend {
                 Ok(BossResult::Speak { delivered })
             }
             BossOperation::Context => {
-                if caller.is_some_and(|id| !self.boss.has_boss_authority(id)) {
+                if caller.is_some_and(|id| !self.boss.is_counsel(id) && !self.boss.has_boss_authority(id)) {
                     bail!("only the boss or a human can read the work digest");
                 }
                 Ok(BossResult::Context {
@@ -1141,7 +1185,7 @@ impl WakuBackend {
                 })
             }
             BossOperation::Projects { action } => {
-                if caller.is_some_and(|id| !self.boss.has_boss_authority(id)) {
+                if caller.is_some_and(|id| !self.boss.is_counsel(id) && !self.boss.has_boss_authority(id)) {
                     bail!("only the boss or a human can discover the project catalog");
                 }
                 use waku_protocol::projects::ProjectOperation;
@@ -1333,7 +1377,7 @@ impl WakuBackend {
                     _ => None,
                 };
                 let result = self.boss.memory(caller, caller_project, operation)?;
-                // Every successful record leaves a durable card in the
+                // Every confirmed note leaves a durable card in the
                 // recording session's transcript — the row the user's undo
                 // hangs off. The note already persisted, so a failed
                 // marker logs rather than reporting the record as failed.
@@ -1499,6 +1543,23 @@ impl WakuBackend {
         }
         let note: RecordedNote =
             serde_json::from_value(note.clone()).context("invalid recorded memory note")?;
+        let source_id = format!("memory-record-{}", note.id);
+        {
+            let mut state = self.task_state.lock();
+            if let Some(session) = state.sessions.iter_mut().find(|s| s.id == session_id) {
+                self.task_store.hydrate(session)?;
+                if session
+                    .transcript_blocks
+                    .iter()
+                    .flat_map(|block| &block.activities)
+                    .any(|activity| activity.source_id.as_deref() == Some(source_id.as_str()))
+                {
+                    // A confirmation retry must preserve the original card,
+                    // including its removed state after the user undoes it.
+                    return Ok(());
+                }
+            }
+        }
         let document = self.boss.document();
         let recorded_by = if document.session_id == Some(session_id) {
             Some(document.identity.name.clone())
@@ -1520,11 +1581,8 @@ impl WakuBackend {
             recorded_by,
             retracted: false,
         };
-        // The marker keys on the note id: a `record` retry deduped to the
-        // same note refreshes its existing card in place rather than
-        // stacking a duplicate row.
         let mut marker = crate::model::ActivityItem::new(
-            Some(format!("memory-record-{}", card.note_id)),
+            Some(source_id),
             crate::model::ActivityKind::Tool,
             "Recorded a memory".to_owned(),
             None,
@@ -1656,9 +1714,23 @@ impl WakuBackend {
         {
             let mut state = self.task_state.lock();
             state.push_session(session.clone());
-            self.task_store.save(&mut state)?;
+            if self.boss.uses_database() {
+                let batch = self.task_store.save_batch(&mut state);
+                let mut host = self.task_store.session_commit(&batch);
+                if let Err(error) = self.boss.set_session_id_with(id, &mut host) {
+                    state.sessions.retain(|session| session.id != id);
+                    state.unmark_sessions_dirty(&std::collections::HashSet::from([id]));
+                    return Err(error);
+                }
+                state.unmark_sessions_dirty(&batch.dirty_ids);
+            } else {
+                self.task_store.save(&mut state)?;
+                self.boss.set_session_id(id)?;
+            }
         }
-        self.boss.set_session_id(id)?;
+        if self.boss.uses_database() {
+            self.boss.notify_session_commit();
+        }
         self.wake_summon_queue();
         Ok(BossResult::Session {
             session: Box::new(session),

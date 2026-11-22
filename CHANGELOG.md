@@ -4,6 +4,175 @@ Release notes for Goddard Desktop and features shared across clients.
 Changes specific to the mobile app are in
 [the mobile changelog](CHANGELOG.mobile.md).
 
+## [0.19.0]
+
+### Features
+
+- **Sessions**
+  - Tasks running out of view use less desktop work while retaining permissions and completion notifications. Transcripts retry loading automatically. Follow-ups keep their worktree, with recovery offering an existing checkout or saved snapshot when needed.
+  - Active task goals pause automatically when Jev marks the latest turn as “Awaiting decision”.
+  - Devin failures now leave a local diagnostic timeline of runtime startup, submissions, and outcomes without message content. Logs rotate within 20 MB and expire after seven days while Goddard is running.
+  - **Rush this:** Turn on “Rush this” from a sidebar task’s right-click menu or choose “Rush current task” in the command palette to enable fast service where available, briefly interrupting and resuming active work. Rushed tasks appear in a dedicated sidebar group above Pinned. Input requests and finished tasks open the task’s usual conversation and controls in a modal when another task is selected. Queued prompts and active goals continue without opening the modal. Click outside or press Escape to dismiss without responding. The modal keeps its width when the right panel is open behind it.
+  - **Task scratch:** `goddard-agent scratch NAME` gives a task's agent a daemon-owned folder for reproducible files (downloads, fixtures, caches) that survives machine restarts and lives on the host the task runs on. It is deleted when the task is archived or removed, and Reclaim Disk Space can clear an idle task's scratch.
+  - Restore archived chats with “Unarchive...” in the command palette; browse the 20 most recently archived chats or search older chats.
+- **Sidebar**
+  - Cmd-click in the sidebar selects tasks without adding the current task; use Cmd-Shift-click to include it in a range.
+  - Click a sidebar group’s eye icon to toggle extra details until you leave the group; hovering alone no longer activates it. Keyboard activation keeps details visible until released.
+  - Hover over a task in the sidebar for 200 ms to preload its latest transcript window before opening it.
+- **Composer**
+  - Continue unfinished work with a suggested prompt when a turn is marked Partial.
+  - Copy or cut reference and pasted-text chips between tasks without losing their chip form; pasted-text chips copied from transcript messages also stay collapsed when pasted into the composer.
+  - When an agent offers one clear recommendation, Jev can suggest “Do that” to ask the agent to carry it out.
+  - Mention skills with `@` in the desktop composer, alongside files and tasks, and insert them as inline chips.
+- **Providers**
+  - New Antigravity tasks use Goddard’s chat and tool approvals with a current Antigravity CLI. Existing Antigravity tasks still open in the terminal.
+  - Auto (Jev) stays visible in the model picker and joins the end of favorites when configured and enabled. Favorite shortcuts now follow the first nine favorites in order, with no slot reserved for Auto.
+  - Long waits near a full context window now show that the provider may be compacting; the context usage panel reports likely compaction when a large usage drop follows. These hints never interrupt or restart a task.
+- **Git**
+  - The dirty-worktree archive dialog now lets you discard uncommitted changes or ask the agent to clean up and request archiving.
+  - Run Git commit, push, pull, and pull with rebase from the command palette using the active terminal, task workspace, or project; each command shows its target directory.
+- **Transcript**
+  - New file and folder attachments retain their originals in the transcript even when an agent edits or deletes its working copies.
+  - Summary paragraphs starting with “Put simply: ” appear bold and larger, making the takeaway easier to spot.
+  - Task transcripts show “Sending prompt…” until the provider accepts the prompt, with working time starting at acceptance and preparation progress still shown.
+  - **Transcript:** Find-in-transcript searches the full retained history, including tool output that has not been downloaded. Tasks open with their full session so saved permissions and provider settings stay accurate. Paged history shows a muted loading spinner and preserves your position. Turn navigation represents all retained visible prompts and jumps directly to unloaded turns. Paging retains messages at page boundaries, including final responses. Task navigation keeps the current screen visible for up to 100 ms while the destination loads, then switches immediately when ready or shows loading feedback.
+- **Panels**
+  - Background processes now show active processes first and at most five exited processes in the dropdown and tab, with an “Exited processes” heading in the tab.
+  - When reading a Markdown file in the right panel, click a link to another Markdown file to open it in a new tab there.
+- **Terminals**
+  - Use the command palette from a focused terminal to go to its primary `.git` checkout root, return to the previous checkout visited through these commands, or go to an existing checkout of the default branch.
+  - Copy the focused terminal’s retained history and current screen as plain text with “Terminal: Copy scrollback” in the command palette.
+  - Use each terminal’s actions menu to split panes, move a pane out, or unsplit the whole group while keeping shells and running commands alive.
+  - Press Cmd+Shift+Enter while a right-panel terminal has focus to maximize the panel or restore its previous size.
+  - Press Cmd+F (Ctrl+F on Windows and Linux) in a terminal to search its scrollback and jump between matches.
+- **Navigation**
+  - Use “Search worktrees…” in the desktop command palette to find a project's worktree, open a recent task, or create a task in that worktree.
+  - Choose whether Go to next unread completion prefers starred projects after unread work is exhausted with “Prefer starred projects when nothing is unread” in General settings, enabled by default.
+  - Switch focused projects directly with “Focus project…” in the command palette while “Unfocus project” remains available.
+- **Settings**
+  - Edit suggested prompts directly beneath their row in Jev → Prompts, with separate Label, Prompt, and Condition fields for composer text, agent instructions, and Jev’s suggestion criteria.
+  - Choose how many recent task transcripts stay in memory under General → Sessions, defaulting to three. Retained tasks receive background transcript updates; older tasks reload when reopened without stopping their agents.
+- Your most-used `@` suggestions now rank first within each project, ahead of suggestion type, with usage remembered across restarts.
+- **Project sync actions:** Use “Sync to remote host...” in the command palette to push committed changes to origin and pull them in a matching project, or “Sync to friend...” to request a Friends sync pairing. Both use the current project or ask you to choose; uncommitted changes are never committed automatically.
+
+### Experiments
+
+- **Boss**
+  - Boss and employee chats now retain access-mode changes before their first message; newly summoned employees inherit the supervisor’s saved access mode, including Full access after a restart.
+  - **Boss:** employee chains paused on approval gates are now resolvable — the Boss view's new Chains section lists every chain, records an explicit approve or reject per required gate, and offers pause, resume, retry, accept handoff, and cancel for the current state. Retries of committed-workspace chains retain the original checkout, including uncommitted work, once its previous employee has released it. Clean descendant repairs by released prerequisite owners can also be retried after the daemon verifies their managed adoption lineage and outcome; ownership or source changes before dispatch still stop the retry.
+  - **Boss:** retrying a paused dependency chain after released prerequisite repairs no longer rejects repairs the Boss admitted under a rotated chat generation or a planning session — the recovery check compares the supervising principal, not the stranded session id, and now names which ownership fact blocked the retry.
+  - **Concurrent writer reload:** Boss no longer wedges on "Boss database changed in another host" when a second daemon shares its data directory: the extra daemon now refuses to start on an already-owned directory, and a conflicted write reloads the committed state so the next operation succeeds.
+  - Boss context now focuses on current work and pending decisions, leaving project catalogs, finished employees, and automation details available on demand.
+  - Ask Counsel to relay instructions to Boss or message an existing task directly. Recommendation cards stay inline in Counsel history, and automatic reviews wait while a recommendation is open or saved for later.
+  - **Counsel flag:** Counsel now has its own opt-in under Settings → Experiments, off by default. It works only while Boss is also enabled; turning Counsel off leaves Boss running on its own, and your Counsel chat and recommendations are still there when you turn it back on.
+  - **Counsel recommendations:** Counsel shows each recommendation as a card at the point in the chat where it was proposed, with the exact Boss message behind a collapsed "Message to Boss" section. After Counsel finishes answering, it may add a fresh recommendation on its own, and an approved instruction is delivered to Boss by Counsel with visible pending/failed/sent status that can be retried.
+  - Opening Counsel leaves the chat idle. Press Enter on an empty composer to ask Counsel to continue.
+  - Counsel has its own chat after the Boss section. Open it with `/counsel` to discuss next steps grounded in recent sessions, revise or defer recommendations, and send an approved instruction to Boss with linked conversation history.
+  - **Boss:** `goddard-agent boss deliverable publish` now returns the stored deliverable record and its `deliverable:<id>` reference, so employees can cite published artifacts in chain results and handoffs.
+  - Cmd+Shift-clicking a sidebar item starts a range from the selected deliverable or task, including both endpoints and the items between them.
+  - Selecting sidebar deliverables with Cmd-click now moves keyboard focus to the selection so archive shortcuts work after using a browser preview.
+  - Boss chat no longer captures Git checkpoints or delays follow-up messages with “Checking for changes”.
+  - Boss, Counsel, and employees keep distinct names so you can tell who is speaking.
+  - **Employee approvals:** The Boss chat now pins an employee's unanswered request — a tool permission, a structured question, or a computer-use approval — to the top of its transcript with the same controls the employee's task shows, so you can answer it inline instead of navigating to the employee's task.
+  - **Boss:** Direct messages resume expired employees, including the latest employee in a chain and assignments whose outcome already closed. When an employee cannot resume, the composer disables direct input and Send, explains why, and offers the current employee when available.
+  - Boss employee groups automatically collapse when all their employees have expired, and reopen when a live employee joins unless you collapsed the group yourself.
+  - **Boss:** retry failed artifact handoffs in the existing local checkout at its current committed source, preserving unrelated work and the original completion gates.
+  - Agents now receive a reminder of the memory guidelines and must explicitly confirm proposed notes before they enter shared memory. Unconfirmed proposals expire.
+  - The Boss's work digest no longer reports an outcome as needing attention when the wait recorded after the evidence explains the pause, matching the Tasks panel — newer evidence and owed reviews still surface.
+  - **Boss:** reopening a completed outcome now stays open — a finished employee chain no longer re-marks it completed on the next pass, and a reopened outcome accepts a new finishing chain.
+  - Boss Tasks now groups resumed outcomes and counts those needing attention based on their current status, even if an earlier attempt was blocked.
+  - Boss Tasks no longer lists an outcome in Blocked when the wait the boss recorded afterward explains the pause, and it surfaces paused chains that stalled on an unhandled error.
+  - Prevent archiving the Boss chat, including with the archive keyboard shortcut. Use `/clear` to reset its conversation.
+  - The Recently viewed tasks modal now omits Boss, Counsel, and employee chats.
+  - **Sidebar archiving:** Tasks and deliverables disappear immediately when archived, retain pending changes across restarts, and offer grouped Undo. Routine saves stay quiet; slow saves and failures appear above the sidebar footer without shifting rows, with Retry and expandable recovery details. Archive confirmations retain the task or deliverable wording and count.
+  - Boss reminders now omit tasks that gained an assignment, waiting reason, or completion while the alert was queued.
+  - **Boss:** "Start now" on a queued employee now continues a task paused by host memory protection instead of hanging on "Starting," and a queued ticket that cannot dispatch yet reports the real wait reason.
+  - Boss Tasks aligns Show more with outcome status indicators, removes trailing attempt-history and follow-up rows, and marks employees awaiting follow-up with a yellow bell.
+  - Boss now saves new chats and queued employees together with their session records in the task database, retaining existing JSON files as migration backups and avoiding full-file rewrites for small coordination updates.
+  - **Boss:** unattended-task reminders now leave deliberately held work alone: a chain parked by its Pause control counts as a recorded wait, while a chain paused by a failed handoff still surfaces with its pause reason. The first reminder also waits an hour of quiet instead of 15 minutes.
+  - Cmd+K task search excludes Boss and employee tasks, including retired employees.
+  - Improve Stop response during native Codex and Claude operations while preserving the stopped turn's history. Stops during Boss or required-plan preparation no longer appear as prompt failures.
+- **Sessions**
+  - **Qa layout:** QA sessions keep chat beside the commit diff, show permission requests, and offer a Commit button to reopen the reviewed changes. Chat, Review, and Terminal state now survive provider startup. QA conversations stay out of the main window's sidebar, including after a review ends. Project QA settings use the shared model picker and initially select your last-used provider and model. QA settings can also use the primary local checkout, restore its original branch afterward, reuse dependency installs, and attach to an existing server URL.
+  - Jev title rewrites are now opt-in in Settings → Jev. When enabled, rewrites use broader task context and keep titles focused on the product goal. Provider updates continue to preserve custom titles.
+- **Git**
+  - **Land progress card:** `/land` progress in the transcript now shares the “Landed” card's look, and a landing that stops on conflicts reports a single line — the conflicted files stay in the conflict dialog and the working tree instead of listing in the transcript.
+  - The Git panel now shows a single base lane after landing, without leaving HEAD orange or offset from the rest of the shared history.
+  - **Landing queue:** See `/land` queue position in desktop, web, and mobile, and cancel a landing before it starts. `/land` and `merge submit` share each repository’s queue; duplicate requests attach to existing jobs, and reconnecting checks status without submitting again. Desktop `/land` uses one transcript element for progress and results, retaining conflict details when resolution continues in chat. You can keep the desktop Git panel open while a landing is in progress.
+  - Open Git as a right-panel tab from the Git button in the top bar.
+- Dependency chains can retry from verified committed repairs in their original workspace while preserving ownership and recovery checks.
+
+### Fixed
+
+- **Sessions**
+  - Rewinding a task cancels older background change checks and prevents their late results from attaching to replacement turns.
+  - Reopening an idle Codex task now includes turns added by resuming the same thread in Codex CLI.
+  - Fixed `/compact` showing a daemon disconnected error when a restored session needs to reopen its provider thread.
+  - Fixed a slow task rewind or fork delaying controls in other tasks.
+  - Devin sessions now get separate time for startup and a first response after sending a message. Timeouts identify the delayed stage and explain when message delivery remains uncertain.
+  - Prevent delayed task saves from restoring messages removed by a successful rewind.
+  - Long goals now scroll inside the Goal editor instead of overflowing into the modal’s actions.
+  - Preserve the original Codex conversation when rewinding a message, so a lost provider reply leaves the task and its files recoverable.
+  - Keep tasks and their model settings after rewinding to the beginning and restarting Goddard.
+  - Provider-generated titles can replace the initial prompt-based placeholder once, then preserve the generated title and any title chosen by you.
+  - Stop can now cancel a pending Codex message rewind without waiting for the provider reply.
+- **Composer**
+  - Copying a sent message or composer text now includes pasted text chip contents in blockquotes titled “Pasted text.”
+  - Prompts recover after another client rewinds the task and replaces its runtime, and ask you to retry if history or selected options change while preparing a prompt.
+  - Hide the composer’s mode chip until the saved session mode has loaded, instead of showing “Auto-accept edits” while loading.
+  - If Goddard can’t prepare the workspace for a message, it tells you the message wasn’t sent and prompts you to retry.
+- **Providers**
+  - The model picker shows which model started after Auto (Jev) routing, including when the app starts a fallback.
+  - Fixed Codex tasks failing to start when Goddard finds a Codex CLI version that does not accept `--stdio`.
+  - Fixed the usage panel showing `%{count}` instead of `1` when one reset credit is available.
+  - Prompts keep the model and options selected when sent, or report a settings failure before running. Late failures preserve newer model choices and rewound turns.
+  - The provider-switch confirmation now receives keyboard focus when it opens, and Escape dismisses it even before focus arrives.
+  - Fixed a startup error when switching providers in an existing task, and preserved the prior conversation so you can switch back after reopening the task.
+- **Transcript**
+  - Keep image attachments visible after reopening a task, including filenames containing spaces.
+  - Show images generated by Codex in the task transcript.
+  - Prompts sent immediately now appear in the transcript while the existing “Sending prompt…” status is shown.
+  - Return to previously viewed tasks without waiting for their transcripts to reload; loaded content stays in memory for the lifetime of the window.
+  - Fixed `/land` leaving its “Landing onto…” message behind after a successful landing instead of showing the Landed banner.
+  - Fixed the transcript shifting when turn status markers arrive after opening a task; marker lines now reserve their space and scroll horizontally in narrow windows. Copy actions occupy the first footer line when no markers apply.
+  - Fixed screenshots linked from local files in agent responses showing only their captions.
+  - Markdown file links in agent replies open in the right panel preview even when the file is outside every known project.
+  - Long transcript notices wrap onto multiple lines, and web links in them are clickable.
+  - Follow-up prompts sent into a running turn appear immediately and stay visible while awaiting provider acknowledgment, including across transcript refreshes.
+  - Reopening a task preserves how your prompt was written, including pasted-text chips and task references, when the provider received an expanded version.
+  - Fixed the transcript jumping back to an older scroll position shortly after sending from the latest turn with “Keep scroll position when sending” enabled.
+- **Terminals**
+  - **Busy card escape:** Pressing Escape inside a floating terminal that's running a command no longer hides the card outright: the press still reaches the program (vim, fzf, and other TUIs keep working) and the card's close button arms — a deliberate second Escape within three seconds hides it. An idle shell still hides on one press.
+  - Split panes now fill the floating terminal card. Use the first pane’s toolbar to expand or hide the group.
+- **Keyboard**
+  - When you archive a task with the keyboard shortcut, Goddard stays on the task if it needs your confirmation, and only moves to the next task once the archive actually happens.
+  - Press Cmd+Enter again after starting a landed task’s push to queue Archive immediately; the task stays open if the push fails.
+- **Permissions**
+  - Approval requests now play your completion sound when they arrive in another task, respecting sound settings and project focus.
+  - Read-only `goddard-agent` commands, including task reads, searches, and help, run without human approval prompts.
+  - Changing a task’s permission mode now takes effect when you immediately resume it, as well as when you send a new message.
+- **Friends**
+  - Retrying a first Codex reply to a forwarded message opens a fresh thread when the earlier attempt never started and includes the original message as context.
+  - Agents now receive the shared message, or file-transfer note and receipt, when you first reply to a task received from a friend.
+- Fixed daemon startup hanging when a scheduled automation's recent history crosses a daylight-saving clock rollback.
+- Fixed intermittent Computer Use denials immediately after allowing access.
+- **Daemon request waits:** Slow operations waiting for daemon capacity no longer stall later actions on the same app connection. Resource release and cancellation have a dedicated worker. `goddard-agent resource acquire` keeps its place in line through brief polling overload. `goddard-agent resource run` survives brief overload and stops its whole process group when cancelled.
+- The desktop task list can load while transcript saves are queued behind a slow database write.
+- The file tree stays responsive while background provider checks keep the daemon busy.
+- Fixed “Move to worktree” reporting success while a task could revert to its original checkout.
+- Inbox, Drafts, Automations, Projects, and Brain now show their own top bars instead of the last selected task’s details, with navigation available when the sidebar is collapsed.
+- Opening a file with Cmd+P keeps existing right-panel files open and puts the new tab first.
+- Fixed remote daemon access settings hanging on Windows when changing credentials or turning access off.
+- Reclaim Disk Space scans and cleans tasks one at a time to reduce contention, shows results and progress as they arrive, and lets you rescan after failures. Canceling skips tasks still in the scan queue.
+- A maximized file tab in a task's side panel keeps its file tree resizable, and picking another file in the tree no longer restores the panel.
+- A stalled sandbox checkpoint lookup now times out after five seconds, so sandbox sign-in reports an error and frees a daemon worker for other requests.
+- Reading provider and other daemon settings no longer waits for an in-progress settings save.
+- Tasks move to Today in the sidebar’s Date grouping when a reply is accepted into a running turn.
+- Goddard keeps responding to unrelated requests while friend operations or sandbox sign-in wait on a peer or VM preparation.
+- SSH hosts detect unresponsive connections and preserve working tunnels during recovery. Prompts waiting for a remote are saved locally and recover to Drafts after an app restart; authentication failures restore the composer.
+- Opening a desktop task no longer waits for unrelated background task loads to free a slot.
+- Fixed tasks briefly (or indefinitely, on failure) falling back to the loading state after opening, where a control-only task view snapshot could wipe the loaded transcript; tasks deleted elsewhere now leave the list instead of loading forever.
+
 ## [0.18.0]
 
 ### Features

@@ -4,6 +4,7 @@ import type { AutomationOperation } from "./AutomationOperation";
 import type { AvatarStyle } from "./AvatarStyle";
 import type { BossPersonaUpsert } from "./BossPersonaUpsert";
 import type { ChainOperation } from "./ChainOperation";
+import type { CounselOperation } from "./CounselOperation";
 import type { CustomCommandIcon } from "./CustomCommandIcon";
 import type { EmployeeControl } from "./EmployeeControl";
 import type { EmployeeGoal } from "./EmployeeGoal";
@@ -29,7 +30,7 @@ import type { ResourcePolicy } from "./ResourcePolicy";
 import type { ResourceSet } from "./ResourceSet";
 import type { RuntimeMode } from "./RuntimeMode";
 
-export type BossOperation = { "type": "instructionPin", action: InstructionPinOperation, } | { "type": "chain", action: ChainOperation, } | { "type": "view" } | { "type": "roster" } | { "type": "context" } | { "type": "projects", action: ProjectOperation, } | { "type": "retryRotation" } | { "type": "clear" } | { "type": "open", provider: ProviderKind, model: string | null, mode: RuntimeMode, } | { "type": "createPlan", title: string, planFile: string, prompt: string, provider: ProviderKind | null, model: string | null, reasoningEffort: string | null, } | { "type": "browse", url: string, title: string | null, } | { "type": "terminal", title: string, cwd: string, command?: string, } | { "type": "finalizePlan", planFile: string | null, items?: Array<string>, reviewed?: PlanReview, } | { "type": "previewPlan", plan: string, } | { "type": "automation", action: AutomationOperation, } | { "type": "summon",
+export type BossOperation = { "type": "counsel", action: CounselOperation, } | { "type": "instructionPin", action: InstructionPinOperation, } | { "type": "chain", action: ChainOperation, } | { "type": "view" } | { "type": "roster" } | { "type": "context" } | { "type": "projects", action: ProjectOperation, } | { "type": "retryRotation" } | { "type": "clear" } | { "type": "open", provider: ProviderKind, model: string | null, mode: RuntimeMode, } | { "type": "createPlan", title: string, planFile: string, prompt: string, provider: ProviderKind | null, model: string | null, reasoningEffort: string | null, } | { "type": "browse", url: string, title: string | null, } | { "type": "terminal", title: string, cwd: string, command?: string, } | { "type": "finalizePlan", planFile: string | null, items?: Array<string>, reviewed?: PlanReview, } | { "type": "previewPlan", plan: string, } | { "type": "automation", action: AutomationOperation, } | { "type": "summon",
 /**
  * The employee role layered on the canonical Employee base — a
  * shipped specialist or a custom persona. `None` assigns the

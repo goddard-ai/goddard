@@ -267,6 +267,9 @@ impl WakuBackend {
     /// report per completed chain. Safe to call from any boss-affecting
     /// path; every action reconciles against stored state.
     pub(super) fn drive_chains(&self) {
+        let Ok(_admission) = self.idle_shutdown.enter() else {
+            return;
+        };
         if !self.boss.is_active() {
             return;
         }
@@ -517,7 +520,7 @@ impl WakuBackend {
     /// The assignment text a step's employee receives — its own prompt,
     /// the handoff brief the seam composed from the predecessor's sealed
     /// evidence, and the identities its structured-result write needs.
-    fn compose_chain_prompt(
+    pub(super) fn compose_chain_prompt(
         &self,
         chain: &EmployeeChain,
         step_index: usize,
@@ -937,7 +940,7 @@ impl WakuBackend {
                     _ => crate::model::ReportTriggerKind::Failed,
                 },
             );
-        let prompt = format!(
+        let mut prompt = format!(
             "Employee chain {} paused at step {} \"{}\" — {}. Work and evidence are preserved. Inspect with goddard-agent boss chain --json '{{\"type\":\"show\",\"chainId\":\"{}\"}}', then resume, retry, or cancel through the chain controls.",
             chain.id,
             chain.current_step + 1,
@@ -945,6 +948,13 @@ impl WakuBackend {
             attention.reason,
             chain.id,
         );
+        if attention.reason.starts_with("approval required:") {
+            // The gate takes only a human decision — the boss's own chain
+            // controls cannot record one, so name the surface that does.
+            prompt.push_str(
+                " The approval gate accepts only a human decision — record it in the Boss view's Chains section, then resume the chain.",
+            );
+        }
         let trigger = sender
             .and_then(|id| self.boss.employee_including_retired(id))
             .map(|employee| crate::model::ReportTrigger::new(&employee, kind));

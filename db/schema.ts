@@ -12,7 +12,7 @@
  * fetched only when a session is opened.
  */
 
-import { blob, index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { blob, index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 /** Independent of transcript saves: design regeneration never replaces discussion. */
 export const wireframeDiscussions = sqliteTable("wireframe_discussions", {
@@ -124,7 +124,9 @@ export const sessions = sqliteTable(
      * confirmed.
      */
     configActivation: text("config_activation"),
+    taskConfiguration: text("task_configuration"),
     metadataRevision: integer("metadata_revision").notNull().default(0),
+    historyGeneration: integer("history_generation").notNull().default(0),
   },
   (table) => [
     index("sessions_by_project").on(table.projectId, table.updatedAt),
@@ -189,6 +191,110 @@ export const sessionDetails = sqliteTable("session_details", {
 });
 
 /**
+ * Flattened transcript index: one row per message or activity in reading
+ * order. `seq` is the absolute flattened position — blocks anchored
+ * `afterMessage` messages render before the message at that index, so a
+ * window read never needs to merge two tables itself.
+ *
+ * `compact` holds the wire row with bulk fields removed (a stripped
+ * `ActivityItem`); message rows carry NULL and join `messages` for their
+ * fields. Written inside the same transaction as `session_details`, so the
+ * index cannot disagree with the authoritative record.
+ */
+export const transcriptEntries = sqliteTable(
+  "transcript_entries",
+  {
+    sessionId: text("session_id").notNull(),
+    /** Absolute flattened position; append-only for ordinary growth. */
+    seq: integer("seq").notNull(),
+    /** Message id or activity id — cursor validation's identity half. */
+    entryId: text("entry_id").notNull(),
+    /** 'message' | 'activity'. */
+    kind: text("kind").notNull(),
+    turnId: text("turn_id"),
+    /**
+     * Absolute message anchor — for a message its position, for an activity
+     * its owning block's `after_message`. Never window-local.
+     */
+    afterMessage: integer("after_message").notNull(),
+    blockIndex: integer("block_index"),
+    activityIndex: integer("activity_index"),
+    /** Head revision of the write that last changed this row. */
+    revision: integer("revision").notNull(),
+    /** Write-skip fingerprint over the row's stored content. */
+    fingerprint: integer("fingerprint").notNull(),
+    /** Stripped ActivityItem JSON; NULL for messages (joined on demand). */
+    compact: text("compact"),
+    compactBytes: integer("compact_bytes").notNull().default(0),
+  },
+  (table) => [
+    primaryKey({ columns: [table.sessionId, table.seq] }),
+    index("transcript_entries_by_id").on(table.sessionId, table.entryId),
+    index("transcript_entries_by_turn").on(table.sessionId, table.turnId, table.seq),
+  ],
+);
+
+/**
+ * Bulk transcript text kept out of `compact`: activity output, arguments,
+ * detail, reasoning, file changes, and image URLs. Range reads slice with
+ * `substr(content, …)`; find scans search these rows plus `messages`.
+ * A pruned payload has no row — its descriptor then reports unavailable.
+ */
+export const transcriptPayloads = sqliteTable(
+  "transcript_payloads",
+  {
+    sessionId: text("session_id").notNull(),
+    entryId: text("entry_id").notNull(),
+    /** 'output' | 'arguments' | 'detail' | 'reasoning' | 'file_changes' | 'image_urls'. */
+    field: text("field").notNull(),
+    /** Head revision of the write that last changed this field. */
+    revision: integer("revision").notNull(),
+    fingerprint: integer("fingerprint").notNull(),
+    bytes: integer("bytes").notNull(),
+    /** The stored value was already clipped at a source-side cap. */
+    truncated: integer("truncated", { mode: "boolean" }).notNull().default(false),
+    content: blob("content").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.sessionId, table.entryId, table.field] }),
+    index("transcript_payloads_by_session").on(table.sessionId),
+  ],
+);
+
+/** `AgentTurn` rows, addressed for window turn metadata and turn-scoped paging. */
+export const transcriptTurns = sqliteTable(
+  "transcript_turns",
+  {
+    sessionId: text("session_id").notNull(),
+    turnId: text("turn_id").notNull(),
+    turnCount: integer("turn_count").notNull(),
+    /** Ordinal inside `session.turns` — latest turn is the max position. */
+    position: integer("position").notNull(),
+    data: text("data").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.sessionId, table.turnId] }),
+    index("transcript_turns_by_count").on(table.sessionId, table.turnCount),
+  ],
+);
+
+/**
+ * Per-session transcript head: presence means the normalized index covers
+ * this session (absence queues it for conversion), plus the small control
+ * state a window needs without parsing `session_details.data`.
+ */
+export const transcriptHeads = sqliteTable("transcript_heads", {
+  sessionId: text("session_id").primaryKey(),
+  /** Monotonic per session; bumped whenever any index row changes. */
+  revision: integer("revision").notNull(),
+  entryCount: integer("entry_count").notNull(),
+  messageCount: integer("message_count").notNull(),
+  /** JSON-serialized QueuedMessage array. */
+  queuedMessages: text("queued_messages").notNull().default("[]"),
+  detailsPruned: integer("details_pruned", { mode: "boolean" }).notNull().default(false),
+});
+
+/**
  * The daemon's durable attachment to a stable-runtime host session. One row
  * per task that ever ran through the surviving provider host: it records the
  * runtime session/generation the task is attached to and the host sequence
@@ -230,4 +336,31 @@ export const stableRuntimeReceipts = sqliteTable("stable_runtime_receipts", {
   /** JSON outcome recorded for the request before delivery was confirmed. */
   outcome: text("outcome").notNull(),
   recordedAt: integer("recorded_at").notNull(),
+});
+
+/** One committed Boss coordinator projection; collection members live in boss_records. */
+export const bossCoordinator = sqliteTable("boss_coordinator", {
+  id: integer("id").primaryKey(),
+  schemaVersion: integer("schema_version").notNull(),
+  revision: integer("revision").notNull(),
+  data: text("data").notNull(),
+});
+
+/** One Boss entity or history entry. Parent identities survive removal of session history. */
+export const bossRecords = sqliteTable("boss_records", {
+  collection: text("collection").notNull(),
+  parentId: text("parent_id").notNull(),
+  id: text("id").notNull(),
+  position: integer("position").notNull(),
+  lifecycle: text("lifecycle"),
+  data: text("data").notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.collection, table.parentId, table.id] }),
+  index("boss_records_lifecycle").on(table.collection, table.lifecycle),
+]);
+
+/** Immutable content addressed request, definition and approval payloads. */
+export const bossPayloads = sqliteTable("boss_payloads", {
+  digest: text("digest").primaryKey(),
+  data: text("data").notNull(),
 });

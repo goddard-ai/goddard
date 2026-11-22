@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::thread;
 
 use anyhow::{Context as _, anyhow, bail};
-use crossbeam_channel::{Sender, unbounded};
+use crossbeam_channel::{Sender, bounded, unbounded};
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -42,7 +42,7 @@ enum CommandMessage {
         request_id: String,
         answers: Vec<UserInputAnswer>,
     },
-    ApplyOptions(SessionOptions),
+    ApplyOptions(SessionOptions, Sender<bool>),
     Shutdown,
 }
 
@@ -109,7 +109,7 @@ impl DeepSeekDriver {
             model,
             reasoning_effort,
             service_tier,
-            context_window: _,
+            context_window,
             agent_preset,
             computer_use_enabled,
             computer_use_runtime,
@@ -124,6 +124,14 @@ impl DeepSeekDriver {
             allow_model_fallback: _,
             ephemeral: _,
         } = options;
+        anyhow::ensure!(
+            service_tier.is_none(),
+            "service tier selection is not supported for DeepSeek Harness"
+        );
+        anyhow::ensure!(
+            context_window.is_none(),
+            "context window selection is not supported for DeepSeek Harness"
+        );
         let (requested_session_id, resuming) = match provider_cursor {
             Some(ProviderResumeCursor::DeepSeek { session_id }) if !session_id.is_empty() => {
                 (session_id, true)
@@ -361,9 +369,19 @@ impl DriverControl for DeepSeekDriver {
     }
 
     fn apply_options(&self, options: SessionOptions) -> bool {
-        self.commands
-            .send(CommandMessage::ApplyOptions(options))
-            .is_ok()
+        if options.service_tier.is_some() || options.context_window.is_some() {
+            return false;
+        }
+        let (reply, response) = bounded(1);
+        if self
+            .commands
+            .send(CommandMessage::ApplyOptions(options, reply))
+            .is_err()
+        {
+            return false;
+        }
+        // The existing HTTP RPC deadlines bound the worker's settings calls.
+        response.recv().unwrap_or(false)
     }
 
     fn rollback(&self, turns: usize) -> anyhow::Result<Option<ProviderResumeCursor>> {
@@ -497,6 +515,7 @@ fn handle_command(
         CommandMessage::Steer(text) => match prompt(server, session_id, &text, "steer") {
             Ok(_) => {
                 let _ = events.send(DriverEvent::SteerAccepted {
+                    submission_id: None,
                     message: text,
                     sent_by_task: None,
                     hidden: false,
@@ -505,6 +524,7 @@ fn handle_command(
             }
             Err(error) => {
                 let _ = events.send(DriverEvent::SteerRejected {
+                    submission_id: None,
                     message: text,
                     reason: error.to_string(),
                     reason_i18n: None,
@@ -574,16 +594,21 @@ fn handle_command(
                 )));
             }
         }
-        CommandMessage::ApplyOptions(options) => {
+        CommandMessage::ApplyOptions(options, reply) => {
             let projections = fetch_history(server, session_id)
                 .ok()
                 .and_then(|history| history.projection_values);
             match apply_session_options(server, session_id, &options, projections.as_ref()) {
-                Ok(()) => *mode.lock() = options.mode,
+                Ok(()) => {
+                    *mode.lock() = options.mode;
+                    let _ = reply.send(true);
+                }
                 Err(error) => {
+                    let _ = reply.send(false);
                     let _ = events.send(DriverEvent::Error(format!(
                         "DeepSeek Harness could not apply the session options: {error}"
                     )));
+                    return false;
                 }
             }
         }
@@ -1011,6 +1036,21 @@ fn handle_approval_request(
         .get("reason")
         .and_then(Value::as_str)
         .unwrap_or("DeepSeek Harness is asking for permission to continue");
+    if matches!(tool_name, "bash" | "shell" | "execute")
+        && crate::agent_readonly::readonly_agent_input(payload)
+    {
+        if let Err(error) = server.respond(
+            rpc_id,
+            json!({
+                "sessionId": session_id, "approvalId": approval_id, "outcome": "allowed-once",
+            }),
+        ) {
+            let _ = events.send(DriverEvent::Error(format!(
+                "DeepSeek Harness rejected a read-only approval: {error}"
+            )));
+        }
+        return;
+    }
     let event = DriverEvent::Permission {
         request_id: rpc_id.to_owned(),
         title: format!("Allow {tool_name}?"),

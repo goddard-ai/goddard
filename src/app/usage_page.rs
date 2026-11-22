@@ -95,6 +95,12 @@ impl Waku {
         if page == SettingsPage::Git && !self.state.git_worktree_management_enabled {
             return;
         }
+        if self
+            .pending_session_activation
+            .is_some_and(|pending| pending.deferred.is_some())
+        {
+            self.pending_session_activation = None;
+        }
         // Reaching a page while settings was closed is a fresh visit —
         // whichever entry point landed here, the last visit's stack is dead.
         if self.settings_page.is_none() {

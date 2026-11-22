@@ -18,7 +18,7 @@ pub mod qa;
 pub mod routing;
 mod workspace_client;
 
-pub use client::{DaemonClient, PairReply, pair};
+pub use client::{DaemonClient, PairReply, PendingRequest, pair};
 pub use daemons::{DaemonKey, DaemonMap};
 pub use discover::DaemonDiscovery;
 pub use process::{

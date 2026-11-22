@@ -2,6 +2,7 @@
 
 use std::cell::Cell;
 use std::process::Output;
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
 pub use waku_exec::capture::{CaptureError, CaptureOptions, OutputLimit};
@@ -86,6 +87,16 @@ pub fn output(
     stdout: OutputLimit,
     input: Option<&[u8]>,
 ) -> Result<Output, CaptureError> {
+    output_cancellable(command, deadline, stdout, input, None)
+}
+
+pub(crate) fn output_cancellable(
+    command: &mut Proc,
+    deadline: Instant,
+    stdout: OutputLimit,
+    input: Option<&[u8]>,
+    cancellation: Option<&AtomicBool>,
+) -> Result<Output, CaptureError> {
     let deadline = REQUEST_DEADLINE.with(|current| {
         current
             .get()
@@ -94,15 +105,17 @@ pub fn output(
     command
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_EDITOR", "true");
-    let mut captured = waku_exec::capture::capture(
-        command,
-        CaptureOptions {
-            deadline,
-            stdout,
-            stderr: OutputLimit::Prefix(MAX_DIAGNOSTIC_BYTES),
-        },
-        input,
-    )?;
+    let options = CaptureOptions {
+        deadline,
+        stdout,
+        stderr: OutputLimit::Prefix(MAX_DIAGNOSTIC_BYTES),
+    };
+    let mut captured = match cancellation {
+        Some(cancellation) => {
+            waku_exec::capture::capture_cancellable(command, options, input, cancellation)
+        }
+        None => waku_exec::capture::capture(command, options, input),
+    }?;
     if captured.stdout_truncated {
         captured
             .stdout

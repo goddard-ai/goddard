@@ -2022,9 +2022,9 @@ pub const fn primary_shortcut<'a>(macos: &'a str, other: &'a str) -> &'a str {
 pub fn hide_window(window: &mut Window) {
     use objc2::MainThreadMarker;
     use objc2_app_kit::NSView;
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use raw_window_handle::RawWindowHandle;
 
-    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+    let Some(handle) = native_window_handle(window) else {
         return;
     };
     let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
@@ -2111,11 +2111,11 @@ pub fn configure_sidebar_material(
         NSAutoresizingMaskOptions, NSColor, NSView, NSVisualEffectBlendingMode,
         NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView, NSWindowOrderingMode,
     };
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use raw_window_handle::RawWindowHandle;
 
     let transparent = transparent && !reduce_transparency();
     let glass_active = transparent && glass_effect_supported();
-    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+    let Some(handle) = native_window_handle(window) else {
         return;
     };
     let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
@@ -2223,6 +2223,21 @@ pub fn configure_sidebar_material(
     }
 }
 
+
+/// `Window`'s raw-handle query is `unimplemented!` on GPUI's headless test
+/// window — a panic, not an `Err` — so probe it under `catch_unwind`; a
+/// window with no real platform behind it takes the same early return a
+/// foreign toolkit handle would.
+#[cfg(target_os = "macos")]
+pub(crate) fn native_window_handle(window: &Window) -> Option<raw_window_handle::WindowHandle<'_>> {
+    use raw_window_handle::HasWindowHandle;
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        HasWindowHandle::window_handle(window).ok()
+    }))
+    .ok()
+    .flatten()
+}
+
 #[cfg(not(target_os = "macos"))]
 pub fn configure_sidebar_material(_: &Window, _: gpui::Hsla, _: bool, _: bool) {}
 
@@ -2230,9 +2245,9 @@ pub fn configure_sidebar_material(_: &Window, _: gpui::Hsla, _: bool, _: bool) {
 pub fn set_sidebar_material_width(window: &Window, width: f32) {
     use objc2::MainThreadMarker;
     use objc2_app_kit::NSView;
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use raw_window_handle::RawWindowHandle;
 
-    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+    let Some(handle) = native_window_handle(window) else {
         return;
     };
     let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
@@ -2271,9 +2286,9 @@ pub fn set_sidebar_material_width(_: &Window, _: f32) {}
 #[cfg(target_os = "macos")]
 pub fn window_capture_id(window: &Window) -> Option<u32> {
     use objc2_app_kit::NSView;
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use raw_window_handle::RawWindowHandle;
 
-    let handle = HasWindowHandle::window_handle(window).ok()?;
+    let handle = native_window_handle(window)?;
     let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
         return None;
     };
@@ -2388,9 +2403,9 @@ pub fn set_window_appearance(window: &Window, dark: Option<bool>) {
         NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
         NSView,
     };
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use raw_window_handle::RawWindowHandle;
 
-    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+    let Some(handle) = native_window_handle(window) else {
         return;
     };
     let RawWindowHandle::AppKit(handle) = handle.as_raw() else {

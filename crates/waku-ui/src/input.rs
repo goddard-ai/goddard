@@ -1,3 +1,4 @@
+use crate::clipboard::{ChipContent, ClipboardAtom};
 use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -373,6 +374,8 @@ struct EditRecord {
     /// An IME composition still underway, amended in place as the marked
     /// text changes so the whole entry undoes as one step.
     composing: bool,
+    atoms_before: Option<Arc<Vec<(usize, ClipboardAtom)>>>,
+    atoms_after: Option<Arc<Vec<(usize, ClipboardAtom)>>>,
 }
 
 #[derive(Default)]
@@ -440,6 +443,8 @@ impl EditHistory {
             edited_at: now,
             sealed: false,
             composing: false,
+            atoms_before: None,
+            atoms_after: None,
         });
     }
 
@@ -479,6 +484,8 @@ impl EditHistory {
             edited_at: now,
             sealed: false,
             composing: true,
+            atoms_before: None,
+            atoms_after: None,
         });
     }
 
@@ -648,6 +655,9 @@ pub struct CollapsedPaste(pub String);
 pub struct ContentSplice {
     pub removed: Range<usize>,
     pub inserted: usize,
+    /// Typed atoms replacing this splice, relative to the inserted text.
+    /// `Some`, including an empty list, also restores atom identity on undo.
+    pub pasted_atoms: Option<Vec<(usize, ClipboardAtom)>>,
 }
 
 /// The sentinel an inline atom leaves in the field — the interlinear
@@ -700,6 +710,7 @@ pub fn atom_ref_icon(kind: waku_protocol::model::AtomRefKind) -> &'static str {
         AtomRefKind::MemoryBucket => "icons/database.svg",
         AtomRefKind::Automation => "icons/automations.svg",
         AtomRefKind::MemoryFile => "icons/brain.svg",
+        AtomRefKind::Skill => "icons/sparkle.svg",
     }
 }
 
@@ -722,6 +733,10 @@ pub struct InlineAtom {
     /// Optional preview, prepared by the owner and shown over the painted label.
     pub tooltip: Option<Rc<dyn Fn(&mut Window, &mut App) -> AnyView>>,
     pub label: SharedString,
+    /// Clipboard replacement for chips whose display label hides their content.
+    pub copy_text: Option<SharedString>,
+    /// Typed payload restored when pasted into another composer.
+    pub clipboard_atom: Option<ClipboardAtom>,
     pub icon: Option<&'static str>,
     pub avatar: Option<Arc<gpui::RenderImage>>,
 }
@@ -929,6 +944,7 @@ pub struct TextInput {
     /// marker substitutes to in the painted text. The owner keeps it in step
     /// with its atom list; a marker beyond the list paints as nothing.
     inline_atoms: Vec<InlineAtom>,
+    history_atoms: Arc<Vec<(usize, ClipboardAtom)>>,
     /// Escape clears the field when it has content; an empty field lets the
     /// keystroke fall through to the surface's own escape.
     clear_on_escape: bool,
@@ -1047,6 +1063,7 @@ impl TextInput {
             accepts_media_paste: false,
             accepts_collapsed_paste: false,
             inline_atoms: Vec::new(),
+            history_atoms: Arc::default(),
             clear_on_escape: false,
             select_all_on_focus_click: false,
             focus_click_select_all: false,
@@ -1330,7 +1347,23 @@ impl TextInput {
                 atom
             })
             .collect();
+        self.history_atoms = Arc::new(
+            self.content
+                .match_indices(INLINE_ATOM_MARKER)
+                .zip(&self.inline_atoms)
+                .filter_map(|((offset, _), atom)| {
+                    atom.clipboard_atom.clone().map(|atom| (offset, atom))
+                })
+                .collect(),
+        );
+        if let Some(record) = self.history.undo.last_mut() {
+            record.atoms_after = Some(self.history_atoms.clone());
+        }
         cx.notify();
+    }
+
+    fn clipboard_atoms(&self) -> Arc<Vec<(usize, ClipboardAtom)>> {
+        self.history_atoms.clone()
     }
 
     /// Each [`INLINE_ATOM_MARKER`]'s content position paired with its atom
@@ -1495,6 +1528,16 @@ impl TextInput {
     /// autocompletion insert: unlike [`EntityInputHandler::replace_text_in_range`]
     /// it takes byte offsets and no window, so an action handler can call it.
     pub fn replace_range(&mut self, range: Range<usize>, text: &str, cx: &mut Context<Self>) {
+        self.replace_range_with_atoms(range, text, Vec::new(), cx);
+    }
+
+    fn replace_range_with_atoms(
+        &mut self,
+        range: Range<usize>,
+        text: &str,
+        pasted_atoms: Vec<(usize, ClipboardAtom)>,
+        cx: &mut Context<Self>,
+    ) {
         if self.read_only {
             return;
         }
@@ -1508,7 +1551,23 @@ impl TextInput {
         // A discrete undo step: picking a completion or replacing a match
         // must not coalesce with the typing around it.
         self.history.seal();
-        self.record_edit_history(&range, text, false);
+        if !pasted_atoms.is_empty() && self.content[range.clone()] == *text {
+            self.history.redo.clear();
+            self.history.push(EditRecord {
+                start: range.start,
+                old: text.to_owned(),
+                new: text.to_owned(),
+                selection_before: self.selected_range.clone(),
+                selection_reversed_before: self.selection_reversed,
+                edited_at: Instant::now(),
+                sealed: true,
+                composing: false,
+                atoms_before: Some(self.clipboard_atoms()),
+                atoms_after: None,
+            });
+        } else {
+            self.record_edit_history(&range, text, false);
+        }
         let content: SharedString =
             (self.content[..range.start].to_owned() + text + &self.content[range.end..]).into();
         let changed = self.content != content;
@@ -1527,6 +1586,7 @@ impl TextInput {
         cx.emit(ContentSplice {
             removed: range,
             inserted: text.len(),
+            pasted_atoms: Some(pasted_atoms).filter(|atoms| !atoms.is_empty()),
         });
         cx.emit(InputEvent::Edited);
         cx.notify();
@@ -1757,12 +1817,14 @@ impl TextInput {
         if changed {
             self.clear_content_overlays();
             self.history = EditHistory::default();
+            self.history_atoms = Arc::default();
         }
         self.pause_blink_cursor(cx);
         if changed {
             cx.emit(ContentSplice {
                 removed,
                 inserted: 0,
+                pasted_atoms: None,
             });
             cx.emit(InputEvent::Edited);
         }
@@ -1785,6 +1847,7 @@ impl TextInput {
         if changed {
             self.clear_content_overlays();
             self.history = EditHistory::default();
+            self.history_atoms = Arc::default();
         }
         self.refresh_highlight();
         self.pause_blink_cursor(cx);
@@ -1792,6 +1855,7 @@ impl TextInput {
             cx.emit(ContentSplice {
                 removed,
                 inserted: self.content.len(),
+                pasted_atoms: None,
             });
             cx.emit(InputEvent::Edited);
         }
@@ -2643,10 +2707,23 @@ impl TextInput {
         let Some(clipboard) = cx.read_from_clipboard() else {
             return;
         };
+        self.paste_clipboard_item(&clipboard, cx);
+    }
+
+    pub fn paste_clipboard_item(&mut self, clipboard: &ClipboardItem, cx: &mut Context<Self>) {
+        if self.read_only {
+            return;
+        }
         if self.accepts_media_paste
-            && let Some(entries) = media_paste_entries(&clipboard)
+            && let Some(entries) = media_paste_entries(clipboard)
         {
             cx.emit(MediaPaste(entries));
+            return;
+        }
+        if self.accepts_collapsed_paste
+            && let Some(content) = ChipContent::from_clipboard(clipboard)
+        {
+            self.replace_range_with_atoms(self.selected_range(), &content.text, content.atoms, cx);
             return;
         }
         let Some(text) = clipboard.text() else {
@@ -2702,8 +2779,7 @@ impl TextInput {
     }
 
     /// `content[range]` with each [`INLINE_ATOM_MARKER`] swapped for its
-    /// label — what a copy of text holding an atom should carry to the
-    /// clipboard.
+    /// clipboard representation, falling back to the painted label.
     fn export_text(&self, range: &Range<usize>) -> String {
         let slice = &self.content[range.clone()];
         if !slice.contains(INLINE_ATOM_MARKER) {
@@ -2717,18 +2793,41 @@ impl TextInput {
         let marker_len = INLINE_ATOM_MARKER.len_utf8();
         let mut out = String::with_capacity(slice.len());
         let mut rest = slice;
-        // The clipboard keeps the atom's label, not its icon slot — the
-        // painted slot only exists to carry the chip's icon.
+        // Copy hidden content when supplied, without the painted icon slot.
         let mut atoms = self.inline_atoms.iter().skip(offset);
         while let Some(index) = rest.find(INLINE_ATOM_MARKER) {
             out.push_str(&rest[..index]);
             if let Some(atom) = atoms.next() {
-                out.push_str(&atom.label);
+                out.push_str(atom.copy_text.as_ref().unwrap_or(&atom.label));
             }
             rest = &rest[index + marker_len..];
         }
         out.push_str(rest);
         out
+    }
+
+    fn clipboard_item(&self, range: &Range<usize>) -> ClipboardItem {
+        let mut content = ChipContent::default();
+        let mut position = range.start;
+        for (offset, atom) in self
+            .content
+            .match_indices(INLINE_ATOM_MARKER)
+            .zip(&self.inline_atoms)
+            .filter_map(|((offset, _), atom)| (range.contains(&offset)).then_some((offset, atom)))
+        {
+            content.text.push_str(&self.content[position..offset]);
+            if let Some(atom) = &atom.clipboard_atom {
+                content.atoms.push((content.text.len(), atom.clone()));
+                content.text.push(INLINE_ATOM_MARKER);
+            } else {
+                content
+                    .text
+                    .push_str(atom.copy_text.as_ref().unwrap_or(&atom.label));
+            }
+            position = offset + INLINE_ATOM_MARKER.len_utf8();
+        }
+        content.text.push_str(&self.content[position..range.end]);
+        content.clipboard_item(self.export_text(range))
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
@@ -2744,17 +2843,13 @@ impl TextInput {
             cx.propagate();
             return;
         }
-        cx.write_to_clipboard(ClipboardItem::new_string(
-            self.export_text(&self.selected_range.clone()),
-        ));
+        cx.write_to_clipboard(self.clipboard_item(&self.selected_range));
     }
 
     fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
         if !self.selected_range.is_empty() {
             if !self.masked {
-                cx.write_to_clipboard(ClipboardItem::new_string(
-                    self.export_text(&self.selected_range.clone()),
-                ));
+                cx.write_to_clipboard(self.clipboard_item(&self.selected_range));
             }
             // Like paste, a cut never coalesces with surrounding deletions.
             self.history.seal();
@@ -2830,6 +2925,7 @@ impl TextInput {
             cx.emit(ContentSplice {
                 removed: range,
                 inserted: new_text.len(),
+                pasted_atoms: None,
             });
             cx.emit(InputEvent::Edited);
         }
@@ -2840,6 +2936,7 @@ impl TextInput {
     /// splices amend the open composition step, everything else records —
     /// and possibly coalesces — normally.
     fn record_edit_history(&mut self, range: &Range<usize>, new_text: &str, composing: bool) {
+        let atoms = self.clipboard_atoms();
         if composing {
             self.history.record_composition(
                 &self.content,
@@ -2859,6 +2956,9 @@ impl TextInput {
                 Instant::now(),
             );
         }
+        if let Some(record) = self.history.undo.last_mut() {
+            record.atoms_before.get_or_insert(atoms);
+        }
     }
 
     fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
@@ -2874,7 +2974,12 @@ impl TextInput {
             cx.propagate();
             return;
         };
-        self.apply_history_step(content, selection, selection_reversed, cx);
+        let atoms = self
+            .history
+            .redo
+            .last()
+            .and_then(|record| record.atoms_before.clone());
+        self.apply_history_step(content, selection, selection_reversed, atoms, cx);
     }
 
     fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) {
@@ -2885,7 +2990,12 @@ impl TextInput {
         else {
             return;
         };
-        self.apply_history_step(content, selection, selection_reversed, cx);
+        let atoms = self
+            .history
+            .undo
+            .last()
+            .and_then(|record| record.atoms_after.clone());
+        self.apply_history_step(content, selection, selection_reversed, atoms, cx);
     }
 
     fn apply_history_step(
@@ -2893,6 +3003,7 @@ impl TextInput {
         content: String,
         selection: Range<usize>,
         selection_reversed: bool,
+        atoms: Option<Arc<Vec<(usize, ClipboardAtom)>>>,
         cx: &mut Context<Self>,
     ) {
         let removed = 0..self.content.len();
@@ -2910,6 +3021,7 @@ impl TextInput {
         cx.emit(ContentSplice {
             removed,
             inserted: self.content.len(),
+            pasted_atoms: atoms.map(|atoms| (*atoms).clone()),
         });
         cx.emit(InputEvent::Edited);
         cx.notify();
@@ -3267,6 +3379,7 @@ impl EntityInputHandler for TextInput {
             cx.emit(ContentSplice {
                 removed: range,
                 inserted: new_text.len(),
+                pasted_atoms: None,
             });
             cx.emit(InputEvent::Edited);
         }
@@ -4535,6 +4648,7 @@ pub struct ComposerSplice(pub ContentSplice);
 /// owns only the prompt policy on top.
 pub struct ComposerInput {
     input: Entity<TextInput>,
+    read_only: bool,
     /// Clone of the embedded field's handle, so `focus()` needs no `cx`.
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
@@ -4561,6 +4675,9 @@ impl ComposerInput {
         let _subscriptions = vec![
             cx.subscribe(&input, |composer, _, event: &InputEvent, cx| match event {
                 InputEvent::Submit(raw) => {
+                    if composer.read_only {
+                        return;
+                    }
                     // Whether Enter has something to send — text, staged
                     // attachments, transcript annotations — is the owner's
                     // call; the field just reports the keystroke and clears
@@ -4593,6 +4710,7 @@ impl ComposerInput {
         ];
         Self {
             input,
+            read_only: false,
             focus_handle,
             _subscriptions,
         }
@@ -4604,6 +4722,19 @@ impl ComposerInput {
         self.input
             .update(cx, |input, _| input.set_padding_x(padding));
         self
+    }
+
+    /// Keep the draft selectable while preventing editing and submission.
+    pub fn set_read_only(&mut self, read_only: bool, cx: &mut Context<Self>) {
+        if self.read_only == read_only {
+            return;
+        }
+        self.read_only = read_only;
+        self.input.update(cx, |input, cx| {
+            input.set_read_only(read_only);
+            cx.notify();
+        });
+        cx.notify();
     }
 
     /// Opt the embedded field into [`CollapsedPaste`] and re-emit it as
@@ -4656,6 +4787,11 @@ impl ComposerInput {
         self.input
             .update(cx, |input, cx| input.replace_range(range, &text, cx));
         marker
+    }
+
+    pub fn paste_clipboard_item(&mut self, item: &ClipboardItem, cx: &mut Context<Self>) {
+        self.input
+            .update(cx, |input, cx| input.paste_clipboard_item(item, cx));
     }
 
     /// Forwarded [`TextInput::set_inline_atoms`] — the owner pushes its
@@ -4789,6 +4925,7 @@ impl EventEmitter<ComposerSplice> for ComposerInput {}
 
 #[cfg(test)]
 mod tests {
+    use crate::clipboard::ClipboardAtom;
     use std::cell::RefCell;
     use std::path::PathBuf;
     use std::rc::Rc;
@@ -4936,6 +5073,59 @@ mod tests {
     }
 
     #[gpui::test]
+    fn copying_and_cutting_paste_chips_preserves_hidden_text(cx: &mut TestAppContext) {
+        use super::{INLINE_ATOM_MARKER as A, InlineAtom};
+        cx.update(super::init);
+        let (harness, cx) = cx.add_window_view(|window, cx| InputHarness {
+            input: cx.new(|cx| {
+                let mut input = TextInput::new(window, cx).multi_line();
+                input.set_content(format!("before {A} between {A} after"), cx);
+                input.set_inline_atoms(
+                    ["first\n\n> nested", "second"]
+                        .into_iter()
+                        .map(|text| InlineAtom {
+                            label: "Pasted text".into(),
+                            clipboard_atom: Some(ClipboardAtom::PastedText {
+                                text: text.to_owned(),
+                                category: None,
+                            }),
+                            copy_text: Some(
+                                waku_protocol::model::pasted_text_blockquote(text).into(),
+                            ),
+                            icon: Some(super::ATOM_PASTED_ICON),
+                            avatar: None,
+                            tooltip: None,
+                        })
+                        .collect(),
+                    cx,
+                );
+                input
+            }),
+            width: px(400.),
+        });
+        let input = cx.read_entity(&harness, |harness, _| harness.input.clone());
+        cx.update(|window, cx| input.update(cx, |input, cx| {
+            input.selected_range = 0..input.content.len();
+            input.copy(&super::Copy, window, cx);
+            assert_eq!(cx.read_from_clipboard().unwrap().text().unwrap(),
+                "before \n\n> **Pasted text**\n>\n> first\n> \n> > nested\n\n between \n\n> **Pasted text**\n>\n> second\n\n after");
+            let copied = crate::clipboard::ChipContent::from_clipboard(&cx.read_from_clipboard().unwrap()).unwrap();
+            assert_eq!(copied.text, format!("before {A} between {A} after"));
+            assert_eq!(copied.atoms.len(), 2);
+            // Selecting only the second chip must use its own payload.
+            let start = input.content.rfind(A).unwrap();
+            input.selected_range = start..start + A.len_utf8();
+            input.cut(&super::Cut, window, cx);
+            assert_eq!(cx.read_from_clipboard().unwrap().text().unwrap(),
+                "\n\n> **Pasted text**\n>\n> second\n\n");
+            let copied = crate::clipboard::ChipContent::from_clipboard(&cx.read_from_clipboard().unwrap()).unwrap();
+            assert_eq!(copied.text, A.to_string());
+            assert_eq!(copied.atoms, vec![(0, ClipboardAtom::PastedText { text: "second".into(), category: None })]);
+            assert_eq!(input.content, format!("before {A} between  after"));
+        }));
+    }
+
+    #[gpui::test]
     fn inline_atoms_translate_layout_indices(cx: &mut TestAppContext) {
         use super::{ATOM_SESSION_ICON, INLINE_ATOM_MARKER as A, InlineAtom};
         cx.update(super::init);
@@ -4947,6 +5137,8 @@ mod tests {
                 input.set_inline_atoms(
                     vec![InlineAtom {
                         label: "Big refactor".into(),
+                        copy_text: None,
+                        clipboard_atom: None,
                         icon: Some(ATOM_SESSION_ICON),
                         avatar: None,
                         tooltip: None,
@@ -5005,6 +5197,8 @@ mod tests {
                 input.set_inline_atoms(
                     vec![InlineAtom {
                         label: "pasted text".into(),
+                        copy_text: None,
+                        clipboard_atom: None,
                         icon: Some(ATOM_PASTED_ICON),
                         avatar: None,
                         tooltip: Some(Rc::new(move |window, cx| {

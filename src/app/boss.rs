@@ -14,6 +14,9 @@ use waku_client::boss::{
     shipped_persona_prefix, shipped_persona_revision,
 };
 use waku_protocol::boss::AvatarStyle;
+use waku_protocol::chains::{
+    ChainControl, ChainOperation, ChainStatus, ChainStep, EmployeeChain, StepStatus,
+};
 use waku_protocol::custom_commands::CustomCommandIcon;
 mod instruction_pins;
 
@@ -280,6 +283,7 @@ pub(super) enum BossTab {
     Plans,
     Deliverables,
     Instructions,
+    Chains,
 }
 
 /// One original note in the unified Memory Records feed — the daemon's
@@ -613,6 +617,9 @@ enum BossDeliverablesFilter {
 
 pub(super) struct BossUi {
     pub states: HashMap<DaemonKey, BossState>,
+    /// Recommendation ids whose "Message to Boss" disclosure is expanded —
+    /// view state only, the cards live inline in transcript rows.
+    pub(super) counsel_message_expanded: HashSet<Uuid>,
     pin_rows: HashMap<(DaemonKey, Uuid), waku_protocol::instruction_pins::InstructionPin>,
     pin_scope_labels: HashMap<(DaemonKey, Uuid), String>,
     pin_history: HashSet<DaemonKey>,
@@ -752,6 +759,8 @@ pub(super) struct BossUi {
     /// The Personas section's selected role, per host — the boss's own
     /// persona id is a valid entry like any role's.
     personas_selected: HashMap<DaemonKey, Uuid>,
+    /// The Chains section's selected employee chain, per host.
+    chains_selected: HashMap<DaemonKey, Uuid>,
     /// Per-section filters, per host: the Employees view and the Plans and
     /// Deliverables library filters.
     employees_view: HashMap<DaemonKey, BossEmployeesView>,
@@ -804,7 +813,7 @@ pub(super) struct BossUi {
     retracted_memory: HashSet<(DaemonKey, String, String)>,
     editor: Option<BossEditor>,
     generation: u64,
-    pending: bool,
+    pub(super) pending: bool,
     pending_reply: Option<BossReply>,
     /// The session that was selected when the in-flight `BossOperation::Open`
     /// went out — the surface the open was asked to navigate away from. Its
@@ -850,6 +859,7 @@ impl Default for BossUi {
     fn default() -> Self {
         Self {
             states: HashMap::new(),
+            counsel_message_expanded: HashSet::new(),
             pin_rows: HashMap::new(),
             pin_scope_labels: HashMap::new(),
             pin_history: HashSet::new(),
@@ -905,6 +915,7 @@ impl Default for BossUi {
             last_section: HashMap::new(),
             plans_selected: HashMap::new(),
             personas_selected: HashMap::new(),
+            chains_selected: HashMap::new(),
             employees_view: HashMap::new(),
             plans_filter: HashMap::new(),
             deliverables_filter: HashMap::new(),
@@ -1061,10 +1072,16 @@ pub(super) struct BossOutcomeRow {
     /// the status join; expired and retired ones still classify their
     /// settled attempts.
     pub members: Vec<BossOutcomeMember>,
-    /// Attention derived across both rosters and the durable history —
-    /// an unresolved failure, a flagged blocker, or an open completion
-    /// conflict, including a settled attempt whose roster record is gone.
+    /// Attention derived across both rosters, the durable history, and
+    /// bound chains — an unresolved failure, a flagged blocker, an open
+    /// completion conflict, or a paused chain's unhandled exception,
+    /// including a settled attempt whose roster record is gone.
     pub attention: bool,
+    /// The newest stamp among the attention evidence — `None` when every
+    /// piece predates the stamp fields, which is always older than any
+    /// wait stamped since. Lets a recorded wait order itself against the
+    /// evidence it acknowledges.
+    pub attention_at: Option<u64>,
 }
 
 /// An outcome member's roster record plus its queue position. The record
@@ -1093,27 +1110,6 @@ pub(super) enum BossEmployeeAvatar {
         circular: bool,
         initial: SharedString,
     },
-}
-
-/// The reason a card shows on its own line — a reported blocker, an
-/// admission wait, or a recorded cause. Reasons never squeeze into the
-/// job line, where they truncated into a fragment that read as broken.
-#[derive(Clone, Debug, PartialEq)]
-pub(super) enum BossEmployeeReason {
-    /// The employee's own reported blocker, or a settled blocked flag.
-    Blocked(String),
-    /// A queued admission's recorded wait.
-    Queued(String),
-    /// A recorded cause — a settle's finer-grained expiry reason.
-    Detail(String),
-}
-
-impl BossEmployeeReason {
-    pub(super) fn text(&self) -> &str {
-        match self {
-            Self::Blocked(text) | Self::Queued(text) | Self::Detail(text) => text,
-        }
-    }
 }
 
 /// A required-plan chip's resolved state — the bound plan's open target
@@ -1167,41 +1163,23 @@ pub(super) struct BossEmployeeRow {
     pub aria: Option<String>,
 }
 
-/// An outcome's attention flag — the roster's unresolved members and any
-/// open completion conflict, extended to settled history rows whose
-/// roster record is gone so a failure cannot lose attention when the
-/// employee retires. Pending handoffs are owed decisions, not attention:
-/// the row surfaces them through its own follow-up state.
+/// An outcome's attention flag and the newest stamp among its evidence —
+/// the roster's unresolved members, an open completion conflict, settled
+/// history rows whose roster record is gone so a failure cannot lose
+/// attention when the employee retires, and a paused chain's unhandled
+/// exception — stalled work the owner still owes an answer, matching the
+/// reminder scan's reading. Pending handoffs are owed decisions, not
+/// attention: the row surfaces them through its own follow-up state.
+/// `attention_at` stays `None` when every piece of evidence predates the
+/// stamp fields — such records are always older than any wait stamped
+/// since. Shared with the boss digest through
+/// [`waku_protocol::boss::BossOutcome::attention_evidence`].
 fn boss_outcome_attention(
     outcome: &waku_protocol::boss::BossOutcome,
     members: &[BossOutcomeMember],
-) -> bool {
-    if outcome.completion_conflict.is_some()
-        || members
-            .iter()
-            .any(|member| waku_protocol::boss::BossOutcome::assignment_unresolved(&member.employee))
-    {
-        return true;
-    }
-    // A session's latest recorded attempt still failed or blocked while
-    // its roster record is gone — the durable row is all that remembers
-    // the failure. A rostered member defers to the record's own verdict:
-    // a resume reopens its row, so a settled failure here is one nothing
-    // answered.
-    let mut latest: HashMap<Uuid, &waku_protocol::boss::OutcomeAssignment> = HashMap::new();
-    for row in &outcome.assignments {
-        latest.insert(row.session, row);
-    }
-    latest.values().any(|row| {
-        row.settled.as_ref().is_some_and(|settle| {
-            matches!(
-                settle.verdict,
-                waku_protocol::boss::AssignmentVerdict::Failed
-            ) || settle.blocked
-        }) && !members
-            .iter()
-            .any(|member| member.employee.session_id == row.session)
-    })
+    chains: &[waku_protocol::chains::EmployeeChain],
+) -> (bool, Option<u64>) {
+    outcome.attention_evidence(members.iter().map(|member| &member.employee), chains)
 }
 
 /// The Deliverables library rows under `filter`. A planning session's
@@ -1251,6 +1229,8 @@ enum BossItem {
     Plan(Uuid),
     /// A `BossState.deliverables` record — the library rows.
     Deliverable(Uuid),
+    /// A `BossState.chains` record — the Chains tab rows.
+    Chain(Uuid),
     /// A History lookup hit — the index into the host's accumulated
     /// `BossHistorySearch::hits`.
     HistoryHit(usize),
@@ -1493,6 +1473,8 @@ pub(super) enum BossReply {
     /// A `/clear` dispatch — its Session reply takes the same landing the
     /// boss row's Open gets: swap bookkeeping, catalog insert, activation.
     Clear,
+    CounselOpen(Option<Uuid>),
+    CounselDecision,
     /// An Employees → History lookup — the reply merges into the host's
     /// `BossHistorySearch` instead of the roster list.
     HistorySearch,
@@ -1592,6 +1574,15 @@ fn archived_employee_session(
 ) -> bool {
     session.archived_at.is_some()
         && employee_session(session, managed, boss_chat, experiment_enabled)
+}
+
+fn is_boss_chat_surface(
+    state: &BossState,
+    session_id: Uuid,
+    project_identity: Option<Uuid>,
+) -> bool {
+    state.counsel.session_id != Some(session_id)
+        && (state.session_id == Some(session_id) || project_identity == Some(state.identity.id))
 }
 
 /// The Boss state owning one of the boss's own surfaces — its chat's
@@ -1769,11 +1760,19 @@ impl Waku {
     pub(super) fn drain_boss_events(&mut self, cx: &mut Context<Self>) -> bool {
         let mut changed = false;
         let mut finalized_plan_host = None;
-        while let Ok((key, state)) = self.boss_events.try_recv() {
+        while let Ok((key, mut state)) = self.boss_events.try_recv() {
             if self.boss_ui.states.get(&key).is_some_and(|previous| {
                 previous.identity.id == state.identity.id && previous.revision > state.revision
             }) {
                 continue;
+            }
+            // A decision reply can beat an older full-state push. Preserve
+            // its Counsel revision until the matching snapshot arrives.
+            if let Some(previous) = self.boss_ui.states.get(&key).filter(|previous| {
+                previous.identity.id == state.identity.id
+                    && previous.counsel.revision > state.counsel.revision
+            }) {
+                state.counsel = previous.counsel.clone();
             }
             // Agent-initiated approval has no BossReply in this client.
             // Follow its live state transition, but don't redirect when
@@ -1821,8 +1820,11 @@ impl Waku {
                                 employee: employee.clone(),
                             })
                             .collect();
+                        let (attention, attention_at) =
+                            boss_outcome_attention(outcome, &members, &state.chains);
                         BossOutcomeRow {
-                            attention: boss_outcome_attention(outcome, &members),
+                            attention,
+                            attention_at,
                             outcome: outcome.clone(),
                             members,
                         }
@@ -1851,6 +1853,7 @@ impl Waku {
                     self.boss_ui.pin_scope_labels.insert((key, pin.id), label);
                 }
             }
+            self.sidebar_intents.observe_boss(key, &mut state);
             self.boss_ui.states.insert(key, state);
             if let Some((from, to)) = rotated_session {
                 self.migrate_boss_annotations(key, from, to, cx);
@@ -2031,7 +2034,7 @@ impl Waku {
                     model: session.and_then(|session| session.model.clone()),
                     mode: session
                         .map(|session| session.runtime_mode)
-                        .unwrap_or_default(),
+                        .unwrap_or(self.state.last_runtime_mode),
                 };
                 self.boss_request(key, operation, BossReply::List, cx);
             }
@@ -2396,6 +2399,23 @@ impl Waku {
                     .unwrap_or_default();
                 boss_deliverable_rows(state, filter)
             }
+            BossTab::Chains => {
+                let mut chains: Vec<&EmployeeChain> = state.chains.iter().collect();
+                chains.sort_by_key(|chain| {
+                    (
+                        matches!(
+                            chain.status,
+                            ChainStatus::Completed | ChainStatus::Cancelled
+                        ),
+                        std::cmp::Reverse(chain.history.last().map(|entry| entry.at).unwrap_or(0)),
+                        chain.id,
+                    )
+                });
+                chains
+                    .into_iter()
+                    .map(|chain| BossItem::Chain(chain.id))
+                    .collect()
+            }
         }
     }
 
@@ -2679,12 +2699,13 @@ impl Waku {
         // means the user moved on and the late reply must not drag them
         // back. A `/clear` follows the same contract: the fresh chat opens
         // only while the composer still shows the chat it replaced.
-        self.boss_ui.open_from =
-            if matches!(operation, BossOperation::Open { .. } | BossOperation::Clear) {
-                self.state.selected_session
-            } else {
-                None
-            };
+        self.boss_ui.open_from = if let BossReply::CounselOpen(from) = reply {
+            from
+        } else if matches!(operation, BossOperation::Open { .. } | BossOperation::Clear) {
+            self.state.selected_session
+        } else {
+            None
+        };
         if let BossReply::Finalize(session_id) = reply {
             self.boss_ui.plan_finalizing.insert(session_id);
         }
@@ -2733,6 +2754,49 @@ impl Waku {
                 match result {
                     Ok(waku_client::ResponsePayload::Boss { result }) => {
                         match result {
+                            BossResult::Session { session, project }
+                                if matches!(reply, BossReply::CounselOpen(_)) =>
+                            {
+                                let id = session.id;
+                                this.daemons.claim_project(project.id, key);
+                                this.boss_ui.projects.insert(project.id, *project);
+                                this.daemons.claim_session(id, key);
+                                if let Some(existing) =
+                                    this.state.sessions.iter_mut().find(|entry| entry.id == id)
+                                {
+                                    *existing = *session;
+                                } else {
+                                    this.state.sessions.push(*session);
+                                }
+                                if let Some(state) = this.boss_ui.states.get_mut(&key) {
+                                    state.counsel.session_id = Some(id);
+                                }
+                                if boss_open_reply_navigates(
+                                    this.boss_ui.open_from,
+                                    this.state.selected_session,
+                                ) {
+                                    this.request_session_activation(
+                                        id,
+                                        SessionActivationTransition::Visit,
+                                        cx,
+                                    );
+                                }
+                                this.refresh_boss_state_on(key, cx);
+                            }
+                            BossResult::Counsel { state } => {
+                                let session_id = state.session_id;
+                                if let Some(boss) = this.boss_ui.states.get_mut(&key)
+                                    && boss.counsel.revision <= state.revision
+                                {
+                                    boss.counsel = state;
+                                }
+                                if reply == BossReply::CounselDecision {
+                                    if let Some(id) = session_id {
+                                        this.ensure_session_loaded(id, cx);
+                                    }
+                                    this.refresh_boss_state_on(key, cx);
+                                }
+                            }
                             BossResult::InstructionPins { pins } => {
                                 if let (
                                     Some(editor),
@@ -2851,6 +2915,7 @@ impl Waku {
                                         |_| false,
                                         |id| runtime_ids.contains(&id),
                                         false,
+                                        &HashSet::new(),
                                     );
                                 }
                                 let navigates = matches!(reply, BossReply::Open | BossReply::Clear)
@@ -3237,7 +3302,7 @@ impl Waku {
             message_id,
             query: String::new(),
         });
-        self.request_session_activation(task_id, SessionActivationTransition::Inspect, cx);
+        self.navigate_to_session(task_id, SessionActivationTransition::Inspect, cx);
     }
 
     /// The unified Memory Records feed — issued on every Memory visit so
@@ -3431,18 +3496,20 @@ impl Waku {
     }
 
     pub(super) fn boss_chat_key(&self) -> Option<DaemonKey> {
+        self.boss_chat_key_for(self.selected_session()?)
+    }
+
+    pub(super) fn boss_chat_key_for(&self, session: &AgentSession) -> Option<DaemonKey> {
         if !self.state.boss_experiment_enabled {
             return None;
         }
-        let id = self.state.selected_session?;
-        let identity = self
-            .selected_session()
-            .filter(|session| session.boss_managed && session.planning.is_none())
-            .map(|session| session.project_id);
+        let id = session.id;
+        let identity =
+            (session.boss_managed && session.planning.is_none()).then_some(session.project_id);
         self.boss_ui.states.iter().find_map(|(key, state)| {
             // Keep the mounted predecessor a Boss chat while the catalog
             // and successor hydration catch up with the new pointer.
-            (state.session_id == Some(id) || identity == Some(state.identity.id)).then_some(*key)
+            is_boss_chat_surface(state, id, identity).then_some(*key)
         })
     }
 
@@ -3650,6 +3717,13 @@ impl Waku {
         ) {
             ComposerTargetPick::Unpicked => ComposerTarget::Boss,
             ComposerTargetPick::Live(employee) => ComposerTarget::Employee(employee),
+            ComposerTargetPick::Stale(employee)
+                if self.boss_ui.states.get(&key).is_some_and(|state| {
+                    state.employee_prompt_controls.contains_key(&employee)
+                }) =>
+            {
+                ComposerTarget::Employee(employee)
+            }
             ComposerTargetPick::Stale(employee) => ComposerTarget::Stale {
                 employee,
                 name: self.employee_target_name(employee),
@@ -3698,7 +3772,7 @@ impl Waku {
 
     /// Record the destination chip's pick for one boss daemon — `None`
     /// restores the boss chat as the landing.
-    fn set_composer_target(
+    pub(super) fn set_composer_target(
         &mut self,
         key: DaemonKey,
         target: Option<Uuid>,
@@ -3816,7 +3890,7 @@ impl Waku {
             model: cached.and_then(|session| session.model.clone()),
             mode: cached
                 .map(|session| session.runtime_mode)
-                .unwrap_or_default(),
+                .unwrap_or(self.state.last_runtime_mode),
         };
         let queue_background = self.live_deliverable_page().is_some();
         let old = command.session_id;
@@ -3990,7 +4064,46 @@ impl Waku {
     /// boss command goes to the boss chat — the employee on screen or the
     /// armed deliverable riding along as its attachment — everything else to
     /// the selected task.
+    pub(super) fn direct_employee_prompt_control(
+        &self,
+    ) -> Option<waku_client::boss::EmployeePromptControl> {
+        let command = self.composer_boss_command()?;
+        let target = self.composer_target(&command);
+        let employee = match target {
+            ComposerTarget::Employee(employee) | ComposerTarget::Stale { employee, .. } => employee,
+            ComposerTarget::Boss => return None,
+        };
+        let key = self.composer_command_daemon(&command)?;
+        let state = self.boss_ui.states.get(&key)?;
+        let mut control = state
+            .employee_prompt_controls
+            .get(&employee)
+            .cloned()
+            .unwrap_or_else(|| state.employee_prompt_control(employee));
+        if let Some(adopter) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == employee)
+            .and_then(|session| match &session.workspace {
+                SessionWorkspace::Worktree { adopted_by, .. } => *adopted_by,
+                _ => None,
+            })
+        {
+            control.reason.get_or_insert_with(|| {
+                "This employee's workspace has been taken over by another employee.".into()
+            });
+            control.successor_id.get_or_insert(adopter);
+        }
+        Some(control)
+    }
+
     pub(super) fn sync_composer_placeholder(&self, cx: &mut Context<Self>) {
+        let blocked = self
+            .direct_employee_prompt_control()
+            .is_some_and(|control| control.reason.is_some());
+        self.composer
+            .update(cx, |composer, cx| composer.set_read_only(blocked, cx));
         // Big Picture writes its own hint while it holds the composer.
         if self.big_picture.is_open() {
             return;
@@ -4339,6 +4452,11 @@ impl Waku {
             if state.session_id == Some(session_id) {
                 return Some((*key, state.identity.clone(), tr!("boss.group")));
             }
+            if state.counsel.session_id == Some(session_id)
+                && let Some(identity) = &state.counsel.identity
+            {
+                return Some((*key, identity.clone(), tr!("counsel.title")));
+            }
             state
                 .employees
                 .iter()
@@ -4366,11 +4484,9 @@ impl Waku {
         if !self.state.boss_experiment_enabled {
             return false;
         }
-        self.boss_ui
-            .states
-            .values()
-            .any(|state| state.session_id == Some(session.id))
-            || Self::session_kind_is_boss_owned(session)
+        self.boss_ui.states.values().any(|state| {
+            state.session_id == Some(session.id) || state.counsel.session_id == Some(session.id)
+        }) || Self::session_kind_is_boss_owned(session)
     }
 
     /// Managed-session kinds that are boss surfaces rather than employee
@@ -4451,7 +4567,16 @@ impl Waku {
         if identity.name == name {
             return;
         }
-        let operation = if self.managed_session_is_boss(key, session_id) {
+        let is_counsel = self
+            .boss_ui
+            .states
+            .get(&key)
+            .is_some_and(|state| state.counsel.session_id == Some(session_id));
+        let operation = if is_counsel {
+            BossOperation::Counsel {
+                action: waku_protocol::counsel::CounselOperation::Rename { name },
+            }
+        } else if self.managed_session_is_boss(key, session_id) {
             BossOperation::Rename { name }
         } else {
             BossOperation::RenameEmployee { session_id, name }
@@ -4466,15 +4591,22 @@ impl Waku {
         let Some((key, ..)) = self.managed_session_meta(session_id) else {
             return;
         };
-        let employee = (!self.managed_session_is_boss(key, session_id)).then_some(session_id);
-        self.boss_request(
-            key,
+        let is_counsel = self
+            .boss_ui
+            .states
+            .get(&key)
+            .is_some_and(|state| state.counsel.session_id == Some(session_id));
+        let operation = if is_counsel {
+            BossOperation::Counsel {
+                action: waku_protocol::counsel::CounselOperation::RegenerateAvatar,
+            }
+        } else {
             BossOperation::RegenerateAvatar {
-                session_id: employee,
-            },
-            BossReply::List,
-            cx,
-        );
+                session_id: (!self.managed_session_is_boss(key, session_id))
+                    .then_some(session_id),
+            }
+        };
+        self.boss_request(key, operation, BossReply::List, cx);
     }
 
     /// The generator style is a global Boss setting shared by the boss and
@@ -4665,7 +4797,7 @@ impl Waku {
         let mode = self
             .selected_session()
             .map(|session| session.runtime_mode)
-            .unwrap_or_default();
+            .unwrap_or(self.state.last_runtime_mode);
         self.boss_request(
             key,
             BossOperation::Open {
@@ -5129,8 +5261,10 @@ impl Waku {
                 session_id,
                 title: SharedString::from(state.identity.name.clone()),
             });
+        let row_group = SharedString::from(format!("boss-sidebar-row-{key:?}"));
         div()
             .id(format!("boss-{key:?}"))
+            .group(row_group.clone())
             .tab_index(0)
             .h(px(42.0))
             .w_full()
@@ -5217,7 +5351,9 @@ impl Waku {
                     .items_center()
                     .justify_center()
                     .cursor_pointer()
-                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                    .opacity(0.0)
+                    .group_hover(row_group, |style| style.opacity(1.0))
+                    .focus_visible(|style| style.opacity(1.0).bg(theme.focus_highlight()))
                     .hover(|style| style.bg(theme.overlay))
                     .active(|style| style.bg(theme.overlay_strong))
                     .aria_label(tr!("boss.brain_label"))
@@ -5246,7 +5382,7 @@ impl Waku {
     pub(super) fn selected_queued_employee(
         &self,
     ) -> Option<(DaemonKey, &waku_protocol::boss::BossEmployee)> {
-        let session_id = self.state.selected_session?;
+        let session_id = self.transcript_session_id()?;
         self.boss_ui.states.iter().find_map(|(key, state)| {
             state
                 .employees
@@ -5389,7 +5525,12 @@ impl Waku {
         )
     }
 
-    pub(super) fn render_boss_employee_row(&self, id: Uuid, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_boss_employee_row(
+        &self,
+        id: Uuid,
+        group_alt: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let Some(identity) = self.boss_ui.identities.get(&id) else {
             return div().into_any_element();
         };
@@ -5414,8 +5555,9 @@ impl Waku {
             id,
         );
         // Option trades the job title for the employee's model and effort,
-        // the same reveal a task row's detail line performs.
-        let alt_held = self.sidebar_alt_held;
+        // the same reveal a task row's detail line performs. A group-local
+        // Option engagement on the row's sidebar group counts the same.
+        let alt_held = self.sidebar_alt_held || group_alt;
         let (detail, detail_provider) = if alt_held {
             self.boss_ui.queued_model_targets.get(&id).map_or_else(
                 || {
@@ -5453,7 +5595,8 @@ impl Waku {
                 None,
             )
         };
-        let (uses_worktree, activity_label) = employee_sidebar_details(session, unix_time());
+        let (uses_worktree, activity_label) =
+            employee_sidebar_details(session, unix_time(), alt_held);
         let project = session.and_then(|session| {
             self.state
                 .projects
@@ -5545,6 +5688,7 @@ impl Waku {
         };
         let row = div()
             .id(format!("boss-employee-{id}"))
+            .debug_selector(|| format!("employee-row-{id}"))
             .when(archivable, |row| row.group(group_name.clone()))
             .tab_index(0)
             .h(px(sidebar::SIDEBAR_SESSION_CARD_HEIGHT))
@@ -5832,7 +5976,14 @@ impl Waku {
         let row_focus = menu.trigger_focus_handle().clone();
         let keyboard_menu = menu.clone();
         let group_name = SharedString::from(format!("boss-planning-row-{id}"));
-        let archive_button = session_archivable(session).then(|| {
+        let archive_button = session_archivable(
+            session,
+            self.boss_ui
+                .states
+                .values()
+                .any(|state| state.session_id == Some(session.id)),
+        )
+        .then(|| {
             let archive_focus = self
                 .sidebar_session_archive_focuses
                 .borrow_mut()
@@ -6200,8 +6351,13 @@ impl Waku {
             ))
             // ⌘-click and ⌘⇧-click select like a task row; a plain click
             // opens the deliverable's task page.
-            .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 let modifiers = event.modifiers();
+                if modifiers.secondary() {
+                    // Selection owns the next keyboard action, even when a
+                    // native preview held the keyboard before this click.
+                    window.focus(&row_focus, cx);
+                }
                 if modifiers.secondary() && modifiers.shift {
                     this.extend_sidebar_multi_selection(
                         sidebar::SidebarSelection::Deliverable(key, deliverable_id),
@@ -6466,11 +6622,15 @@ impl Waku {
                             "deliverable.archive_many",
                             archive_targets.len(),
                         ),
-                        move |_, cx| {
+                        move |window, cx| {
                             let _ = archive_waku.update(cx, |waku, cx| {
-                                for (key, id) in archive_targets.iter().copied() {
-                                    waku.set_deliverable_archived(key, id, true, cx);
-                                }
+                                let tasks = waku.sidebar_multi_selection_targets();
+                                waku.archive_sidebar_targets(
+                                    tasks,
+                                    archive_targets.clone(),
+                                    window,
+                                    cx,
+                                );
                             });
                         },
                     )
@@ -6871,10 +7031,9 @@ impl Waku {
         pinned: bool,
         cx: &mut Context<Self>,
     ) {
-        self.boss_request(
+        self.record_deliverable_intent(
             key,
-            BossOperation::PinDeliverable { id, pinned },
-            BossReply::List,
+            waku_protocol::sidebar_intent::SidebarEdit::DeliverablePin { id, pinned },
             cx,
         );
     }
@@ -6886,10 +7045,9 @@ impl Waku {
         dormant: bool,
         cx: &mut Context<Self>,
     ) {
-        self.boss_request(
+        self.record_deliverable_intent(
             key,
-            BossOperation::SweepDeliverable { id, dormant },
-            BossReply::List,
+            waku_protocol::sidebar_intent::SidebarEdit::DeliverableDormant { id, dormant },
             cx,
         );
     }
@@ -6904,10 +7062,9 @@ impl Waku {
         if archived {
             self.prune_deliverable_multi_selection(key, id);
         }
-        self.boss_request(
+        self.record_deliverable_intent(
             key,
-            BossOperation::ArchiveDeliverable { id, archived },
-            BossReply::List,
+            waku_protocol::sidebar_intent::SidebarEdit::DeliverableArchive { id, archived },
             cx,
         );
     }
@@ -6949,52 +7106,66 @@ impl Waku {
             BossTab::Plans => self.render_boss_plans_section(key, cx),
             BossTab::Deliverables => self.render_boss_deliverables_section(key, cx),
             BossTab::Instructions => self.render_instruction_pins(key, cx),
+            BossTab::Chains => self.render_boss_chains_section(key, cx),
         };
+        let header = self.render_boss_page_header(key, tab, cx);
         div()
             .track_focus(&focus)
             .flex_1()
             .min_h_0()
             .min_w_0()
             .flex()
-            .child(
-                div()
-                    .w(px(220.0))
-                    .flex_none()
-                    .flex()
-                    .flex_col()
-                    .bg(theme.sidebar)
-                    .border_r_1()
-                    .border_color(theme.separator)
-                    .child(self.render_boss_page_header(key, cx))
-                    .child(self.render_boss_section_navigation(key, tab, &theme, cx)),
-            )
+            .flex_col()
+            .child(self.render_header_frame(header, window, cx))
             .child(
                 div()
                     .flex_1()
-                    .min_w_0()
                     .min_h_0()
                     .flex()
-                    .flex_col()
-                    .when(
-                        boss_loading_label_visible(self.boss_ui.pending),
-                        |element| {
-                            element.child(
-                                div()
-                                    .px(px(20.0))
-                                    .py(px(4.0))
-                                    .text_size(sp(12.0))
-                                    .text_color(theme.text_tertiary)
-                                    .child(tr!("boss.loading")),
-                            )
-                        },
+                    .child(
+                        div()
+                            .w(px(220.0))
+                            .flex_none()
+                            .flex()
+                            .flex_col()
+                            .bg(theme.sidebar)
+                            .border_r_1()
+                            .border_color(theme.separator)
+                            .child(self.render_boss_section_navigation(key, tab, &theme, cx)),
                     )
-                    .child(content),
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .min_h_0()
+                            .flex()
+                            .flex_col()
+                            .when(
+                                boss_loading_label_visible(self.boss_ui.pending),
+                                |element| {
+                                    element.child(
+                                        div()
+                                            .px(px(20.0))
+                                            .py(px(4.0))
+                                            .text_size(sp(12.0))
+                                            .text_color(theme.text_tertiary)
+                                            .child(tr!("boss.loading")),
+                                    )
+                                },
+                            )
+                            .child(content),
+                    ),
             )
             .into_any_element()
     }
 
-    /// The Boss identity at the top of the Brain navigation sidebar.
-    fn render_boss_page_header(&self, key: DaemonKey, cx: &mut Context<Self>) -> AnyElement {
+    /// The Boss identity in the Brain screen's top bar.
+    fn render_boss_page_header(
+        &self,
+        key: DaemonKey,
+        tab: BossTab,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
         let state = self.boss_ui.states.get(&key);
         let name = state
@@ -7041,12 +7212,21 @@ impl Waku {
                 .child(name)
                 .into_any_element()
         };
+        let section = match tab {
+            BossTab::Memory => tr!("boss.memory"),
+            BossTab::Personas => tr!("boss.personas"),
+            BossTab::Employees => tr!("boss.history"),
+            BossTab::Plans => tr!("boss.plans"),
+            BossTab::Deliverables => tr!("boss.deliverables"),
+            BossTab::Instructions => tr!("boss.pinned_instructions"),
+            BossTab::Chains => tr!("boss.chains"),
+        };
         div()
+            .h(px(HEADER_HEIGHT))
             .flex()
             .items_center()
             .gap(px(10.0))
             .px(px(16.0))
-            .py(px(12.0))
             .border_b_1()
             .border_color(theme.border)
             .when_some(
@@ -7055,7 +7235,7 @@ impl Waku {
             )
             .child(
                 div()
-                    .flex_1()
+                    .max_w(px(240.0))
                     .min_w_0()
                     .flex()
                     .flex_col()
@@ -7066,6 +7246,13 @@ impl Waku {
                             .text_color(theme.text_tertiary)
                             .child(host),
                     ),
+            )
+            .child(icon("icons/chevron-right.svg", 12.0, theme.text_tertiary))
+            .child(
+                div()
+                    .text_size(sp(13.0))
+                    .text_color(theme.text_secondary)
+                    .child(section),
             )
             .into_any_element()
     }
@@ -7094,6 +7281,7 @@ impl Waku {
                     "boss.deliverables",
                     "icons/file-text.svg",
                 ),
+                (BossTab::Chains, "boss.chains", "icons/link.svg"),
             ]
             .into_iter()
             .map(|(target, label, glyph)| {
@@ -10303,6 +10491,442 @@ impl Waku {
             .into_any_element()
     }
 
+    // ── Chains ───────────────────────────────────────────────────────────
+
+    /// The Chains section — every durable employee chain on this host with
+    /// its lifecycle and pause reason in the list, and the detail pane the
+    /// human-only approval flow needs: each required gate records an
+    /// explicit approve/reject here, then the owner controls (resume,
+    /// retry, cancel) carry the paused chain onward.
+    fn render_boss_chains_section(&mut self, key: DaemonKey, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let visible: Vec<Uuid> = self
+            .boss_ui
+            .rows
+            .iter()
+            .filter_map(|row| match row {
+                BossItem::Chain(id) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        let selected = self
+            .boss_ui
+            .chains_selected
+            .get(&key)
+            .copied()
+            .filter(|id| visible.contains(id))
+            .or_else(|| visible.first().copied());
+        if let Some(id) = selected {
+            self.boss_ui.chains_selected.insert(key, id);
+        }
+        let list_column = div()
+            .w(px(300.0))
+            .flex_none()
+            .flex()
+            .flex_col()
+            .min_h_0()
+            .border_r_1()
+            .border_color(theme.separator)
+            .child(if self.boss_ui.rows.is_empty() {
+                div()
+                    .px(px(12.0))
+                    .py(px(8.0))
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_tertiary)
+                    .child(tr!("boss.chains_empty"))
+                    .into_any_element()
+            } else {
+                self.boss_item_list(cx).into_any_element()
+            });
+        div()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .child(list_column)
+            .child(self.render_boss_chain_detail(key, selected, cx))
+            .into_any_element()
+    }
+
+    /// A chain list row — the outcome it serves, plus lifecycle and the
+    /// pause reason that tells the human what it is waiting on.
+    fn render_boss_chain_row(
+        &self,
+        key: DaemonKey,
+        chain_id: Uuid,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let Some(state) = self.boss_ui.states.get(&key) else {
+            return div().into_any_element();
+        };
+        let Some(chain) = state.chains.iter().find(|chain| chain.id == chain_id) else {
+            return div().into_any_element();
+        };
+        let title = state
+            .outcomes
+            .iter()
+            .find(|outcome| outcome.id == chain.request.outcome_id)
+            .map(|outcome| outcome.outcome.clone())
+            .unwrap_or_else(|| tr!("boss.chain_untitled"));
+        let status = chain_status_label(chain.status);
+        let detail = match &chain.reason {
+            Some(reason) if !reason.trim().is_empty() => format!("{status} · {reason}"),
+            _ => status,
+        };
+        let selected = self.boss_ui.chains_selected.get(&key) == Some(&chain_id);
+        div()
+            .id(SharedString::from(format!("boss-chain-{chain_id}")))
+            .tab_index(0)
+            .h(px(42.0))
+            .w_full()
+            .px(px(10.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .cursor_pointer()
+            .when(selected, |row| row.bg(theme.overlay))
+            .hover(|style| style.bg(theme.overlay))
+            .focus_visible(|style| style.bg(theme.focus_highlight()))
+            .on_activation(cx, move |this, _, cx| {
+                this.boss_ui.chains_selected.insert(key, chain_id);
+                cx.notify();
+            })
+            .child(icon("icons/link.svg", 15.0, theme.text_secondary))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .min_w_0()
+                    .flex_1()
+                    .child(div().truncate().text_color(theme.text).child(title))
+                    .child(
+                        div()
+                            .text_size(sp(11.0))
+                            .text_color(theme.text_tertiary)
+                            .truncate()
+                            .child(detail),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    /// Every chain mutation goes through the shared contract — the daemon
+    /// keeps the human-only approval gate and owner controls authoritative.
+    fn boss_chain_operation(
+        &mut self,
+        key: DaemonKey,
+        action: ChainOperation,
+        cx: &mut Context<Self>,
+    ) {
+        self.boss_request(key, BossOperation::Chain { action }, BossReply::List, cx);
+    }
+
+    /// The chain detail — status and reason up top, then the controls the
+    /// daemon accepts for this exact state, the current step's approval
+    /// gates, and the step list. Approval decisions and controls send the
+    /// revision the detail was rendered from; a stale write rejects with a
+    /// toast and the next state refresh re-arms the buttons.
+    fn render_boss_chain_detail(
+        &mut self,
+        key: DaemonKey,
+        selected: Option<Uuid>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let Some(chain_id) = selected else {
+            return boss_detail_placeholder(&theme, "icons/link.svg", tr!("boss.chain_select"));
+        };
+        let Some((chain, outcome)) = self.boss_ui.states.get(&key).and_then(|state| {
+            state
+                .chains
+                .iter()
+                .find(|chain| chain.id == chain_id)
+                .map(|chain| {
+                    (
+                        chain.clone(),
+                        state
+                            .outcomes
+                            .iter()
+                            .find(|outcome| outcome.id == chain.request.outcome_id)
+                            .map(|outcome| outcome.outcome.clone()),
+                    )
+                })
+        }) else {
+            return boss_detail_placeholder(&theme, "icons/link.svg", tr!("boss.chain_select"));
+        };
+        let revision = chain.revision;
+        let title = outcome.unwrap_or_else(|| tr!("boss.chain_untitled"));
+        let controls = chain_controls(&chain);
+        let mut control_button = |id: &str, label: String, control: ChainControl| {
+            boss_button(SharedString::from(id.to_owned()), label.clone(), &theme)
+                .child(label)
+                .on_activation(cx, move |this, _, cx| {
+                    this.boss_chain_operation(
+                        key,
+                        ChainOperation::Control {
+                            chain_id,
+                            expected_revision: revision,
+                            control,
+                            source_revision: None,
+                        },
+                        cx,
+                    );
+                })
+        };
+        let mut header = div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .px(px(16.0))
+            .py(px(10.0))
+            .border_b_1()
+            .border_color(theme.separator)
+            .child(icon("icons/link.svg", 14.0, theme.text_secondary))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .items_baseline()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(sp(13.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(title),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_size(sp(11.5))
+                            .text_color(theme.text_tertiary)
+                            .child(format!(
+                                "{} · {}",
+                                chain_status_label(chain.status),
+                                tr!("boss.chain_revision", revision = chain.revision)
+                            )),
+                    ),
+            );
+        if controls.pause {
+            header = header.child(control_button(
+                "boss-chain-pause",
+                tr!("boss.chain_pause"),
+                ChainControl::Pause,
+            ));
+        }
+        if controls.resume {
+            header = header.child(control_button(
+                "boss-chain-resume",
+                tr!("boss.chain_resume"),
+                ChainControl::Resume,
+            ));
+        }
+        if controls.retry {
+            header = header.child(control_button(
+                "boss-chain-retry",
+                tr!("boss.chain_retry"),
+                ChainControl::Retry,
+            ));
+        }
+        if controls.accept {
+            header = header.child(control_button(
+                "boss-chain-accept",
+                tr!("boss.chain_accept"),
+                ChainControl::Accept,
+            ));
+        }
+        if controls.cancel {
+            header = header.child(control_button(
+                "boss-chain-cancel",
+                tr!("boss.chain_cancel"),
+                ChainControl::Cancel,
+            ));
+        }
+        let mut body = div()
+            .id("boss-chain-detail-scroll")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .flex()
+            .flex_col();
+        if let Some(reason) = chain
+            .reason
+            .as_ref()
+            .filter(|reason| !reason.trim().is_empty())
+        {
+            body = body.child(
+                div()
+                    .flex_none()
+                    .px(px(16.0))
+                    .py(px(10.0))
+                    .border_b_1()
+                    .border_color(theme.separator)
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_secondary)
+                    .child(reason.clone()),
+            );
+        }
+        let step = &chain.steps[chain.current_step];
+        if !step.definition.required_approvals.is_empty() {
+            let gate_version = step
+                .attempts
+                .last()
+                .map_or(chain.definition_version, |attempt| {
+                    attempt.definition_version
+                });
+            let paused = chain.status == ChainStatus::Paused;
+            let mut gates = div()
+                .flex_none()
+                .px(px(16.0))
+                .py(px(10.0))
+                .border_b_1()
+                .border_color(theme.separator)
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
+                .child(boss_section_label(&theme, tr!("boss.chain_gates"), true));
+            for gate in &step.definition.required_approvals {
+                let decision = chain_gate_decision(step, gate, gate_version);
+                let chip = match decision {
+                    Some(true) => tr!("boss.chain_gate_approved"),
+                    Some(false) => tr!("boss.chain_gate_rejected"),
+                    None => tr!("boss.chain_gate_pending"),
+                };
+                let mut row = div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text)
+                            .child(gate.clone()),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_size(sp(11.5))
+                            .text_color(theme.text_tertiary)
+                            .child(chip),
+                    );
+                if paused && decision != Some(true) {
+                    let gate_name = gate.clone();
+                    row = row.child(
+                        boss_button(
+                            SharedString::from(format!("boss-chain-approve-{gate}")),
+                            tr!("boss.chain_approve"),
+                            &theme,
+                        )
+                        .child(tr!("boss.chain_approve"))
+                        .on_activation(cx, move |this, _, cx| {
+                            this.boss_chain_operation(
+                                key,
+                                ChainOperation::Approve {
+                                    chain_id,
+                                    expected_revision: revision,
+                                    gate: gate_name.clone(),
+                                    approved: true,
+                                },
+                                cx,
+                            );
+                        }),
+                    );
+                }
+                if paused && decision != Some(false) {
+                    let gate_name = gate.clone();
+                    row = row.child(
+                        boss_button(
+                            SharedString::from(format!("boss-chain-reject-{gate}")),
+                            tr!("boss.chain_reject"),
+                            &theme,
+                        )
+                        .child(tr!("boss.chain_reject"))
+                        .on_activation(cx, move |this, _, cx| {
+                            this.boss_chain_operation(
+                                key,
+                                ChainOperation::Approve {
+                                    chain_id,
+                                    expected_revision: revision,
+                                    gate: gate_name.clone(),
+                                    approved: false,
+                                },
+                                cx,
+                            );
+                        }),
+                    );
+                }
+                gates = gates.child(row);
+            }
+            body = body.child(gates);
+        }
+        let mut steps = div()
+            .flex_none()
+            .px(px(16.0))
+            .py(px(10.0))
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(boss_section_label(&theme, tr!("boss.chain_steps"), true));
+        for (index, step) in chain.steps.iter().enumerate() {
+            let current = index == chain.current_step;
+            let mut label = div()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .flex_none()
+                        .text_size(sp(11.5))
+                        .text_color(theme.text_tertiary)
+                        .w(px(18.0))
+                        .child(format!("{}", index + 1)),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text)
+                        .child(step.definition.title.clone()),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .text_size(sp(11.5))
+                        .text_color(theme.text_tertiary)
+                        .child(step_status_label(step.status)),
+                );
+            if current {
+                label = label.child(
+                    div()
+                        .flex_none()
+                        .text_size(sp(11.5))
+                        .text_color(theme.text_secondary)
+                        .child(tr!("boss.chain_current")),
+                );
+            }
+            steps = steps.child(label);
+        }
+        body = body.child(steps);
+        div()
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .child(header)
+            .child(body)
+            .into_any_element()
+    }
+
     /// A library deliverable row — the sidebar row's name/type/age/unread
     /// cues at task-row density, opening the same preview page on click.
     /// Remote records keep their host in the detail line and offer no
@@ -10576,6 +11200,7 @@ impl Waku {
             BossItem::InstructionPin { id, .. } => self.render_instruction_pin_row(key, id, cx),
             BossItem::Employee(id) => self.render_boss_employee_page_row(id, key, cx),
             BossItem::Deliverable(id) => self.render_boss_deliverable_row(key, id, cx),
+            BossItem::Chain(id) => self.render_boss_chain_row(key, id, cx),
             BossItem::HistoryHit(index) => self.render_boss_history_hit(key, index, cx),
             BossItem::HistoryFooter => self.render_boss_history_footer(key, cx),
             BossItem::MemoryRecord(index) => self.render_boss_memory_record(key, index, cx),
@@ -11262,6 +11887,77 @@ fn boss_loading_label_visible(pending: bool) -> bool {
     pending
 }
 
+/// The owner controls a chain accepts from its current lifecycle — the same
+/// transitions the reducer enforces, derived here so the detail pane only
+/// offers what cannot reject on arrival.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ChainControls {
+    pause: bool,
+    resume: bool,
+    retry: bool,
+    cancel: bool,
+    accept: bool,
+}
+
+fn chain_controls(chain: &EmployeeChain) -> ChainControls {
+    if matches!(
+        chain.status,
+        ChainStatus::Completed | ChainStatus::Cancelled
+    ) {
+        return ChainControls::default();
+    }
+    let paused = chain.status == ChainStatus::Paused;
+    let attempt = chain.steps[chain.current_step].attempts.last();
+    // The reducer's released check: a bound employee must report both
+    // halves released before resume/retry/accept may run.
+    let released = attempt.is_none_or(|attempt| {
+        attempt.employee_id.is_none() || (attempt.execution_released && attempt.workspace_released)
+    });
+    ChainControls {
+        pause: !matches!(
+            chain.status,
+            ChainStatus::Paused | ChainStatus::Pausing | ChainStatus::Cancelling
+        ),
+        resume: paused && released,
+        retry: paused && released && attempt.is_some(),
+        cancel: true,
+        accept: paused
+            && attempt.is_some_and(|attempt| attempt.sealed.is_some() && !attempt.handoff_accepted),
+    }
+}
+
+/// The latest recorded decision on one approval gate at the live attempt's
+/// definition version — `gate_reason`'s read, mirrored so the detail shows
+/// exactly what the daemon will evaluate on resume.
+fn chain_gate_decision(step: &ChainStep, gate: &str, definition_version: u64) -> Option<bool> {
+    step.approvals
+        .iter()
+        .rev()
+        .find(|approval| approval.gate == gate && approval.definition_version == definition_version)
+        .map(|approval| approval.approved)
+}
+
+fn chain_status_label(status: ChainStatus) -> String {
+    match status {
+        ChainStatus::Paused => tr!("boss.chain_status_paused"),
+        ChainStatus::Pausing => tr!("boss.chain_status_pausing"),
+        ChainStatus::Cancelling => tr!("boss.chain_status_cancelling"),
+        ChainStatus::Cancelled => tr!("boss.chain_status_cancelled"),
+        ChainStatus::Completed => tr!("boss.chain_status_completed"),
+        _ => tr!("boss.chain_status_active"),
+    }
+}
+
+fn step_status_label(status: StepStatus) -> String {
+    match status {
+        StepStatus::NotStarted => tr!("boss.chain_step_pending"),
+        StepStatus::Succeeded => tr!("boss.chain_step_succeeded"),
+        StepStatus::Failed => tr!("boss.chain_step_failed"),
+        StepStatus::Cancelled => tr!("boss.chain_step_cancelled"),
+        _ => tr!("boss.chain_step_active"),
+    }
+}
+
 /// An `Open` reply lands on whatever surface the user had when the request
 /// went out. If they have since navigated — a project-switcher commit, a
 /// sidebar click — the open's intent is stale and the reply must not
@@ -11826,13 +12522,17 @@ fn boss_sidebar_detail_line(
         .when_some(trailing_detail, |row, detail| row.child(detail))
 }
 
-fn employee_sidebar_details(session: Option<&AgentSession>, now: u64) -> (bool, Option<String>) {
+fn employee_sidebar_details(
+    session: Option<&AgentSession>,
+    now: u64,
+    absolute_date: bool,
+) -> (bool, Option<String>) {
     let Some(session) = session else {
         return (false, None);
     };
     (
         session.workspace.is_worktree(),
-        sidebar::session_time_label(session, now),
+        sidebar::session_time_label(session, now, absolute_date),
     )
 }
 
@@ -12222,16 +12922,23 @@ mod tests {
         employee.last_reply_at = Some(880);
 
         assert_eq!(
-            employee_sidebar_details(Some(&employee), now),
+            employee_sidebar_details(Some(&employee), now, false),
             (true, Some(sidebar::format_time_ago(120)))
         );
 
         employee.workspace = SessionWorkspace::Local;
         assert_eq!(
-            employee_sidebar_details(Some(&employee), now),
+            employee_sidebar_details(Some(&employee), now, false),
             (false, Some(sidebar::format_time_ago(120)))
         );
-        assert_eq!(employee_sidebar_details(None, now), (false, None));
+        assert_eq!(
+            employee_sidebar_details(Some(&employee), now, true),
+            (
+                false,
+                Some(sidebar::sidebar_short_date(880, now))
+            )
+        );
+        assert_eq!(employee_sidebar_details(None, now, false), (false, None));
     }
 
     #[test]
@@ -12256,6 +12963,8 @@ mod tests {
 
     fn deliverable_state(updated_at: u64, viewed_at: Option<u64>) -> BossState {
         BossState {
+            counsel: Default::default(),
+            employee_prompt_controls: Default::default(),
             identity: BossIdentity {
                 id: Uuid::new_v4(),
                 name: "Boss".into(),
@@ -13065,29 +13774,39 @@ mod tests {
         let mut task = outcome(1);
         task.assignments
             .push(settled_row(9, AssignmentVerdict::Failed, false));
-        assert!(boss_outcome_attention(&task, &[]));
+        assert_eq!(
+            boss_outcome_attention(&task, &[], &[]),
+            (true, Some(10)),
+            "the settle stamp is the evidence's own time"
+        );
 
         // A flagged blocker reads as failed evidence the same way.
         task.assignments[0].settled.as_mut().unwrap().verdict = AssignmentVerdict::Finished;
         task.assignments[0].settled.as_mut().unwrap().blocked = true;
-        assert!(boss_outcome_attention(&task, &[]));
+        assert!(boss_outcome_attention(&task, &[], &[]).0);
 
         // Clean finishes and deliberate cancels leave nothing owed.
         task.assignments[0].settled.as_mut().unwrap().blocked = false;
-        assert!(!boss_outcome_attention(&task, &[]));
+        assert!(!boss_outcome_attention(&task, &[], &[]).0);
         task.assignments[0].settled.as_mut().unwrap().verdict = AssignmentVerdict::Cancelled;
-        assert!(!boss_outcome_attention(&task, &[]));
+        assert!(!boss_outcome_attention(&task, &[], &[]).0);
         task.assignments[0].settled.as_mut().unwrap().verdict = AssignmentVerdict::Superseded;
-        assert!(!boss_outcome_attention(&task, &[]));
+        assert!(!boss_outcome_attention(&task, &[], &[]).0);
 
         // A rostered member's clean record answers for its own settled
         // failure — the durable row defers to it.
-        let member = BossOutcomeMember {
+        let mut member = BossOutcomeMember {
             employee: employee(9, EmployeeLifecycle::Expired, None),
             queue_rank: None,
         };
+        member.employee.assignment = Some(waku_protocol::boss::Assignment {
+            outcome_id: task.id,
+            after_success: String::new(),
+            finishes_outcome: false,
+            prerequisites: Vec::new(),
+        });
         task.assignments[0].settled.as_mut().unwrap().verdict = AssignmentVerdict::Failed;
-        assert!(!boss_outcome_attention(&task, &[member.clone()]));
+        assert!(!boss_outcome_attention(&task, &[member.clone()], &[]).0);
 
         // The same member's unresolved record flags the outcome itself.
         let mut failed_member = member;
@@ -13098,7 +13817,11 @@ mod tests {
             parked_prompts: 0,
             pending_question: None,
         });
-        assert!(boss_outcome_attention(&task, &[failed_member]));
+        assert_eq!(
+            boss_outcome_attention(&task, &[failed_member], &[]),
+            (true, None),
+            "a member with no expiry stamp is undated evidence"
+        );
 
         // An open completion conflict flags the outcome on its own.
         let mut conflicted = outcome(2);
@@ -13108,7 +13831,71 @@ mod tests {
             reason: "handoff still pending".into(),
             at: 10,
         });
-        assert!(boss_outcome_attention(&conflicted, &[]));
+        assert!(boss_outcome_attention(&conflicted, &[], &[]).0);
+    }
+
+    /// A paused chain's unhandled exception counts toward its outcome's
+    /// attention with the exception's own stamp — the same stalled work
+    /// the reminder scan surfaces. A handled exception, an owner's hold
+    /// without one, and live or terminal chains leave the outcome to its
+    /// own evidence.
+    #[test]
+    fn outcome_attention_counts_paused_chain_exceptions() {
+        let task = outcome(1);
+        let mut chain = test_chain(ChainStatus::Paused);
+        chain.request.outcome_id = task.id;
+        chain.attention = Some(waku_protocol::chains::ChainAttention {
+            id: Uuid::new_v4(),
+            reason: "gate failed".into(),
+            raised_at: Some(42),
+            handled_at: None,
+        });
+        assert_eq!(
+            boss_outcome_attention(&task, &[], std::slice::from_ref(&chain)),
+            (true, Some(42))
+        );
+
+        // A handled exception reads like the wait the pause itself is;
+        // an owner hold carries no exception at all.
+        chain.attention.as_mut().unwrap().handled_at = Some(50);
+        assert_eq!(
+            boss_outcome_attention(&task, &[], std::slice::from_ref(&chain)),
+            (false, None)
+        );
+        chain.attention = None;
+        assert_eq!(
+            boss_outcome_attention(&task, &[], std::slice::from_ref(&chain)),
+            (false, None)
+        );
+
+        // Live and terminal chains own or close their work — a stall
+        // reads only while the chain is paused.
+        for status in [ChainStatus::Working, ChainStatus::Completed] {
+            let mut live = chain.clone();
+            live.status = status;
+            live.attention = Some(waku_protocol::chains::ChainAttention {
+                id: Uuid::new_v4(),
+                reason: "gate failed".into(),
+                raised_at: Some(42),
+                handled_at: None,
+            });
+            assert_eq!(
+                boss_outcome_attention(&task, &[], &[live]),
+                (false, None)
+            );
+        }
+
+        // A chain bound to another outcome never lands here.
+        let mut other = chain.clone();
+        other.status = ChainStatus::Paused;
+        other.request.outcome_id = Uuid::new_v4();
+        other.attention = Some(waku_protocol::chains::ChainAttention {
+            id: Uuid::new_v4(),
+            reason: "gate failed".into(),
+            raised_at: Some(42),
+            handled_at: None,
+        });
+        assert_eq!(boss_outcome_attention(&task, &[], &[other]), (false, None));
     }
 
     #[test]
@@ -13173,6 +13960,20 @@ mod tests {
             false,
             false
         ));
+    }
+
+    #[test]
+    fn counsel_in_the_boss_project_uses_its_own_transcript() {
+        let mut state = boss_state_for_queue_test();
+        let boss = Uuid::new_v4();
+        let counsel = Uuid::new_v4();
+        state.session_id = Some(boss);
+        state.counsel.session_id = Some(counsel);
+        let project = Some(state.identity.id);
+
+        assert!(is_boss_chat_surface(&state, boss, project));
+        assert!(is_boss_chat_surface(&state, Uuid::new_v4(), project));
+        assert!(!is_boss_chat_surface(&state, counsel, project));
     }
 
     #[test]
@@ -13979,6 +14780,8 @@ mod tests {
 
     fn boss_state_for_queue_test() -> BossState {
         BossState {
+            counsel: Default::default(),
+            employee_prompt_controls: Default::default(),
             identity: BossIdentity {
                 id: Uuid::from_u128(u128::MAX - 2),
                 name: "Boss".into(),
@@ -14421,5 +15224,154 @@ mod tests {
         assert!(document.contains("- **Inherited — Employee**"));
         assert!(document.contains("- **Shipped — Researcher**"));
         assert!(!document.contains("**Custom**"));
+    }
+
+    fn chain_attempt() -> waku_protocol::chains::ChainAttempt {
+        waku_protocol::chains::ChainAttempt {
+            id: Uuid::new_v4(),
+            dispatch_id: Uuid::new_v4(),
+            definition_version: 1,
+            employee_id: None,
+            status: StepStatus::Waiting,
+            starting_revision: None,
+            workspace: None,
+            execution_released: false,
+            workspace_released: false,
+            provisional_result: None,
+            terminal: None,
+            sealed: None,
+            handoff_accepted: false,
+            reconciled_retry_revision: None,
+            retry_workspace_lineage: None,
+            created_at: 0,
+        }
+    }
+
+    fn test_chain(status: ChainStatus) -> EmployeeChain {
+        let step = ChainStep {
+            project_metadata: None,
+            definition: waku_protocol::chains::ChainStepDefinition {
+                purpose: None,
+                title: "step".into(),
+                prompt: "work".into(),
+                project_id: Uuid::new_v4(),
+                project: None,
+                persona_id: None,
+                provider: ProviderKind::Codex,
+                model: "gpt-5".into(),
+                reasoning_effort: None,
+                permissions: PersonaPermissions::default(),
+                resources: Default::default(),
+                workspace: Default::default(),
+                base_revision: None,
+                boundary: waku_protocol::chains::HandoffBoundary::ArtifactsReady,
+                required_checks: Vec::new(),
+                required_artifacts: Vec::new(),
+                required_approvals: Vec::new(),
+                max_retries: 0,
+                plan_id: None,
+                item_id: None,
+                successor_brief: String::new(),
+            },
+            status: StepStatus::Waiting,
+            attempts: vec![chain_attempt()],
+            approvals: Vec::new(),
+        };
+        EmployeeChain {
+            schema_version: 1,
+            id: Uuid::new_v4(),
+            request_id: Uuid::new_v4(),
+            supervisor_id: None,
+            definition_version: 1,
+            revision: 0,
+            current_step: 0,
+            status,
+            reason: None,
+            finisher_reserved: false,
+            request: waku_protocol::chains::ChainDefinition {
+                outcome_id: Uuid::new_v4(),
+                finishes_outcome: false,
+                steps: Vec::new(),
+            },
+            steps: vec![step],
+            attention: None,
+            history: Vec::new(),
+        }
+    }
+
+    /// The Chains detail offers only controls the reducer accepts: pause
+    /// and cancel while live; resume, retry, and accept only on a paused,
+    /// released attempt; nothing once terminal.
+    #[test]
+    fn chain_controls_follow_lifecycle_and_release() {
+        let mut chain = test_chain(ChainStatus::Working);
+        let controls = chain_controls(&chain);
+        assert!(controls.pause && controls.cancel);
+        assert!(!controls.resume && !controls.retry && !controls.accept);
+
+        // Paused with a bound, unreleased attempt: only cancel is safe
+        // until the daemon confirms release.
+        chain.status = ChainStatus::Paused;
+        chain.steps[0].attempts[0].employee_id = Some(Uuid::new_v4());
+        let controls = chain_controls(&chain);
+        assert!(!controls.pause && !controls.resume && !controls.retry && controls.cancel);
+        assert!(!controls.accept);
+
+        // Released with a sealed, unaccepted handoff: every recovery
+        // control is offered.
+        let attempt = &mut chain.steps[0].attempts[0];
+        attempt.execution_released = true;
+        attempt.workspace_released = true;
+        attempt.sealed = Some(waku_protocol::chains::ChainHandoff {
+            producer_attempt: attempt.id,
+            definition_version: 1,
+            terminal_message: "done".into(),
+            result: waku_protocol::chains::ChainResult {
+                disposition: waku_protocol::chains::ResultDisposition::Success,
+                checks: Vec::new(),
+                artifacts: Vec::new(),
+                code: None,
+                limitations: Vec::new(),
+            },
+            successor_step: None,
+            accepted: false,
+            reason: None,
+            sealed_at: 0,
+        });
+        let controls = chain_controls(&chain);
+        assert!(controls.resume && controls.retry && controls.cancel && controls.accept);
+        assert!(!controls.pause);
+
+        chain.steps[0].attempts[0].handoff_accepted = true;
+        assert!(!chain_controls(&chain).accept);
+
+        chain.status = ChainStatus::Completed;
+        assert_eq!(chain_controls(&chain), ChainControls::default());
+        chain.status = ChainStatus::Cancelled;
+        assert_eq!(chain_controls(&chain), ChainControls::default());
+    }
+
+    /// Gate decisions key on the live attempt's definition version — a
+    /// decision under an older version never satisfies the current gate.
+    #[test]
+    fn chain_gate_decision_reads_the_latest_versioned_verdict() {
+        let chain = test_chain(ChainStatus::Paused);
+        let mut step = chain.steps[0].clone();
+        let approval = |version: u64, approved: bool| waku_protocol::chains::ChainApproval {
+            gate: "publish".into(),
+            actor: waku_protocol::chains::ChainActor::Human,
+            approved,
+            definition_version: version,
+            at: 0,
+        };
+        assert_eq!(chain_gate_decision(&step, "publish", 1), None);
+        step.approvals.push(approval(1, true));
+        assert_eq!(chain_gate_decision(&step, "publish", 1), Some(true));
+        // A later rejection wins; an older approval does not cover a
+        // revised attempt.
+        step.approvals.push(approval(1, false));
+        assert_eq!(chain_gate_decision(&step, "publish", 1), Some(false));
+        assert_eq!(chain_gate_decision(&step, "publish", 2), None);
+        assert_eq!(chain_gate_decision(&step, "other", 1), None);
     }
 }

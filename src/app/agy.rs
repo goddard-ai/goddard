@@ -1,12 +1,11 @@
 //! Antigravity (`agy`) terminal-backed sessions.
 //!
-//! An Antigravity task has no driver, no daemon runtime, and no transcript:
+//! A legacy Antigravity task runs outside the daemon:
 //! the surface is a PTY running the CLI's own TUI, and the sidebar status
 //! comes from the CLI's own `conversation_summaries.db`, polled off-thread.
 //! The session record itself rides the same persistence and sidebar as
 //! every other task.
 
-use super::runtime::prepare_submission;
 use super::*;
 use crate::agy;
 
@@ -43,206 +42,6 @@ fn agy_session_status(summary: &agy::ConversationSummary) -> SessionStatus {
 }
 
 impl Waku {
-    /// Submit a draft Antigravity task's first prompt.
-    ///
-    /// This is the terminal-backed counterpart of the driver path: the
-    /// prompt is recorded so the task persists and titles itself, the
-    /// workspace materializes through the same preparation the driver path
-    /// uses, and the finished preparation spawns `agy -i` as the session's
-    /// terminal instead of asking the daemon for a runtime.
-    pub(super) fn submit_agy_submission(
-        &mut self,
-        session_id: Uuid,
-        submission: ComposerSubmission,
-        cx: &mut Context<Self>,
-    ) {
-        let selected = self.state.selected_session == Some(session_id);
-        let Some(session) = self
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-        else {
-            return;
-        };
-        // A started session's TUI owns every follow-up — the composer is
-        // already hidden for it, so a submission reaching this path has
-        // nowhere valid to go.
-        if session.has_started() {
-            return;
-        }
-        // The surface is a local PTY; a remote daemon's workspace paths do
-        // not exist on this machine.
-        if self.daemon.is_remote() {
-            if selected {
-                self.restore_composer_submission(session.id, submission, cx);
-                self.show_toast(tr!(
-                    "errors.provider_terminal_sessions_local_only",
-                    provider = ProviderKind::Antigravity.display_name()
-                ));
-            }
-            cx.notify();
-            return;
-        }
-        let project_id = session.project_id;
-        let workspace = session.workspace.clone();
-        let next_turn_count = session.turns.len() + 1;
-        let Some(project) = self
-            .state
-            .projects
-            .iter()
-            .find(|project| project.id == project_id)
-            .cloned()
-        else {
-            if selected {
-                self.restore_composer_submission(session.id, submission, cx);
-                self.show_toast(tr!("errors.prepare_task_project_not_found"));
-            }
-            cx.notify();
-            return;
-        };
-        // The task's message and busy state land before any Git work begins,
-        // the same rule the driver path follows; a failed preparation
-        // unwinds them together.
-        let prompt = submission.prompt.clone();
-        let mut incognito = false;
-        let message_id = if let Some(session) = self.state.session_mut(session_id) {
-            incognito = session.incognito;
-            if !submission.hidden {
-                session.set_title_from_prompt(&submission.human_prompt());
-            }
-            let message_id = session.push_message(MessageRole::User, &submission.human_prompt());
-            // A queued follow-up sends under its chip's id — the same
-            // convention the driver path follows — so the stored copy
-            // retires the parked entry.
-            if let Some(queued_id) = submission.queued_id
-                && let Some(stored) = session
-                    .messages
-                    .iter_mut()
-                    .find(|stored| stored.id == message_id)
-            {
-                stored.id = queued_id;
-            }
-            session.status = SessionStatus::Connecting;
-            session.updated_at = unix_time();
-            Some(submission.queued_id.unwrap_or(message_id))
-        } else {
-            None
-        };
-        self.submission_preparations.insert(session_id);
-        let workspace_client = waku_client::WorkspaceClient::new(self.daemon.client());
-        let sync_default_branch = self.state.new_worktree_sync_default_branch;
-        let sync_branches = self.state.new_worktree_sync_branches.clone();
-        cx.spawn(async move |waku, cx| {
-            let prepared = cx
-                .background_executor()
-                .spawn(async move {
-                    prepare_submission(
-                        workspace_client,
-                        project,
-                        workspace,
-                        None,
-                        None,
-                        session_id,
-                        next_turn_count,
-                        sync_default_branch,
-                        sync_branches,
-                        incognito,
-                        None,
-                    )
-                })
-                .await;
-            let _ = waku.update(cx, move |waku, cx| {
-                waku.finish_agy_submission(
-                    session_id, submission, prompt, message_id, prepared, cx,
-                );
-            });
-        })
-        .detach();
-        cx.notify();
-    }
-
-    fn finish_agy_submission(
-        &mut self,
-        session_id: Uuid,
-        submission: ComposerSubmission,
-        prompt: String,
-        message_id: Option<Uuid>,
-        prepared: anyhow::Result<PreparedSubmission>,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.submission_preparations.remove(&session_id) {
-            return;
-        }
-        self.submission_stages.remove(&session_id);
-        let selected = self.state.selected_session == Some(session_id);
-        let prepared = match prepared {
-            Ok(prepared) => prepared,
-            Err(error) => {
-                self.drain_pending_workspace_cleanups(cx);
-                if let Some(session) = self.state.session_mut(session_id) {
-                    if session.status == SessionStatus::Connecting {
-                        if let Some(message_id) = message_id {
-                            session.messages.retain(|message| message.id != message_id);
-                        }
-                        session.status = SessionStatus::Idle;
-                    }
-                }
-                if selected {
-                    self.restore_composer_submission(session_id, submission, cx);
-                    self.show_toast(tr!("errors.create_worktree", error = error));
-                }
-                cx.notify();
-                return;
-            }
-        };
-        let PreparedSubmission {
-            workspace,
-            checkpoint_warning,
-            lfs_warning,
-            worktree_restored,
-            driver: _,
-            route_decision: _,
-            turn_route: _,
-        } = prepared;
-        let workspace_changed = self.state.session_mut(session_id).is_some_and(|session| {
-            let changed = session.workspace != workspace;
-            session.workspace = workspace;
-            changed
-        });
-        if selected && (workspace_changed || worktree_restored) {
-            self.invalidate_workspace_queries(cx);
-            self.ensure_right_panel_terminals(cx);
-        }
-        if selected && worktree_restored {
-            self.show_toast(tr!("session.worktree_recreated"));
-        }
-        if selected && let Some(warning) = checkpoint_warning {
-            self.show_toast(warning);
-        }
-        if selected && let Some(warning) = lfs_warning {
-            self.show_toast(warning);
-        }
-        let prompt = self.resolve_provider_submission(
-            ProviderKind::Antigravity,
-            &prompt,
-            self.slash_command_index.as_slice(),
-        );
-        let spawned = self.spawn_agy_terminal(session_id, AgyLaunchKind::Prompt(prompt), cx);
-        if let Some(session) = self.state.session_mut(session_id) {
-            // A launch that never produced a terminal is a failed start, not
-            // work in flight — the relaunch affordance is the retry path.
-            session.status = if spawned {
-                SessionStatus::Working
-            } else {
-                SessionStatus::Failed
-            };
-            session.updated_at = unix_time();
-        }
-        self.save();
-        cx.notify();
-    }
-
     /// Whether the Antigravity session's TUI is on screen right now.
     pub(super) fn agy_session_visible(&self, session_id: Uuid) -> bool {
         self.state.selected_session == Some(session_id)
@@ -254,10 +53,7 @@ impl Waku {
         self.agy_terminals.get(&session_id).cloned()
     }
 
-    /// Bring the session's TUI up if it is down: fresh sessions get `agy -i`
-    /// through the submit path, while selecting a started session respawns
-    /// against `--conversation` (or a bare TUI when no cursor was captured).
-    /// No-op for non-Antigravity sessions and while a terminal is alive.
+    /// Reopen a legacy Antigravity task in its terminal.
     pub(super) fn ensure_agy_terminal(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         if self.agy_terminals.contains_key(&session_id) || self.daemon.is_remote() {
             return;
@@ -270,7 +66,7 @@ impl Waku {
         else {
             return;
         };
-        if session.provider != ProviderKind::Antigravity || !session.has_started() {
+        if !session.uses_antigravity_terminal() {
             return;
         }
         let launch = match session.provider_cursor.as_ref() {
@@ -336,11 +132,6 @@ impl Waku {
             return false;
         };
         let launch = match &kind {
-            AgyLaunchKind::Prompt(prompt) => agy::AgyLaunch::initial_prompt(
-                prompt,
-                model.as_deref(),
-                reasoning_effort.as_deref(),
-            ),
             AgyLaunchKind::Resume(conversation_id) => agy::AgyLaunch::resume(
                 conversation_id,
                 model.as_deref(),
@@ -532,7 +323,7 @@ impl Waku {
         }
         let mut queries: Vec<AgyPollQuery> = Vec::new();
         for session in &self.state.sessions {
-            if session.provider != ProviderKind::Antigravity || !session.has_started() {
+            if !session.uses_antigravity_terminal() {
                 continue;
             }
             let cursor_id = match session.provider_cursor.as_ref() {
@@ -633,7 +424,7 @@ impl Waku {
                 .state
                 .sessions
                 .iter()
-                .filter(|session| session.provider == ProviderKind::Antigravity)
+                .filter(|session| session.uses_antigravity_terminal())
                 .filter_map(|session| {
                     let Some(ProviderResumeCursor::Antigravity { conversation_id }) =
                         session.provider_cursor.as_ref()
@@ -655,6 +446,7 @@ impl Waku {
                     session.updated_at = unix_time();
                     if let Some(title) = title {
                         session.auto_title = Some(title);
+                        session.auto_title_is_prompt = false;
                     }
                     dirty = true;
                 }
@@ -670,8 +462,6 @@ impl Waku {
 
 /// What a spawned Antigravity terminal should run.
 enum AgyLaunchKind {
-    /// `agy -i "<prompt>"` — the first prompt of a new conversation.
-    Prompt(String),
     /// `agy --conversation <id>` — reopen a captured conversation.
     Resume(String),
     /// A bare TUI, when no conversation id was ever captured.

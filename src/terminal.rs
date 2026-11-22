@@ -5,7 +5,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -27,13 +27,13 @@ use anyhow::{Context as _, Result};
 use base64::Engine as _;
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use gpui::{
-    AnyElement, App, AppContext, Bounds, ClipboardItem, Context, Entity, EventEmitter, FocusHandle,
-    Focusable, FontFallbacks, FontStyle, FontWeight, Global, Hsla, InteractiveElement, IntoElement,
-    KeyBinding, KeyDownEvent, Keystroke, Modifiers, ModifiersChangedEvent, MouseButton,
-    MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point,
-    Render, ScrollDelta, ScrollWheelEvent, SharedString, StrikethroughStyle, Styled, StyledText,
-    Subscription, Task, TextAlign, TextRun, UnderlineStyle, Window, actions, canvas, div, fill,
-    font, point, px, rgb, size,
+    AnyElement, App, AppContext, Bounds, ClipboardItem, Context, Div, Entity, EventEmitter,
+    FocusHandle, Focusable, FontFallbacks, FontStyle, FontWeight, Global, Hsla, InteractiveElement,
+    IntoElement, KeyBinding, KeyDownEvent, Keystroke, Modifiers, ModifiersChangedEvent,
+    MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, ParentElement,
+    Pixels, Point, Render, ScrollDelta, ScrollWheelEvent, SharedString, StrikethroughStyle, Styled,
+    StyledText, Subscription, Task, TextAlign, TextRun, UnderlineStyle, Window, actions, canvas,
+    div, fill, font, point, px, rgb, size,
 };
 use parking_lot::Mutex;
 
@@ -43,6 +43,9 @@ use crate::persistence::DEFAULT_RIGHT_PANEL_WIDTH;
 use crate::theme::{Theme, hairline, sp};
 use crate::ui::scrollbar::{self, ScrollbarState};
 use uuid::Uuid;
+
+mod search;
+use search::TerminalSearch;
 
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
@@ -369,6 +372,7 @@ impl TerminalIo {
 #[derive(Clone)]
 struct TerminalEventProxy {
     dirty: Arc<AtomicBool>,
+    grid_revision: Arc<AtomicU64>,
     io: Arc<OnceLock<TerminalIo>>,
     ui_events: Sender<TerminalUiEvent>,
     window_size: Arc<Mutex<WindowSize>>,
@@ -378,6 +382,11 @@ struct TerminalEventProxy {
 }
 
 impl TerminalEventProxy {
+    fn grid_changed(&self) {
+        self.grid_revision.fetch_add(1, Ordering::Release);
+        self.dirty.store(true, Ordering::Release);
+    }
+
     fn write_pty(&self, bytes: impl Into<Cow<'static, [u8]>>) {
         if let Some(io) = self.io.get() {
             io.write(bytes.into());
@@ -388,7 +397,8 @@ impl TerminalEventProxy {
 impl EventListener for TerminalEventProxy {
     fn send_event(&self, event: Event) {
         match event {
-            Event::Wakeup | Event::MouseCursorDirty | Event::CursorBlinkingChange => {
+            Event::Wakeup => self.grid_changed(),
+            Event::MouseCursorDirty | Event::CursorBlinkingChange => {
                 self.dirty.store(true, Ordering::Release);
             }
             Event::Title(title) => {
@@ -490,6 +500,7 @@ impl EmulatorParts {
             .map_err(|error| anyhow::anyhow!("compile terminal link regex: {error}"))?;
         let proxy = TerminalEventProxy {
             dirty: dirty.clone(),
+            grid_revision: Arc::new(AtomicU64::new(0)),
             io: io.clone(),
             ui_events: ui_events_sender.clone(),
             window_size: shared_window_size.clone(),
@@ -566,8 +577,9 @@ fn remote_terminal_pump(
                                     else {
                                         continue;
                                     };
-                                    processor.advance(&mut *term.lock(), &bytes);
-                                    dirty.store(true, Ordering::Release);
+                                    let mut term = term.lock();
+                                    processor.advance(&mut *term, &bytes);
+                                    proxy.grid_changed();
                                 }
                                 "terminalExited" | "terminalError" => {
                                     let _ = ui_events.send(TerminalUiEvent::Exited(None));
@@ -614,18 +626,21 @@ fn remote_terminal_pump(
                 client.unsubscribe(channel_id, channel_id);
                 events = client.subscribe(channel_id, channel_id);
                 let size = *window_size.lock();
-                *term.lock() = Term::new(
-                    Config {
-                        scrolling_history: TERMINAL_SCROLLBACK_LINES,
-                        ..Default::default()
-                    },
-                    &TerminalDimensions {
-                        columns: size.num_cols.max(1) as usize,
-                        rows: size.num_lines.max(1) as usize,
-                    },
-                    proxy.clone(),
-                );
-                dirty.store(true, Ordering::Release);
+                {
+                    let mut term = term.lock();
+                    *term = Term::new(
+                        Config {
+                            scrolling_history: TERMINAL_SCROLLBACK_LINES,
+                            ..Default::default()
+                        },
+                        &TerminalDimensions {
+                            columns: size.num_cols.max(1) as usize,
+                            rows: size.num_lines.max(1) as usize,
+                        },
+                        proxy.clone(),
+                    );
+                    proxy.grid_changed();
+                }
                 let reclaimed = client.request(
                     channel_id,
                     channel_id,
@@ -655,6 +670,7 @@ struct TerminalSession {
     term: Arc<FairMutex<Term<TerminalEventProxy>>>,
     io: TerminalIo,
     dirty: Arc<AtomicBool>,
+    grid_revision: Arc<AtomicU64>,
     ui_events: Receiver<TerminalUiEvent>,
     window_size: Arc<Mutex<WindowSize>>,
     grid_size: (usize, usize),
@@ -782,6 +798,7 @@ impl TerminalSession {
             term: parts.term,
             io,
             dirty: parts.dirty,
+            grid_revision: parts.proxy.grid_revision,
             ui_events: parts.ui_events,
             window_size: parts.window_size,
             grid_size: (columns, rows),
@@ -859,6 +876,7 @@ impl TerminalSession {
             term: parts.term,
             io,
             dirty: parts.dirty,
+            grid_revision: parts.proxy.grid_revision,
             ui_events: parts.ui_events,
             window_size: parts.window_size,
             grid_size: (columns, rows),
@@ -884,7 +902,11 @@ impl TerminalSession {
         self.grid_size = (columns, rows);
         self.cell_size = (cell_width, cell_height);
         let dimensions = TerminalDimensions { columns, rows };
-        self.term.lock().resize(dimensions);
+        {
+            let mut term = self.term.lock();
+            term.resize(dimensions);
+            self.grid_revision.fetch_add(1, Ordering::Release);
+        }
         let size = WindowSize {
             num_lines: rows.min(u16::MAX as usize) as u16,
             num_cols: columns.min(u16::MAX as usize) as u16,
@@ -921,7 +943,9 @@ impl TerminalSession {
     }
 
     fn clear_scrollback(&self) {
-        clear_scrollback(&mut self.term.lock());
+        let mut term = self.term.lock();
+        clear_scrollback(&mut term);
+        self.grid_revision.fetch_add(1, Ordering::Release);
         self.dirty.store(true, Ordering::Release);
     }
 
@@ -952,10 +976,19 @@ impl TerminalSession {
         selection_color: Hsla,
         cursor_style: TerminalCursorStyle,
         hovered_link: Option<&Match>,
+        search: Option<&TerminalSearch>,
     ) -> TerminalSnapshot {
         *self.palette.lock() = theme;
         let term = self.term.lock();
         let content = term.renderable_content();
+        let (matches, active_match) = search
+            .and_then(|search| search.highlights(self.grid_revision.load(Ordering::Acquire)))
+            .unwrap_or_default();
+        let first_visible = TerminalPoint::new(Line(-(content.display_offset as i32)), Column(0));
+        let mut matches = matches
+            [matches.partition_point(|matched| *matched.end() < first_visible)..]
+            .iter()
+            .peekable();
         let columns = self.grid_size.0;
         let rows = self.grid_size.1;
         let selection = content.selection;
@@ -1006,6 +1039,22 @@ impl TerminalSession {
                 } else {
                     foreground.l = 1.0 - (1.0 - foreground.l) * 0.7;
                 }
+            }
+            while matches
+                .peek()
+                .is_some_and(|matched| *matched.end() < indexed.point)
+            {
+                matches.next();
+            }
+            if active_match.is_some_and(|matched| matched.contains(&indexed.point)) {
+                background = theme.inverse;
+                foreground = theme.on_inverse;
+            } else if matches
+                .peek()
+                .is_some_and(|matched| matched.contains(&indexed.point))
+            {
+                background = theme.warning.opacity(0.25);
+                foreground = theme.text;
             }
             if selection.is_some_and(|selection| selection.contains(indexed.point)) {
                 background = selection_color;
@@ -1501,6 +1550,7 @@ struct TerminalCommandBar {
 pub struct TerminalView {
     session: Option<TerminalSession>,
     command_bar: Option<TerminalCommandBar>,
+    search: Option<TerminalSearch>,
     error: Option<String>,
     focus_handle: FocusHandle,
     working_directory: PathBuf,
@@ -1508,6 +1558,8 @@ pub struct TerminalView {
     /// from it as soon as the shell reports a `cd`, so "where this
     /// terminal was spawned" reads here instead.
     spawn_directory: PathBuf,
+    previous_checkout: Option<PathBuf>,
+    pending_checkout: Option<(PathBuf, PathBuf)>,
     /// Basename of the PTY's shell — "zsh", "bash" — what a sidebar row
     /// reports when the terminal sits outside any repository.
     shell_name: String,
@@ -1541,10 +1593,6 @@ pub struct TerminalView {
     /// Terminals rendered inside another surface — the provider setup block
     /// in Settings — keep their own header strip and skip the command bar.
     embedded: bool,
-    /// One cell of a split group — like `embedded` the grid sizes to its
-    /// painted cell and the toolbar strip shows, but a pane stays a user
-    /// shell: the command bar and context menu still work.
-    pane: bool,
     /// Advance width of one grid cell, measured from the terminal font on
     /// first render so grid math matches what `StyledText` actually lays out.
     /// Keyed by family and size so a font change re-measures instead of
@@ -1623,11 +1671,14 @@ impl TerminalView {
         Self {
             session: None,
             command_bar: None,
+            search: None,
             error: None,
             focus_handle: cx.focus_handle(),
             title: default_title.clone(),
             default_title,
             custom_title: None,
+            previous_checkout: None,
+            pending_checkout: None,
             spawn_directory: working_directory.clone(),
             working_directory,
             shell_name,
@@ -1645,7 +1696,6 @@ impl TerminalView {
             scroll_accumulator: 0.0,
             panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
             embedded: false,
-            pane: false,
             measured_cell_width: None,
             scrollbar_state: ScrollbarState::new(),
             grid_bounds: Rc::new(Cell::new(None)),
@@ -1740,11 +1790,14 @@ impl TerminalView {
         Self {
             session: None,
             command_bar: None,
+            search: None,
             error: None,
             focus_handle: cx.focus_handle(),
             title: default_title.clone(),
             default_title,
             custom_title: None,
+            previous_checkout: None,
+            pending_checkout: None,
             spawn_directory: working_directory.clone(),
             working_directory,
             shell_name,
@@ -1760,7 +1813,6 @@ impl TerminalView {
             scroll_accumulator: 0.0,
             panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
             embedded: false,
-            pane: false,
             measured_cell_width: None,
             scrollbar_state: ScrollbarState::new(),
             grid_bounds: Rc::new(Cell::new(None)),
@@ -1883,6 +1935,50 @@ impl TerminalView {
         view
     }
 
+    pub(super) fn previous_checkout(&self) -> Option<PathBuf> {
+        self.previous_checkout.clone()
+    }
+
+    /// Run a directory change only at an idle shell, clearing any unfinished
+    /// edit buffer first so the palette cannot append to and execute user input.
+    pub(super) fn navigate_checkout(
+        &mut self,
+        source: PathBuf,
+        target: PathBuf,
+        cx: &mut Context<Self>,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !self.command_running && !self.exited,
+            "terminal is not at an idle shell prompt"
+        );
+        let session = self
+            .session
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("terminal is not connected"))?;
+        anyhow::ensure!(
+            !session.mode().contains(TermMode::ALT_SCREEN),
+            "terminal is running a full-screen program"
+        );
+        let path = target
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("checkout path is not valid UTF-8"))?;
+        anyhow::ensure!(
+            !path.chars().any(char::is_control),
+            "checkout path contains control characters"
+        );
+        if self.working_directory == target {
+            return Ok(());
+        }
+        let command = format!("cd -- {}", crate::custom_commands::shell_quote(&target));
+        // Cancel unfinished input in either Emacs or vi editing mode.
+        session.write(b"\x03".to_vec());
+        session.write(bracketed_paste(command, session.mode()));
+        session.write(b"\r".to_vec());
+        self.pending_checkout = Some((source, target));
+        cx.notify();
+        Ok(())
+    }
+
     pub fn working_directory(&self) -> &Path {
         &self.working_directory
     }
@@ -1948,10 +2044,66 @@ impl TerminalView {
         self.panel_width = width;
     }
 
-    /// Join or leave a split group: pane mode sizes the grid to the
-    /// painted cell and shows the toolbar strip.
-    pub fn set_pane(&mut self, pane: bool) {
-        self.pane = pane;
+    #[cfg(test)]
+    pub(crate) fn painted_grid_bounds(&self) -> Option<Bounds<Pixels>> {
+        self.grid_bounds.get()
+    }
+
+    #[track_caller]
+    pub(crate) fn render_toolbar(&self, controls: Option<AnyElement>, cx: &App) -> Div {
+        let theme = Theme::current(cx);
+        let title = if self.title().trim().is_empty() {
+            tr!("right_panel.terminal")
+        } else {
+            self.title().to_owned()
+        };
+        let directory = self
+            .working_directory
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_owned)
+            .unwrap_or_else(|| tr!("workspace.workspace"));
+        div()
+            .h(px(TERMINAL_TOOLBAR_HEIGHT))
+            .flex_none()
+            .pl(px(10.0))
+            .pr(px(if controls.is_some() { 6.0 } else { 34.0 }))
+            .flex()
+            .items_center()
+            .gap(px(7.0))
+            .border_b(hairline())
+            .border_color(theme.separator)
+            .bg(theme.surface)
+            .child(
+                div()
+                    .w(px(6.0))
+                    .h(px(6.0))
+                    .rounded_full()
+                    .bg(if self.exited {
+                        theme.danger
+                    } else {
+                        theme.accent
+                    }),
+            )
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .truncate()
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_secondary)
+                    .child(SharedString::from(title)),
+            )
+            .child(
+                div()
+                    .when(controls.is_none(), |directory| directory.flex_none())
+                    .min_w_0()
+                    .truncate()
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_tertiary)
+                    .child(directory),
+            )
+            .children(controls)
     }
 
     pub fn refresh_localized_text(&mut self, cx: &mut Context<Self>) {
@@ -2023,6 +2175,12 @@ impl TerminalView {
                 }
                 TerminalUiEvent::Cwd(path) => {
                     if path != self.working_directory {
+                        if let Some((source, target)) = self.pending_checkout.take()
+                            && path == target
+                            && source != target
+                        {
+                            self.previous_checkout = Some(source);
+                        }
                         self.working_directory = path;
                         cx.emit(TerminalViewEvent::ActivityChanged);
                     }
@@ -2043,6 +2201,7 @@ impl TerminalView {
                 }
             }
         }
+        self.refresh_search(cx);
         changed
     }
 
@@ -2069,10 +2228,9 @@ impl TerminalView {
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        // The command bar's field sits inside this view's dispatch path, so
-        // its keystrokes bubble through here — while it owns focus, nothing
-        // may reach the PTY.
-        if self.command_bar_focused(window, cx) {
+        // The find and command bars share the terminal's dispatch path.
+        // Their keystrokes belong to their controls while they have focus.
+        if self.terminal_input_focused(window, cx) {
             return;
         }
         self.pause_cursor_blink(cx);
@@ -2497,6 +2655,29 @@ impl TerminalView {
         }
     }
 
+    pub fn copy_scrollback(&self, cx: &mut Context<Self>) {
+        let Some(session) = &self.session else {
+            return;
+        };
+        let term = session.term.clone();
+        cx.spawn(async move |_, cx| {
+            let text = cx
+                .background_executor()
+                .spawn(async move {
+                    let term = term.lock();
+                    term.bounds_to_string(
+                        TerminalPoint::new(term.topmost_line(), Column(0)),
+                        TerminalPoint::new(term.bottommost_line(), term.last_column()),
+                    )
+                })
+                .await;
+            let _ = cx.update(|cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(text));
+            });
+        })
+        .detach();
+    }
+
     /// ⌘C reaches the view as an action, not a keystroke: the workspace
     /// binds it to `CopySelection` and the Edit menu sends `Copy`. The
     /// grid's own selection answers both before the workspace's
@@ -2533,6 +2714,7 @@ impl TerminalView {
         if self.embedded || self.exited || self.session.is_none() {
             return;
         }
+        self.search = None;
         let input = cx.new(|cx| {
             TextInput::new(window, cx)
                 .multi_line()
@@ -2564,12 +2746,14 @@ impl TerminalView {
         cx.notify();
     }
 
-    /// Whether the bar's field owns focus — while it does, no keystroke
-    /// here may reach the PTY.
-    fn command_bar_focused(&self, window: &Window, cx: &App) -> bool {
+    fn terminal_input_focused(&self, window: &Window, cx: &App) -> bool {
         self.command_bar
             .as_ref()
             .is_some_and(|bar| bar.input.read(cx).focus().is_focused(window))
+            || self
+                .search
+                .as_ref()
+                .is_some_and(|search| search.focused(window, cx))
     }
 
     fn command_bar_confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -3006,10 +3190,15 @@ impl Render for TerminalView {
             );
         }
         let hovered_link = self.hovered_link.as_ref().map(|link| &link.bounds);
-        let snapshot = self
-            .session
-            .as_ref()
-            .map(|session| session.snapshot(theme, selection_color, cursor_style, hovered_link));
+        let snapshot = self.session.as_ref().map(|session| {
+            session.snapshot(
+                theme,
+                selection_color,
+                cursor_style,
+                hovered_link,
+                self.search.as_ref(),
+            )
+        });
         let mut screen = div()
             .flex_1()
             .min_h_0()
@@ -3256,60 +3445,7 @@ impl Render for TerminalView {
 
         let command_bar = self.command_bar_element(window, cx);
 
-        // Only an embedded terminal or a split pane keeps the header
-        // strip. Its trailing inset clears the kill button the parent
-        // overlays at the toolbar's right edge.
-        let toolbar = (self.embedded || self.pane).then(|| {
-            let title = if self.title().trim().is_empty() {
-                tr!("right_panel.terminal")
-            } else {
-                self.title().to_owned()
-            };
-            let directory = self
-                .working_directory
-                .file_name()
-                .and_then(|name| name.to_str())
-                .map(str::to_owned)
-                .unwrap_or_else(|| tr!("workspace.workspace"));
-            div()
-                .h(px(TERMINAL_TOOLBAR_HEIGHT))
-                .flex_none()
-                .pl(px(10.0))
-                .pr(px(34.0))
-                .flex()
-                .items_center()
-                .gap(px(7.0))
-                .border_b(hairline())
-                .border_color(theme.separator)
-                .bg(theme.surface)
-                .child(
-                    div()
-                        .w(px(6.0))
-                        .h(px(6.0))
-                        .rounded_full()
-                        .bg(if self.exited {
-                            theme.danger
-                        } else {
-                            theme.accent
-                        }),
-                )
-                .child(
-                    div()
-                        .min_w_0()
-                        .flex_1()
-                        .truncate()
-                        .text_size(sp(12.5))
-                        .text_color(theme.text_secondary)
-                        .child(SharedString::from(title)),
-                )
-                .child(
-                    div()
-                        .flex_none()
-                        .text_size(sp(12.5))
-                        .text_color(theme.text_tertiary)
-                        .child(directory),
-                )
-        });
+        let toolbar = self.embedded.then(|| self.render_toolbar(None, cx));
 
         let grid = div()
             .flex_1()
@@ -3337,7 +3473,20 @@ impl Render for TerminalView {
             .flex_col()
             .bg(theme.terminal)
             .children(toolbar)
+            .children(self.search_bar(theme, cx))
             .child(grid)
+            .on_action(
+                cx.listener(|this, _: &crate::OpenFind, window, cx| this.open_search(window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::CloseFind, window, cx| this.close_search(window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::FindNext, _, cx| this.navigate_search(false, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::FindPrevious, _, cx| this.navigate_search(true, cx)),
+            )
             .on_action(cx.listener(|this, _: &crate::CopySelection, _, cx| {
                 this.copy_selection_or_propagate(cx)
             }))

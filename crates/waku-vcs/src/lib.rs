@@ -8,6 +8,7 @@ pub(crate) use waku_sessions::usage;
 pub mod github;
 pub mod issues;
 pub mod notifications;
+pub mod project_sync;
 pub mod pull_requests;
 pub mod qa;
 pub mod repo;

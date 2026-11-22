@@ -534,9 +534,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn maximize_terminal_chord_is_limited_to_standalone_terminal_context(
-        cx: &mut gpui::TestAppContext,
-    ) {
+    fn maximize_terminal_chord_routes_by_focused_surface(cx: &mut gpui::TestAppContext) {
         cx.update(|cx| crate::bind_keys(cx));
 
         let chord = [gpui::Keystroke::parse("secondary-shift-enter").unwrap()];
@@ -548,6 +546,16 @@ mod tests {
             ),
             (
                 "Workspace RightPanel Terminal",
+                &crate::ToggleTerminalMaximize as &dyn gpui::Action,
+                1,
+            ),
+            (
+                "Workspace PanelFullscreen RightPanel Terminal",
+                &crate::ToggleTerminalMaximize as &dyn gpui::Action,
+                1,
+            ),
+            (
+                "Workspace RightPanel FileEditorPane TextInput",
                 &crate::PushBaseBranch as &dyn gpui::Action,
                 1,
             ),

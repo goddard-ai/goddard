@@ -175,7 +175,34 @@ describe('promptSubmitted', () => {
       event('autoTitleUpdated', '<project-memory>\nThis project has persistent me'),
       clock,
     )
-    expect(truncated.session.auto_title).toBeNull()
+    expect(truncated.session.auto_title).toBe(session.auto_title)
+  })
+
+  test('provider updates replace prompt placeholders once and preserve generated or explicit titles', () => {
+    const generated = reduceRuntimeEvent(
+      idleSession(), event('autoTitleUpdated', 'Fix image attachment paths'), clock,
+    ).session
+    const inferred = reduceRuntimeEvent(
+      { ...idleSession(), messages: [], turns: [] },
+      event('promptSubmitted', { ...SUBMISSION, message: 'Fix image attachment paths' }),
+      clock,
+    ).session
+    const replacement = reduceRuntimeEvent(
+      inferred, event('autoTitleUpdated', 'Repair attachment rendering'), clock,
+    ).session
+    expect(replacement.auto_title).toBe('Repair attachment rendering')
+    const identical = reduceRuntimeEvent(
+      inferred, event('autoTitleUpdated', inferred.auto_title), clock,
+    ).session
+    expect(identical.auto_title_is_prompt).toBe(false)
+    const explicit = { ...inferred, title: 'My title' }
+    for (const session of [generated, replacement, identical, explicit]) {
+      for (const update of ['Proceed With Current Task', null]) {
+        const result = reduceRuntimeEvent(session, event('autoTitleUpdated', update), clock)
+        expect(result.session.title).toBe(session.title)
+        expect(result.session.auto_title).toBe(session.auto_title)
+      }
+    }
   })
 
   test('a delivered agent prompt drops its chip and carries provenance', () => {

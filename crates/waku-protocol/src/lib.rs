@@ -38,8 +38,10 @@ pub mod blob;
 pub mod boss;
 pub mod chains;
 pub mod checkpoint;
+pub mod compaction;
 pub mod composer;
 pub mod computer_use;
+pub mod counsel;
 pub mod custom_commands;
 mod driver_wire;
 pub mod eval;
@@ -51,6 +53,7 @@ pub mod identity;
 pub mod inference;
 pub mod instruction_pins;
 pub mod integrations;
+pub mod landing;
 pub mod migration;
 pub mod model;
 pub mod model_catalog;
@@ -62,11 +65,14 @@ pub mod projects;
 pub mod provider_session;
 pub mod resources;
 pub mod routing;
+pub mod scratch;
 pub mod settings;
 pub mod skills;
+pub mod streaming;
 pub mod task_metadata;
 pub mod terminal_command;
 pub mod theme;
+pub mod transcript;
 pub mod usage;
 pub mod usage_history;
 pub mod wireframe;
@@ -84,11 +90,12 @@ pub use protocol::{
     APP_EXECUTABLE_ENV, AgentPromptDelivery, AgentWorkspace, ClientMessage, Command,
     DAEMON_ADDRESS_ENV, DAEMON_TOKEN_ENV, DaemonChildKind, DaemonChildSample, DaemonReady,
     DaemonSessionSample, DaemonStatsSample, MAX_WIRE_MESSAGE_BYTES, PLAN_FINALIZE_REQUEST_PREFIX,
-    PROTOCOL_VERSION, RUNTIME_INGRESS_ENV, ReplayCursor, Request, RequestCommandSample,
-    RequestPoolSample, ResponseOutcome, ResponsePayload, RpcError, SequencedEvent, ServerMessage,
-    SessionDetailTail, SubprocessLabelSample, TASK_LINK_PREFIX, WhistleWord,
-    WireComputerToolRequest, WireDriverEvent, WireDriverStartOptions, WireSessionOptions,
-    is_daemon_request,
+    PROTOCOL_VERSION, PromptConfiguration, PromptPresentation, ProviderSwitchRequest,
+    RUNTIME_INGRESS_ENV, ReplayCursor, Request, RequestCommandSample, RequestPoolSample,
+    RequestTimingOutcome, RequestTimingSample, ResponseOutcome, ResponsePayload, RpcError,
+    RpcErrorCode, SequencedEvent, ServerMessage, SessionDetailTail, SubprocessLabelSample,
+    TASK_LINK_PREFIX, WhistleWord, WireComputerToolRequest, WireDriverEvent,
+    WireDriverStartOptions, WireSessionOptions, is_daemon_request,
 };
 pub use protocol::{KeyedError, WireTranslation};
 pub use settings::DaemonSettings;
@@ -98,6 +105,8 @@ pub use workspace::{
     IssueStateReason, IssueSummary, NotificationPoll, NotificationReason, NotificationSubjectType,
     NotificationThread, PullRequestCheck, PullRequestCheckStatus, PullRequestCommit,
     PullRequestDetail, PullRequestFile, PullRequestReviewComment, PullRequestReviewDecision,
-    PullRequestState, PullRequestSummary, RepoBranch, RepoWorktree, WorkItemComment, WorkItemKind,
-    WorkItemQueryState, WorkspaceOperation, WorkspaceResult,
+    PullRequestState, PullRequestSummary, RepoBranch, RepoWorktree, TurnCheckpointIdentity,
+    WorkItemComment, WorkItemKind, WorkItemQueryState, WorkspaceOperation, WorkspaceResult,
 };
+
+pub mod sidebar_intent;

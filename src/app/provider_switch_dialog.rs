@@ -37,18 +37,20 @@ pub(super) struct ProviderSwitchDialogState {
     /// daemon's backend, so this UI's setup path can't repair it.
     pub eval_missing_remote: bool,
     switch_focus: FocusHandle,
+    jev_focus: FocusHandle,
     cancel_focus: FocusHandle,
 }
 
 impl Waku {
     /// Opens the provider-switch confirmation for `session`'s composer
-    /// session. The caller focuses the returned handle.
+    /// session and focuses it after the deferred overlay is painted.
     pub(super) fn open_provider_switch_dialog(
         &mut self,
         session_id: Uuid,
         pick: ProviderSwitchPick,
+        window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> FocusHandle {
+    ) {
         let (returning, estimate) = self
             .state
             .sessions
@@ -81,13 +83,30 @@ impl Waku {
             eval_missing,
             eval_missing_remote,
             cancel_focus: cx.focus_handle(),
+            jev_focus: cx.focus_handle(),
             switch_focus: switch_focus.clone(),
         });
         cx.notify();
-        switch_focus
+        cx.on_next_frame(window, move |_, window, cx| {
+            cx.on_next_frame(window, move |waku, window, cx| {
+                // Dismissal or another pick can replace the dialog before
+                // these frames run. Never focus a stale dialog's handle.
+                if waku
+                    .provider_switch_dialog
+                    .as_ref()
+                    .is_some_and(|dialog| dialog.switch_focus == switch_focus)
+                {
+                    window.focus(&switch_focus, cx);
+                }
+            });
+        });
     }
 
-    fn close_provider_switch_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn close_provider_switch_dialog(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.provider_switch_dialog.take().is_none() {
             return;
         }
@@ -152,7 +171,7 @@ impl Waku {
         );
         let jev_row = render_provider_switch_action_row(
             "provider-switch-dialog-jev-settings",
-            &dialog.switch_focus,
+            &dialog.jev_focus,
             "icons/settings.svg",
             tr!("experiments.open_jev_settings"),
             weak.clone(),

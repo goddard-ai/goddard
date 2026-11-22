@@ -52,9 +52,10 @@ impl WakuBackend {
         session_id: Uuid,
         runtime_id: Uuid,
         provider: ProviderKind,
-        options: DriverStartOptions,
+        mut options: DriverStartOptions,
         events: EventSink,
     ) -> anyhow::Result<(DriverHandle, bool)> {
+        let _admission = self.idle_shutdown.enter()?;
         let lifecycle = self.runtime_lifecycles.session(session_id);
         let owner = lifecycle.lock();
         let result = (|| {
@@ -70,6 +71,47 @@ impl WakuBackend {
                 !self.removed_session_ids.lock().contains(&session_id),
                 "task {session_id} was removed"
             );
+            // Older saves could pair a new provider with the outgoing
+            // provider's cursor. Open a fresh thread with transcript access.
+            if options
+                .provider_cursor
+                .as_ref()
+                .is_some_and(|cursor| cursor.provider() != provider)
+            {
+                options.provider_cursor = None;
+                options.read_own_transcript = true;
+            }
+            if provider == ProviderKind::Antigravity {
+                let mut state = self.task_state.lock();
+                if let Some(session) = state.sessions.iter_mut().find(|s| s.id == session_id) {
+                    self.task_store.hydrate(session)?;
+                    anyhow::ensure!(
+                        !session.uses_antigravity_terminal(),
+                        "this Antigravity task opens in the desktop terminal"
+                    );
+                }
+            }
+            if provider == ProviderKind::Codex {
+                let mut state = self.task_state.lock();
+                if let Some(session) = state.sessions.iter_mut().find(|s| s.id == session_id)
+                    && session.friend_peer_id.is_some()
+                {
+                    self.task_store.hydrate(session)?;
+                    if session.awaiting_first_friend_reply() {
+                        options.read_own_transcript = true;
+                        // A thread opened before its first turn may never have
+                        // written a rollout. Keep a thread with a saved goal.
+                        if session.thread_goal.is_none()
+                            && matches!(
+                                options.provider_cursor,
+                                Some(ProviderResumeCursor::Codex { .. })
+                            )
+                        {
+                            options.provider_cursor = None;
+                        }
+                    }
+                }
+            }
             drop_detached(self.remove_runtime(session_id, None, false));
             owner.set(Some(runtime_id));
             self.spawn_runtime_inner(session_id, runtime_id, provider, options, events.clone())
@@ -96,9 +138,25 @@ impl WakuBackend {
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         let event_sender = event_sender.with_process_anchor(self.memory_guard.anchor(runtime_id));
         let resumable = options.provider_cursor.is_some();
+        let timeline = (provider == ProviderKind::Devin).then(|| {
+            self.provider_timeline
+                .runtime(session_id, runtime_id, resumable)
+        });
+        let event_sender = match &timeline {
+            Some(timeline) => event_sender.with_timeline(timeline.clone()),
+            None => event_sender,
+        };
         let cwd = options.cwd.clone();
         let mut options = options;
         self.boss.require_active(session_id)?;
+        // The Counsel experiment gates its chat's runtime like its
+        // operations: off means no launch, and queued work stays parked.
+        if self.boss.is_counsel(session_id) {
+            anyhow::ensure!(
+                self.counsel_enabled(),
+                "Counsel is disabled by the experiment setting"
+            );
+        }
         anyhow::ensure!(
             !self.boss_fenced_chat(session_id),
             "task {session_id} is a fenced Boss generation; the active chat owns coordination"
@@ -123,6 +181,7 @@ impl WakuBackend {
             // native service. Other employees retain the ordinary task cwd;
             // sandbox guests already have an isolated provider service.
             if self.boss.is_boss_principal(session_id)
+                || self.boss.is_counsel(session_id)
                 || (provider == ProviderKind::OpenCode && !environment.is_sandbox())
             {
                 options.cwd = self.boss.workspace(session_id)?;
@@ -381,6 +440,14 @@ impl WakuBackend {
         }
         // A launch that never came up keeps no credential.
         let sandboxed_launch = options.sandbox.is_some();
+        let mode = options.mode;
+        let initial_options = SessionOptions {
+            mode,
+            model: options.model.clone(),
+            reasoning_effort: options.reasoning_effort.clone(),
+            service_tier: options.service_tier.clone(),
+            context_window: options.context_window.clone(),
+        };
         let (handle, stable) = self.start_runtime_driver(
             session_id,
             runtime_id,
@@ -411,7 +478,20 @@ impl WakuBackend {
         let handle = plan_gate.as_ref().map_or(handle.clone(), |gate| {
             DriverHandle::from_control(gate.clone())
         });
-        let handle = self.boss_driver_boundary(session_id, runtime_id, handle);
+        let handle = self
+            .boss_driver_boundary(session_id, runtime_id, handle)
+            .with_timeline(timeline);
+        // Fresh admission or matching confirmed inventory can seed wrappers
+        // that deliberately prohibit retuning (such as a frozen plan).
+        let handle = if stable
+            .as_ref()
+            .is_none_or(|link| link.initial_configuration_confirmed())
+        {
+            handle.with_initial_options(initial_options)
+        } else {
+            handle
+        };
+        handle.trace(driver::timeline::Event::RuntimeCreated);
         let computer_use_available = handle.computer_use_available();
         if let Some(error) = computer_use_start_error {
             let error = format!("{error:#}");
@@ -432,6 +512,8 @@ impl WakuBackend {
         self.register_runtime_forwarder(
             session_id,
             RuntimeEntry {
+                mode,
+                _admission: Some(self.idle_shutdown.enter()?),
                 plan_gate,
                 runtime_id,
                 driver: handle.clone(),
@@ -538,6 +620,7 @@ impl WakuBackend {
         event_receiver: crossbeam_channel::Receiver<DriverEvent>,
         events: EventSink,
     ) -> anyhow::Result<std::thread::JoinHandle<()>> {
+        let _admission = self.idle_shutdown.enter()?;
         let lifecycle = self.runtime_lifecycles.session(session_id);
         let owner = lifecycle.lock();
         let runtime_id = entry.runtime_id;
@@ -565,6 +648,7 @@ impl WakuBackend {
         drop_detached(previous);
         let name = format!("goddard-daemon-events-{session_id}");
         let forward = move || {
+            let _admission = _admission;
             forward_driver_events(
                 session_id,
                 runtime_id,
@@ -647,7 +731,7 @@ impl WakuBackend {
             shim_directory,
             task_tools: settings.agent_tools_enabled || self.boss.is_managed(session_id),
             settings_writes: settings.agent_settings_enabled && !self.boss.is_managed(session_id),
-            boss: self.boss.is_boss_principal(session_id),
+            boss: self.boss.is_boss_principal(session_id) || self.boss.is_counsel(session_id),
             // `memory` rides the bucket store the Boss experiment owns, and
             // only a session with a real registered project has a shared
             // bucket to reach — Boss principals keep their own channel.

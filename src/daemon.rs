@@ -132,6 +132,9 @@ pub fn spawn_crash_report_scan(
     analytics: crate::analytics::Analytics,
     executor: &gpui::BackgroundExecutor,
 ) {
+    if cfg!(test) {
+        return;
+    }
     executor
         .spawn(async move { scan_new_crash_reports(&analytics) })
         .detach();

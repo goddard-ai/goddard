@@ -111,6 +111,217 @@ pub(super) fn workspace_picks_base(
 }
 
 impl Waku {
+    pub(super) fn show_workspace_recovery_notice(&mut self, session_id: Uuid) {
+        self.show_toast_with_tone(
+            tr!("session.workspace_recovery_needed"),
+            ToastTone::Alert,
+            Some(ToastAction {
+                label: tr!("session.recover_workspace").into(),
+                kind: ToastActionKind::RecoverWorkspace(session_id),
+            }),
+        );
+    }
+
+    pub(super) fn recover_workspace_dialog(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        let answer = self.window_handle.update(cx, |_, window, cx| {
+            window.prompt(
+                gpui::PromptLevel::Warning,
+                &tr!("session.recover_workspace"),
+                Some(&tr!("session.workspace_recovery_detail")),
+                &[
+                    gpui::PromptButton::cancel(tr!("common.cancel")),
+                    gpui::PromptButton::ok(tr!("session.locate_worktree")),
+                    gpui::PromptButton::ok(tr!("session.restore_task_workspace")),
+                ],
+                cx,
+            )
+        });
+        let Ok(answer) = answer else { return };
+        cx.spawn(async move |this, cx| {
+            let choice = answer.await.ok().map(prompt_answer_index);
+            let _ = this.update(cx, |this, cx| match choice {
+                Some(1) => this.choose_recovery_worktree(session_id, cx),
+                Some(2) => this.repair_task_workspace(session_id, None, true, cx),
+                _ => {}
+            });
+        })
+        .detach();
+    }
+
+    // List on the daemon host so recovery also works for SSH projects.
+    fn choose_recovery_worktree(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        let Some(session) = self.state.sessions.iter().find(|s| s.id == session_id) else {
+            return;
+        };
+        let Some(project) = self
+            .state
+            .projects
+            .iter()
+            .find(|p| p.id == session.project_id)
+        else {
+            return;
+        };
+        let cwd = project.path.clone();
+        let Some(client) = self.workspace_client_for_session(session_id) else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    client.request(waku_client::WorkspaceOperation::ListWorktrees {
+                        cwd,
+                        skip_status: true,
+                    })
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| match result {
+                Ok(waku_client::WorkspaceResult::RepoWorktrees {
+                    entries: Some(entries),
+                }) if !entries.is_empty() => {
+                    let paths: Vec<_> = entries.into_iter().map(|entry| entry.path).collect();
+                    this.choose_recovery_worktree_page(session_id, paths, 0, cx);
+                }
+                _ => this.show_workspace_recovery_notice(session_id),
+            });
+        })
+        .detach();
+    }
+
+    // Keep native prompts bounded even in repositories with many worktrees.
+    fn choose_recovery_worktree_page(
+        &mut self,
+        session_id: Uuid,
+        paths: Vec<PathBuf>,
+        offset: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let end = (offset + 3).min(paths.len());
+        let mut buttons = vec![gpui::PromptButton::cancel(tr!("common.cancel"))];
+        for path in &paths[offset..end] {
+            buttons.push(gpui::PromptButton::ok(existing_worktree_name(path)));
+        }
+        if paths.len() > 3 {
+            buttons.push(gpui::PromptButton::ok(tr!(
+                "session.more_recovery_worktrees"
+            )));
+        }
+        let detail = paths[offset..end]
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let answer = self.window_handle.update(cx, |_, window, cx| {
+            window.prompt(
+                gpui::PromptLevel::Info,
+                &tr!("session.locate_worktree"),
+                Some(&detail),
+                &buttons,
+                cx,
+            )
+        });
+        let Ok(answer) = answer else { return };
+        cx.spawn(async move |this, cx| {
+            if let Some(index) = answer.await.ok().map(prompt_answer_index) {
+                let _ = this.update(cx, |this, cx| {
+                    if index > 0 && index <= end - offset {
+                        this.repair_task_workspace(
+                            session_id,
+                            Some(paths[offset + index - 1].clone()),
+                            false,
+                            cx,
+                        );
+                    } else if index > 0 {
+                        let next = if end == paths.len() { 0 } else { end };
+                        this.choose_recovery_worktree_page(session_id, paths, next, cx);
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
+    fn repair_task_workspace(
+        &mut self,
+        session_id: Uuid,
+        path: Option<PathBuf>,
+        restore: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self.state.sessions.iter().find(|s| s.id == session_id) else {
+            return;
+        };
+        if session.is_busy() || self.submission_preparations.contains(&session_id) {
+            return;
+        }
+        let Some(client) = self.workspace_client_for_session(session_id) else {
+            return;
+        };
+        // Serialize repair with submissions and other workspace moves.
+        if !self.worktree_move_pending.insert(session_id) {
+            return;
+        }
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    client.request(waku_client::WorkspaceOperation::RecoverTaskWorkspace {
+                        session_id,
+                        path,
+                        restore,
+                    })
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.worktree_move_pending.remove(&session_id);
+                match result {
+                    Ok(waku_client::WorkspaceResult::TaskWorkspace {
+                        workspace: Some(workspace),
+                    }) => {
+                        this.reset_session_runtime(session_id);
+                        let recovered_path = workspace.path().map(Path::to_path_buf).or_else(|| {
+                            let session = this.state.sessions.iter().find(|s| s.id == session_id)?;
+                            this.state.projects.iter().find(|p| p.id == session.project_id).map(|p| p.path.clone())
+                        });
+                        if let Some(session) = this.state.session_mut(session_id) {
+                            session.workspace = workspace;
+                            if let Some(path) = recovered_path {
+                                let notice = format!("The task workspace has been recovered. Your working directory for this turn is {}. Inspect current files before continuing; paths from earlier turns may point to an older checkout.", path.display());
+                                session.pending_provider_context = Some(match session.pending_provider_context.take() {
+                                    Some(context) => format!("{context}\n\n{notice}"),
+                                    None => notice,
+                                });
+                            }
+                        }
+                        this.save();
+                        if this.state.selected_session == Some(session_id) {
+                            this.invalidate_workspace_queries(cx);
+                            this.reload_clean_right_panel_file_editors(cx);
+                            this.ensure_right_panel_terminals(cx);
+                            this.sync_git_panel_workspace(cx);
+                        }
+                        this.show_success_toast(tr!("session.workspace_recovered"));
+                        this.drain_queued_message(session_id, cx);
+                    }
+                    Err(error) => this.show_toast_with_tone(
+                        tr!(
+                            "session.workspace_recovery_failed",
+                            error = error.to_string()
+                        ),
+                        ToastTone::Alert,
+                        Some(ToastAction {
+                            label: tr!("session.recover_workspace").into(),
+                            kind: ToastActionKind::RecoverWorkspace(session_id),
+                        }),
+                    ),
+                    _ => this.show_workspace_recovery_notice(session_id),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     /// Create the draft's worktree now — at selection time rather than first
     /// submit — named by the user and detached at `base_ref`. The daemon call
     /// runs on the background executor; the draft binds the result when it
@@ -366,6 +577,16 @@ impl Waku {
             cx.notify();
             return;
         };
+        let metadata_client = if session.has_started() {
+            let Some(daemon) = self.daemon_for_session(session_id) else {
+                self.show_toast(tr!("errors.daemon_disconnected"));
+                cx.notify();
+                return;
+            };
+            Some(daemon.client().clone())
+        } else {
+            None
+        };
         let Some(project_path) = self
             .state
             .projects
@@ -385,17 +606,61 @@ impl Waku {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    match workspace_client.request(
+                    let moved_from = project_path.clone();
+                    let created = match workspace_client.request(
                         waku_client::WorkspaceOperation::CreateWorktreeFromCheckout {
                             project_path,
                             name,
                         },
                     )? {
-                        waku_client::WorkspaceResult::WorktreeCreated { worktree } => Ok(worktree),
-                        _ => Err(anyhow::anyhow!(
-                            "the daemon returned an invalid worktree response"
-                        )),
-                    }
+                        waku_client::WorkspaceResult::WorktreeCreated { worktree } => worktree,
+                        _ => anyhow::bail!("the daemon returned an invalid worktree response"),
+                    };
+                    // A general transcript save may be stale or list-only. Confirm
+                    // the workspace separately before reporting success or sending
+                    // queued prompts into it. Drafts have no daemon row yet.
+                    let revision = if let Some(client) = metadata_client {
+                        let reply = client.request(
+                            Uuid::nil(),
+                            Uuid::nil(),
+                            waku_client::Command::UpdateTaskMetadata {
+                                updates: vec![waku_protocol::task_metadata::TaskMetadataUpdate {
+                                    session_id,
+                                    edit:
+                                        waku_protocol::task_metadata::TaskMetadataEdit::Workspace {
+                                            workspace: SessionWorkspace::Worktree {
+                                                path: created.path.clone(),
+                                                name: created.name.clone(),
+                                                branch: None,
+                                                base_branch: None,
+                                                adopted_by: None,
+                                                borrowed: false,
+                                            },
+                                            moved_from: Some(moved_from),
+                                        },
+                                }],
+                            },
+                        )?;
+                        let waku_client::ResponsePayload::TaskStateSaved { sessions } = reply
+                        else {
+                            anyhow::bail!("the daemon returned an invalid task move response");
+                        };
+                        Some(
+                            sessions
+                                .iter()
+                                .find(|session| {
+                                    session.id == session_id
+                                        && session.workspace.path() == Some(created.path.as_path())
+                                })
+                                .ok_or_else(|| {
+                                    anyhow::anyhow!("the daemon did not confirm the task move")
+                                })?
+                                .metadata_revision,
+                        )
+                    } else {
+                        None
+                    };
+                    Ok((created, revision))
                 })
                 .await;
             let _ = waku.update(cx, move |waku, cx| {
@@ -412,13 +677,13 @@ impl Waku {
     fn finish_move_to_worktree(
         &mut self,
         session_id: Uuid,
-        result: anyhow::Result<waku_client::worktree::CreatedWorktree>,
+        result: anyhow::Result<(waku_client::worktree::CreatedWorktree, Option<u64>)>,
         cx: &mut Context<Self>,
     ) {
         if !self.worktree_move_pending.remove(&session_id) {
             return;
         }
-        let created = match result {
+        let (created, revision) = match result {
             Ok(created) => created,
             Err(error) => {
                 self.show_toast(tr!("errors.move_to_worktree", error = error.to_string()));
@@ -442,8 +707,15 @@ impl Waku {
                     .map(|project| project.path.clone())
             });
         let rebound = self.state.session_mut(session_id).is_some_and(|session| {
-            if !session.workspace.is_local() || session.is_busy() {
+            // The acknowledged move may already have arrived through a catalog.
+            if (!session.workspace.is_local()
+                && session.workspace.path() != Some(created.path.as_path()))
+                || session.is_busy()
+            {
                 return false;
+            }
+            if let Some(revision) = revision {
+                session.metadata_revision = session.metadata_revision.max(revision);
             }
             session.workspace = SessionWorkspace::Worktree {
                 path: created.path.clone(),
@@ -463,9 +735,11 @@ impl Waku {
             true
         });
         if !rebound {
-            // The created worktree only ever holds a copy of the source
-            // checkout's state, so force-removing it loses nothing.
-            self.discard_worktree_copy(created.path, cx);
+            // An acknowledged worktree belongs to the daemon's task already;
+            // another client may have started work there before this callback.
+            if revision.is_none() {
+                self.discard_worktree_copy(created.path, cx);
+            }
             self.drain_queued_message(session_id, cx);
             cx.notify();
             return;
@@ -901,6 +1175,20 @@ impl Waku {
     /// every session is archived and quiet, the daemon zips the workspace
     /// into `~/.goddard/archives` and removes it instead.
     pub(super) fn drain_pending_workspace_cleanups(&mut self, cx: &mut Context<Self>) {
+        if !self.pending_workspace_cleanups.is_empty()
+            && !self.archive_cleanup_wake_scheduled
+            && let Some(delay) = self.sidebar_intents.next_cleanup_wake()
+        {
+            self.archive_cleanup_wake_scheduled = true;
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(delay).await;
+                let _ = this.update(cx, |this, cx| {
+                    this.archive_cleanup_wake_scheduled = false;
+                    this.drain_pending_workspace_cleanups(cx);
+                });
+            })
+            .detach();
+        }
         let mut deferred = HashSet::new();
         let mut ready = Vec::new();
         let mut projectless_ready = Vec::new();
@@ -914,6 +1202,10 @@ impl Waku {
             else {
                 continue;
             };
+            if self.sidebar_intents.cleanup_deferred(session_id) {
+                deferred.insert(session_id);
+                continue;
+            }
             // Queued by archive or by the dormant sweep; either flag
             // lapsing — an unarchive or a wake — cancels the teardown.
             if session.archived_at.is_none() && !self.session_dormant_now(session) {
@@ -952,6 +1244,17 @@ impl Waku {
                 continue;
             }
             if let SessionWorkspace::Worktree { path, .. } = &session.workspace {
+                // Sharing may have started after the destructive choice was made.
+                // Preserve the directory and warn rather than discard another task's work.
+                if self.clean_archive_workspaces.contains(&session_id)
+                    && self.state.sessions.iter().any(|other| {
+                        other.id != session_id
+                            && matches!(&other.workspace, SessionWorkspace::Worktree { path: other_path, .. } if other_path == path)
+                    })
+                {
+                    self.show_toast(tr!("archive.clean_failed"));
+                    continue;
+                }
                 // "New task in same worktree" clones the workspace into a
                 // second session; removing the directory while a sibling is
                 // still live would delete its uncommitted work. Defer until
@@ -975,6 +1278,9 @@ impl Waku {
                 projectless_ready.push((session_id, path));
             }
         }
+        self.clean_archive_workspaces.retain(|id| {
+            deferred.contains(id) || ready.iter().any(|(session_id, _)| session_id == id)
+        });
         self.pending_workspace_cleanups = deferred;
         for session_id in archived_codex_runtimes {
             self.reset_session_runtime(session_id);
@@ -1010,7 +1316,11 @@ impl Waku {
             .detach();
         }
         for (session_id, path) in ready {
+            let committed_only = self.clean_archive_workspaces.remove(&session_id);
             let Some(workspace) = self.workspace_client_for_session(session_id) else {
+                if committed_only {
+                    self.show_toast(tr!("archive.clean_failed"));
+                }
                 continue;
             };
             let local = !self.is_remote_session(session_id);
@@ -1020,11 +1330,19 @@ impl Waku {
                     .background_executor()
                     .spawn(async move {
                         let git_ref = checkpoint::archive_ref(session_id);
-                        let verified = workspace
-                            .request(waku_client::WorkspaceOperation::CaptureRef {
+                        let capture = if committed_only {
+                            waku_client::WorkspaceOperation::CaptureCommittedRef {
                                 cwd: path.clone(),
                                 git_ref: git_ref.clone(),
-                            })
+                            }
+                        } else {
+                            waku_client::WorkspaceOperation::CaptureRef {
+                                cwd: path.clone(),
+                                git_ref: git_ref.clone(),
+                            }
+                        };
+                        let verified = workspace
+                            .request(capture)
                             .and_then(|_| {
                                 workspace.request(waku_client::WorkspaceOperation::HasRef {
                                     cwd: path.clone(),
@@ -1050,6 +1368,10 @@ impl Waku {
                 if removed {
                     let _ = waku.update(cx, move |waku, cx| {
                         waku.close_workspace_terminals(session_id, &worktree_path, cx);
+                    });
+                } else if committed_only {
+                    let _ = waku.update(cx, |waku, _| {
+                        waku.show_toast(tr!("archive.clean_failed"));
                     });
                 }
             })
@@ -1455,7 +1777,7 @@ impl Waku {
     }
 }
 
-fn existing_worktree_name(path: &Path) -> String {
+pub(super) fn existing_worktree_name(path: &Path) -> String {
     // Goddard checkouts repeat the repository leaf: worktrees/repo/name/repo.
     let parent = path.parent();
     let namespaced = path.ancestors().nth(3).and_then(Path::file_name)

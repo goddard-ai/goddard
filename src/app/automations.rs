@@ -828,7 +828,11 @@ impl Waku {
 
     // ── Render ───────────────────────────────────────────────────────────
 
-    pub(super) fn render_automations_page(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_automations_page(
+        &mut self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
         let query = self
             .automations_search
@@ -846,6 +850,7 @@ impl Waku {
             }
         };
 
+        let header = self.render_automations_header(&theme, cx);
         div()
             .key_context(PAGE_CONTEXT)
             .flex_1()
@@ -854,7 +859,7 @@ impl Waku {
             .flex()
             .flex_col()
             .on_action(cx.listener(Self::dismiss_automations_layer_action))
-            .child(self.render_automations_header(&theme, cx))
+            .child(self.render_header_frame(header, window, cx))
             .child(
                 div()
                     .flex_1()
@@ -931,8 +936,8 @@ impl Waku {
 
         div()
             .flex_none()
-            .h(px(52.0))
-            .px(px(20.0))
+            .h(px(HEADER_HEIGHT))
+            .px(px(10.0))
             .flex()
             .items_center()
             .gap(px(12.0))
@@ -2125,7 +2130,6 @@ impl Waku {
                                     Self::probes_on(&this.probes, waku_client::DaemonKey::Local),
                                     &this.state.disabled_providers,
                                     None,
-                                    this.daemon.is_remote(),
                                     kind,
                                 ) {
                                     this.refresh_provider_model_discovery(kind);

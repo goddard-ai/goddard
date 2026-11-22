@@ -1,3 +1,12 @@
+#[cfg(unix)]
+mod codex_history;
+
+mod cancellation;
+#[cfg(unix)]
+mod rewind_safety;
+#[cfg(unix)]
+mod rewind_persistence;
+
 use super::*;
 use crate::model::{ActivityItem, MessageRole, TranscriptBlock};
 use waku_protocol::boss::{BossOperation, BossResult};
@@ -1089,6 +1098,12 @@ fn incoming_transfer_materializes_a_quarantined_session() {
     reload_store.hydrate(&mut reloaded.sessions[index]).unwrap();
     assert!(reloaded.sessions[index].quarantined);
     assert!(reloaded.sessions[index].environment().is_sandbox());
+    let context = reloaded.sessions[index]
+        .take_provider_context()
+        .expect("received transfer context");
+    assert!(context.contains("here's the new mockups"));
+    assert!(context.contains("transfers/x"));
+    assert!(context.contains("design.pdf"));
 
     std::fs::remove_dir_all(root).ok();
 }
@@ -1152,7 +1167,29 @@ fn incoming_chat_materializes_a_session() {
         session.messages[0].content,
         "shipping the update tonight — changelog attached"
     );
+    assert!(session.provider_cursor.is_none());
     drop(state);
+
+    // The first local provider has no native history. Its context must survive
+    // a restart and reach the first prompt without changing the visible text.
+    let reload_store = StateStore::daemon(root.join("app.db"));
+    let mut reloaded = reload_store.load().unwrap();
+    let session = reloaded.session_mut(session_id).unwrap();
+    reload_store.hydrate(session).unwrap();
+    let context = session.take_provider_context().expect("received context");
+    assert!(context.contains("maya"));
+    assert!(context.contains("shipping the update tonight — changelog attached"));
+    assert!(context.contains("third-party reference material"));
+    assert_eq!(session.messages.len(), 1);
+    session.begin_turn("the first attempt");
+    session.finish_active_turn(TurnStatus::Interrupted);
+    assert_eq!(
+        session.take_provider_context().as_deref(),
+        Some(context.as_str())
+    );
+    session.begin_turn("try again");
+    session.mark_active_turn_provider_started();
+    assert!(session.take_provider_context().is_none());
 
     // A second message reuses the same friend project; a different
     // sender still lands in the same Friends project.
@@ -1670,6 +1707,33 @@ impl crate::driver::DriverControl for CaptureDriver {
     }
 }
 
+fn confirm_memory_proposal(
+    backend: &WakuBackend,
+    session: Uuid,
+    result: waku_protocol::boss::BossResult,
+) -> waku_protocol::boss::BossResult {
+    use waku_protocol::boss::{BossOperation, BossResult, MemoryOperation};
+    let BossResult::Memory {
+        proposal: Some(proposal),
+        recorded: None,
+        ..
+    } = result
+    else {
+        panic!("expected a proposal")
+    };
+    backend
+        .handle_boss_operation(
+            Some(session),
+            BossOperation::Memory {
+                operation: MemoryOperation::Confirm {
+                    proposal_id: serde_json::from_value(proposal["id"].clone()).unwrap(),
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap()
+}
+
 /// A task agent's first context steer carries the `<project-memory>` block
 /// — the `goddard-agent memory` instructions plus the project bucket's
 /// compacted overview — once per runtime, and only for sessions whose
@@ -1708,8 +1772,8 @@ fn the_first_prompt_carries_bounded_project_memory() {
     );
 
     // Seed the project bucket the way the session's own
-    // `goddard-agent memory record` lands it.
-    backend
+    // `goddard-agent memory record` then `confirm` saves it.
+    let proposed = backend
         .handle_boss_operation(
             Some(session_id),
             waku_protocol::boss::BossOperation::Memory {
@@ -1724,6 +1788,8 @@ fn the_first_prompt_carries_bounded_project_memory() {
             &EventSink::detached(),
         )
         .unwrap();
+
+    confirm_memory_proposal(&backend, session_id, proposed);
 
     let capture = Arc::new(CaptureDriver::default());
     let driver = crate::driver::DriverHandle::from_control(capture.clone());
@@ -1803,7 +1869,8 @@ fn task_agent_memory_ops_scope_to_the_task_project() {
     // Unqualified operations land on the task's project bucket.
     let BossResult::Memory {
         bucket: Some(echoed),
-        recorded: Some(_),
+        proposal: Some(_),
+        recorded: None,
         ..
     } = memory(MemoryOperation::Record {
         bucket: None,
@@ -1875,7 +1942,7 @@ fn task_agent_memory_ops_scope_to_the_task_project() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// A successful `record` leaves a `memory_record` marker in the caller's
+/// A successful `confirm` leaves a `memory_record` marker in the caller's
 /// transcript, and a `Retract` naming that transcript settles the same
 /// marker to its removed state while the note leaves the bucket.
 #[test]
@@ -1896,10 +1963,7 @@ fn a_memory_record_posts_a_transcript_card_that_retract_settles() {
     .unwrap();
     use waku_protocol::boss::{BossOperation, BossResult, MemoryNoteKind, MemoryOperation};
 
-    let BossResult::Memory {
-        recorded: Some(note),
-        ..
-    } = backend
+    let proposed = backend
         .handle_boss_operation(
             Some(session_id),
             BossOperation::Memory {
@@ -1913,9 +1977,35 @@ fn a_memory_record_posts_a_transcript_card_that_retract_settles() {
             },
             &EventSink::detached(),
         )
-        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        &proposed,
+        BossResult::Memory {
+            proposal: Some(_),
+            recorded: None,
+            ..
+        }
+    ));
+    assert!(backend.boss.project_memory_digest(&repo).is_none());
+    assert!(
+        !backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|s| s.id == session_id)
+            .unwrap()
+            .transcript_blocks
+            .iter()
+            .flat_map(|b| &b.activities)
+            .any(|a| a.tool_name.as_deref() == Some(waku_protocol::model::MEMORY_RECORD_TOOL_NAME))
+    );
+    let BossResult::Memory {
+        recorded: Some(note),
+        ..
+    } = confirm_memory_proposal(&backend, session_id, proposed.clone())
     else {
-        panic!("record returns the note")
+        panic!("confirm returns the recorded note");
     };
     let note_id = note["id"].as_str().unwrap().to_owned();
 
@@ -1926,20 +2016,28 @@ fn a_memory_record_posts_a_transcript_card_that_retract_settles() {
             .iter()
             .find(|session| session.id == session_id)
             .unwrap();
-        let marker = session
+        let markers: Vec<_> = session
             .transcript_blocks
             .iter()
             .flat_map(|block| &block.activities)
-            .find(|activity| {
+            .filter(|activity| {
                 activity.tool_name.as_deref() == Some(waku_protocol::model::MEMORY_RECORD_TOOL_NAME)
             })
-            .expect("record posts a memory card marker");
+            .collect();
+        assert_eq!(
+            markers.len(),
+            1,
+            "confirmation posts exactly one memory card"
+        );
+        let marker = markers[0];
         waku_protocol::model::MemoryRecordCard::parse(marker.arguments.as_deref().unwrap())
             .expect("marker arguments carry the card")
     };
     let card = marker_card();
     assert_eq!(card.text, "the release freeze lands on Fridays");
     assert!(!card.retracted);
+    confirm_memory_proposal(&backend, session_id, proposed.clone());
+    assert!(!marker_card().retracted);
 
     backend
         .handle_boss_operation(
@@ -1959,6 +2057,11 @@ fn a_memory_record_posts_a_transcript_card_that_retract_settles() {
     // The persisted marker settles in place — the open transcript reads
     // removed without a reload — and the note is out of the bucket.
     assert!(marker_card().retracted);
+    confirm_memory_proposal(&backend, session_id, proposed);
+    assert!(
+        marker_card().retracted,
+        "a retry cannot undo the user's retraction"
+    );
     let BossResult::Memory {
         feed: Some(feed), ..
     } = backend
@@ -2006,7 +2109,7 @@ fn boss_prompts_carry_the_header_and_a_pending_verdict_upgrades_to_the_digest() 
         wrap_boss_outbound_prompt(&task_state, &automations, &boss, boss_id, "hello".into());
     assert!(wrapped.contains("<goddard-boss-context>\nWork overview"));
     assert!(wrapped.contains("app: 1 task (1 active)"));
-    assert!(wrapped.contains("Fix login"));
+    assert!(!wrapped.contains("Fix login"));
     assert!(wrapped.ends_with("hello"));
 
     // A deferred attach upgrades the same block to the full digest —
@@ -2020,6 +2123,12 @@ fn boss_prompts_carry_the_header_and_a_pending_verdict_upgrades_to_the_digest() 
     let wrapped =
         wrap_boss_outbound_prompt(&task_state, &automations, &boss, boss_id, "hello".into());
     assert!(wrapped.contains("Work overview"));
+
+    // Idle historical tasks alone no longer attach a context block.
+    task_state.lock().sessions[0].status = SessionStatus::Idle;
+    let wrapped =
+        wrap_boss_outbound_prompt(&task_state, &automations, &boss, boss_id, "hello".into());
+    assert!(!wrapped.contains("<goddard-boss-context>"));
 
     // Prompts to other sessions are never wrapped.
     let untouched = wrap_boss_outbound_prompt(
@@ -2037,6 +2146,99 @@ fn boss_prompts_carry_the_header_and_a_pending_verdict_upgrades_to_the_digest() 
 /// A session plus its side chat in the test store; returns
 /// (backend, session_id, side_chat_id). The default test settings keep
 /// `agent_tools_enabled` off, so reads exercise the scoped exemption.
+#[test]
+#[ignore = "set GODDARD_TEST_AGENT_CLI to the built goddard-agent executable"]
+fn memory_confirmation_through_the_built_cli_and_scoped_daemon_connection() {
+    let root = std::env::temp_dir().join(format!("waku-memory-cli-{}", Uuid::new_v4()));
+    let (backend, task, _) = read_scope_test_backend(&root);
+    let mut settings = backend.settings.get();
+    settings.agent_tools_enabled = true;
+    backend.settings.replace(settings).unwrap();
+    let token = backend.agent.mint(task);
+    let backend = Arc::new(backend);
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let server_shutdown = shutdown.clone();
+    let server_backend = backend.clone();
+    let server = std::thread::spawn(move || {
+        crate::server::serve(
+            listener,
+            "test-desktop-token".into(),
+            server_backend,
+            server_shutdown,
+            crate::server::ServerOptions::default(),
+        )
+        .unwrap()
+    });
+    struct Stop(Arc<std::sync::atomic::AtomicBool>);
+    impl Drop for Stop {
+        fn drop(&mut self) {
+            self.0.store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
+    let stop = Stop(shutdown);
+    let run = |args: &[&str]| {
+        let output =
+            std::process::Command::new(std::env::var_os("GODDARD_TEST_AGENT_CLI").unwrap())
+                .env("GODDARD_DAEMON_ADDRESS", address.to_string())
+                .env("GODDARD_AGENT_TOKEN", &token)
+                .env("GODDARD_TASK_ID", task.to_string())
+                .args(args)
+                .output()
+                .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let note = r#"{"kind":"observation","text":"Dependency X checks its CRC only at EOF (reader audit, version Y).","retryKey":"cli-test"}"#;
+    let text = run(&["memory", "record", "--json", note]);
+    assert!(text.contains("Not saved to memory"));
+    assert!(text.contains(waku_protocol::boss::MEMORY_RECORDING_GUIDANCE));
+    assert!(
+        backend
+            .boss
+            .project_memory_digest(&root.join("repo"))
+            .is_none()
+    );
+    let proposed: Value = serde_json::from_str(&run(&[
+        "memory", "record", "--json", note, "--output", "json",
+    ]))
+    .unwrap();
+    assert!(proposed.get("recorded").is_none());
+    assert!(
+        proposed["proposal"]["review"]
+            .as_str()
+            .unwrap()
+            .contains("Do not confirm automatically")
+    );
+    let id = proposed["proposal"]["id"].as_str().unwrap();
+    assert!(text.contains(&format!("goddard-agent memory confirm {id}")));
+    assert!(
+        backend
+            .boss
+            .project_memory_digest(&root.join("repo"))
+            .is_none()
+    );
+    let confirmed: Value =
+        serde_json::from_str(&run(&["memory", "confirm", id, "--output", "json"])).unwrap();
+    assert_eq!(confirmed["recorded"]["text"], proposed["proposal"]["text"]);
+    assert!(
+        backend
+            .boss
+            .project_memory_digest(&root.join("repo"))
+            .unwrap()
+            .contains("CRC")
+    );
+    drop(stop);
+    server.join().unwrap();
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 fn read_scope_test_backend(root: &Path) -> (WakuBackend, Uuid, Uuid) {
     let repo = root.join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -2094,6 +2296,8 @@ fn computer_use_is_scoped_independently_of_task_and_settings_writes() {
     backend.sessions.lock().insert(
         task,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -2186,6 +2390,8 @@ fn computer_use_through_the_built_cli_and_scoped_daemon_connection() {
     backend.sessions.lock().insert(
         task,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -2396,9 +2602,37 @@ fn agent_rename_consumes_own_task_grant_and_persists_title() {
         .unwrap()
         .title
         .clone();
+    let stale_grant = backend
+        .task_state
+        .lock()
+        .session_mut(session_id)
+        .unwrap()
+        .clone();
     backend
         .agent_rename_self(Some(session_id), &current_title, &events)
         .unwrap();
+    // A delayed client checkpoint must not restore the consumed grant,
+    // even if its wall-clock timestamp is newer and the title was unchanged.
+    for mut stale in [stale_grant.clone(), stale_grant.list_projection()] {
+        stale.updated_at += 100;
+        backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: Uuid::nil(),
+                    runtime_id: Uuid::nil(),
+                    command: Command::SaveTaskState {
+                        projects: Vec::new(),
+                        live_session_ids: vec![session_id],
+                        sessions: vec![stale],
+                        session_tails: Vec::new(),
+                    },
+                },
+                EventSink::detached(),
+                None,
+            )
+            .unwrap();
+    }
     assert!(
         backend
             .agent_rename_self(Some(session_id), "Unapproved title", &events)
@@ -2458,6 +2692,8 @@ fn an_ungranted_agent_rename_parks_a_request_until_answered() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -2471,6 +2707,12 @@ fn an_ungranted_agent_rename_parks_a_request_until_answered() {
     );
     let events = EventSink::detached();
     for (title, option) in [("Fresh title", "always"), ("Next title", "once")] {
+        let stale = backend
+            .task_state
+            .lock()
+            .session_mut(session_id)
+            .unwrap()
+            .clone();
         std::thread::scope(|scope| {
             let rename =
                 scope.spawn(|| backend.agent_rename_self(Some(session_id), title, &events));
@@ -2510,6 +2752,30 @@ fn an_ungranted_agent_rename_parks_a_request_until_answered() {
             );
             assert!(matches!(rename.join().unwrap(), Ok(ResponsePayload::Ack)));
         });
+        for mut checkpoint in [stale.clone(), stale.list_projection()] {
+            checkpoint.updated_at += 100;
+            backend
+                .handle(
+                    Request {
+                        request_id: Uuid::new_v4(),
+                        session_id: Uuid::nil(),
+                        runtime_id: Uuid::nil(),
+                        command: Command::SaveTaskState {
+                            projects: Vec::new(),
+                            live_session_ids: vec![session_id],
+                            sessions: vec![checkpoint],
+                            session_tails: Vec::new(),
+                        },
+                    },
+                    EventSink::detached(),
+                    None,
+                )
+                .unwrap();
+            let mut state = backend.task_state.lock();
+            let session = state.session_mut(session_id).unwrap();
+            assert_eq!(session.title, title);
+            assert!(!session.agent_rename_allowed);
+        }
     }
     let state = backend.task_state.lock();
     let session = state
@@ -2531,6 +2797,8 @@ fn a_declined_agent_rename_leaves_the_title_alone() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -2581,6 +2849,8 @@ fn an_agent_rename_unparks_when_the_runtime_dies() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -2727,6 +2997,8 @@ fn an_approved_archive_proposal_archives_tasks_and_side_chats() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -2835,6 +3107,8 @@ fn a_duplicate_archive_answer_is_consumed() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -2932,6 +3206,8 @@ fn an_approved_archive_proposal_reports_stale_targets() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -3011,6 +3287,8 @@ fn a_declined_archive_proposal_archives_nothing() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -3074,6 +3352,8 @@ fn a_boss_archive_proposal_reaches_other_projects() {
     backend.sessions.lock().insert(
         boss_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: boss_runtime,
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -3293,11 +3573,16 @@ pub(crate) fn surface_test_backend(root: &Path) -> (WakuBackend, Uuid) {
     state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
     let session_id = state.sessions[0].id;
     store.save(&mut state).unwrap();
-    let backend = WakuBackend::new(
+    let mut backend = WakuBackend::new(
         DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
         store,
     )
     .unwrap();
+    // Existing file-failure fixtures explicitly exercise the standalone JSON host.
+    // Enabled daemon startup and activation use SQLite and have separate coverage.
+    if !backend.settings.get().boss_experiment_enabled {
+        backend.boss = Arc::new(crate::boss::BossService::disabled(root.join("boss")));
+    }
     backend.agent.note_surface(
         session_id,
         crate::agent::AgentSurfaceScope {
@@ -3471,6 +3756,7 @@ fn a_rejected_context_steer_leaves_the_session_eligible() {
     let rejected = backend.agent.note_driver_event(
         session_id,
         &DriverEvent::SteerRejected {
+            submission_id: None,
             message: capture.steers.lock()[0].clone(),
             reason: "turn ended".into(),
             reason_i18n: None,
@@ -3518,6 +3804,8 @@ fn an_exited_runtime_releases_its_replay_journal() {
     let sessions = Arc::new(Mutex::new(HashMap::from([(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id,
             driver: driver.clone(),
@@ -3658,12 +3946,14 @@ fn runtime_generation_stale_events(managed: bool) {
         DriverEvent::TurnStarted,
         DriverEvent::TextDelta("stale answer".into()),
         DriverEvent::SteerAccepted {
+            submission_id: None,
             message: "pending acceptance".into(),
             sent_by_task: None,
             hidden: false,
             report_trigger: None,
         },
         DriverEvent::SteerRejected {
+            submission_id: None,
             message: "pending rejection".into(),
             reason: "stale".into(),
             reason_i18n: None,
@@ -3747,6 +4037,8 @@ fn runtime_generation_entry(
     cwd: &Path,
 ) -> RuntimeEntry {
     RuntimeEntry {
+        mode: Default::default(),
+        _admission: None,
         plan_gate: None,
         runtime_id,
         driver: DriverHandle::from_control(capture),
@@ -4238,6 +4530,65 @@ fn runtime_generation_retirement_fences_observed_events(shutdown: bool) {
     std::fs::remove_dir_all(root).ok();
 }
 
+#[test]
+fn received_codex_chat_retries_without_an_unconfirmed_cursor() {
+    let root = std::env::temp_dir().join(format!("waku-chat-retry-{}", Uuid::new_v4()));
+    let (mut backend, _) = surface_test_backend(&root);
+    runtime_generation_configure_launch(&mut backend, &root);
+    let delivery = crate::share::ChatDelivery {
+        peer_id: "peer".into(),
+        peer_name: "Maya".into(),
+        title: "Release note".into(),
+        text: "The release is on Tuesday.".into(),
+    };
+    let share_dir = root.join("share");
+    std::fs::create_dir(&share_dir).unwrap();
+    let session_id = create_chat_session(
+        &backend.task_state,
+        &backend.task_store,
+        &share_dir,
+        &delivery,
+    )
+    .unwrap();
+    let cursor = ProviderResumeCursor::Codex {
+        thread_id: "unconfirmed-thread".into(),
+    };
+    {
+        let mut state = backend.task_state.lock();
+        let session = state.session_mut(session_id).unwrap();
+        session.provider = ProviderKind::Codex;
+        session.provider_cursor = Some(cursor.clone());
+        session.begin_turn("When is the release?");
+        session.finish_active_turn(TurnStatus::Interrupted);
+        session.pending_provider_context = None;
+        session.status = SessionStatus::Failed;
+        assert!(waku_protocol::provider_session::CodexHistoryRefresh::capture(session).is_none());
+        backend.task_store.save(&mut state).unwrap();
+    }
+    let (launches, launch) = crossbeam_channel::unbounded();
+    backend.runtime_test_start = Some(Arc::new(move |_, options, _| {
+        launches.send(options.provider_cursor).unwrap();
+        let capture = Arc::new(CaptureDriver::default());
+        Ok(DriverHandle::from_control(capture))
+    }));
+    let events = EventSink::detached();
+    backend.ensure_agent_runtime(session_id, &events).unwrap();
+    assert!(launch.try_recv().unwrap().is_none());
+    drop_detached(backend.remove_runtime(session_id, None, false));
+    {
+        let mut state = backend.task_state.lock();
+        let session = state.session_mut(session_id).unwrap();
+        session.begin_turn("When is the release?");
+        session.mark_active_turn_provider_started();
+        session.finish_active_turn(TurnStatus::Completed);
+        backend.task_store.save(&mut state).unwrap();
+    }
+    backend.ensure_agent_runtime(session_id, &events).unwrap();
+    assert_eq!(launch.try_recv().unwrap(), Some(cursor));
+    drop(backend);
+    std::fs::remove_dir_all(root).ok();
+}
+
 fn runtime_generation_launch_fixture(root: &Path, managed: bool) -> (WakuBackend, Uuid) {
     let (backend, session_id) = if managed {
         let (backend, _, session_id, _, _) = employee_finish_fixture(root);
@@ -4701,6 +5052,8 @@ fn startup_runtime_events_are_forwarded_after_registration() {
         .register_runtime_forwarder(
             session_id,
             RuntimeEntry {
+                mode: Default::default(),
+                _admission: None,
                 plan_gate: None,
                 runtime_id,
                 driver: DriverHandle::from_control(capture),
@@ -4748,6 +5101,8 @@ fn streaming_deltas_do_not_enter_the_replay_journal() {
     let sessions = Arc::new(Mutex::new(HashMap::from([(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id,
             driver: driver.clone(),
@@ -4819,6 +5174,8 @@ fn closing_a_session_begins_driver_shutdown_while_a_handle_is_held() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id,
             driver: DriverHandle::from_control(capture.clone()),
@@ -5004,6 +5361,8 @@ fn the_idle_reaper_only_takes_runtimes_that_can_come_back() {
                 (
                     id,
                     RuntimeEntry {
+                        mode: Default::default(),
+                        _admission: None,
                         plan_gate: None,
                         runtime_id: Uuid::new_v4(),
                         driver: driver.clone(),
@@ -5041,6 +5400,8 @@ fn the_idle_reaper_only_takes_runtimes_that_can_come_back() {
     sessions.lock().insert(
         idle_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: driver.clone(),
@@ -5093,6 +5454,8 @@ fn the_idle_reaper_only_takes_runtimes_that_can_come_back() {
     sessions.lock().insert(
         idle_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: driver.clone(),
@@ -5691,6 +6054,117 @@ fn boss_chat_is_continuous_and_uses_a_private_workspace_without_user_projects() 
     let _ = std::fs::remove_dir_all(root);
 }
 
+#[test]
+fn visible_and_resume_prompts_require_the_selected_permission_mode() {
+    for hidden in [false, true] {
+        let root = std::env::temp_dir().join(format!("prompt-mode-{}", Uuid::new_v4()));
+        let (mut backend, session_id) = surface_test_backend(&root);
+        runtime_generation_configure_launch(&mut backend, &root);
+        let capture = Arc::new(CaptureDriver::default());
+        let runtime_id = Uuid::new_v4();
+        let mut entry = runtime_generation_entry(runtime_id, capture.clone(), &root);
+        entry.mode = RuntimeMode::FullAccess;
+        backend.sessions.lock().insert(session_id, entry);
+        let prompt = |runtime_id, mode| Request {
+            request_id: Uuid::new_v4(),
+            session_id,
+            runtime_id,
+            command: Command::Prompt {
+                runtime_mode: Some(mode),
+                prompt: "continue safely".into(),
+                turn_id: None,
+                message_id: None,
+                hidden,
+                attachments: Vec::new(),
+            },
+        };
+        let turn_count = backend.task_state.lock().sessions[0].turns.len();
+        let error = backend
+            .handle(
+                prompt(runtime_id, RuntimeMode::Ask),
+                EventSink::detached(),
+                None,
+            )
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("permission mode is still changing")
+        );
+        assert!(capture.prompts.lock().is_empty());
+        assert_eq!(
+            backend.task_state.lock().sessions[0].turns.len(),
+            turn_count,
+            "a refused prompt must not create a running turn"
+        );
+
+        // Once the replacement is installed with the desired posture, the
+        // same input is admitted for both Resume and ordinary sends.
+        backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id,
+                    runtime_id,
+                    command: Command::CloseSession,
+                },
+                EventSink::detached(),
+                None,
+            )
+            .unwrap();
+        let replacement = Arc::new(CaptureDriver::default());
+        let fresh = replacement.clone();
+        let senders = Arc::new(Mutex::new(Vec::new()));
+        let keep_events = senders.clone();
+        backend.runtime_test_start = Some(Arc::new(move |_, options, sender| {
+            assert_eq!(options.mode, RuntimeMode::Ask);
+            keep_events.lock().push(sender);
+            Ok(DriverHandle::from_control(fresh.clone()))
+        }));
+        // The desktop's Start request carries the selection even before a
+        // settings save arrives; a cold agent start would reload stored mode.
+        let fresh_id = Uuid::new_v4();
+        backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id,
+                    runtime_id: fresh_id,
+                    command: Command::Start {
+                        options: waku_protocol::WireDriverStartOptions {
+                            provider: "codex".into(),
+                            binary: root.join("controlled-provider"),
+                            cwd: root.join("repo"),
+                            mode: waku_protocol::encode_enum(RuntimeMode::Ask).unwrap(),
+                            model: None,
+                            reasoning_effort: None,
+                            service_tier: None,
+                            context_window: None,
+                            agent_preset: None,
+                            computer_use_enabled: false,
+                            read_own_transcript: false,
+                            provider_cursor: None,
+                        },
+                    },
+                },
+                EventSink::detached(),
+                None,
+            )
+            .unwrap();
+        backend
+            .handle(
+                prompt(fresh_id, RuntimeMode::Ask),
+                EventSink::detached(),
+                None,
+            )
+            .unwrap();
+        assert!(capture.prompts.lock().is_empty());
+        assert_eq!(replacement.prompts.lock().len(), 1);
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
+
 /// A boss `terminal` op owes its intent to the client that prompted
 /// the boss's turn: a visible prompt on a boss principal session
 /// records the submitting subscriber, and the op resolves that
@@ -5706,6 +6180,8 @@ fn boss_terminal_op_owes_the_prompting_client() {
     backend.sessions.lock().insert(
         supervisor,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id,
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -5727,6 +6203,7 @@ fn boss_terminal_op_owes_the_prompting_client() {
                 session_id: supervisor,
                 runtime_id,
                 command: Command::Prompt {
+                    runtime_mode: None,
                     prompt: "open me a shell".into(),
                     turn_id: None,
                     message_id: None,
@@ -5816,6 +6293,8 @@ fn a_clean_employee_finish_retires_runtime_revokes_token_and_stays_silent() {
         backend.sessions.lock().insert(
             id,
             RuntimeEntry {
+                mode: Default::default(),
+                _admission: None,
                 plan_gate: None,
                 runtime_id: Uuid::new_v4(),
                 driver: DriverHandle::from_control(capture),
@@ -5910,6 +6389,8 @@ fn employee_finish_fixture(
         backend.sessions.lock().insert(
             id,
             RuntimeEntry {
+                mode: Default::default(),
+                _admission: None,
                 plan_gate: None,
                 runtime_id: Uuid::new_v4(),
                 driver: DriverHandle::from_control(capture),
@@ -5949,6 +6430,8 @@ fn detach_boss_session(backend: &WakuBackend, supervisor: Uuid) -> Uuid {
     backend.sessions.lock().insert(
         decoy_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -6597,6 +7080,7 @@ fn a_blocker_steer_marks_its_accepted_boundary() {
         employee_id,
         true,
         Some(trigger),
+        steer.queued_id,
     );
 
     let state = backend.task_state.lock();
@@ -7108,6 +7592,7 @@ fn a_steered_report_delivers_once_through_mirror_and_restart() {
         employee,
         true,
         steer.report_trigger.clone(),
+        steer.queued_id,
     );
     // Restart between the echo's transcript write and the chip's unmirror:
     // the parked entry survives while the in-memory steer bookkeeping dies.
@@ -7474,6 +7959,8 @@ fn an_expiring_employee_notifies_attached_clients() {
         backend.sessions.lock().insert(
             id,
             RuntimeEntry {
+                mode: Default::default(),
+                _admission: None,
                 plan_gate: None,
                 runtime_id,
                 driver: DriverHandle::from_control(capture),
@@ -7579,6 +8066,8 @@ fn a_supervisor_prompt_resurrects_an_expired_employee() {
     backend.sessions.lock().insert(
         supervisor,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(parent_capture),
@@ -7605,6 +8094,8 @@ fn a_supervisor_prompt_resurrects_an_expired_employee() {
     backend.sessions.lock().insert(
         employee_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
@@ -7726,6 +8217,8 @@ fn a_settle_expiry_drains_past_an_open_turn() {
     backend.sessions.lock().insert(
         employee_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -8661,6 +9154,89 @@ fn boss_summon_validates_the_requested_reasoning_effort() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+#[test]
+fn managed_access_mode_survives_skeleton_saves_and_explicit_changes() {
+    for mode in [
+        crate::model::RuntimeMode::FullAccess,
+        crate::model::RuntimeMode::Ask,
+    ] {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.boss_managed = true;
+        session.runtime_mode = mode;
+        let mut skeleton = session.list_projection();
+        skeleton.updated_at += 1;
+        merge_stale_session_metadata(&mut session, skeleton);
+        assert_eq!(session.runtime_mode, mode);
+
+        let mut edited = session.clone();
+        edited.runtime_mode = crate::model::RuntimeMode::AutoAcceptEdits;
+        edited.updated_at += 1;
+        merge_stale_session_metadata(&mut session, edited);
+        assert_eq!(
+            session.runtime_mode,
+            crate::model::RuntimeMode::AutoAcceptEdits
+        );
+    }
+}
+
+#[test]
+fn summoned_employee_inherits_saved_supervisor_access_before_hydration() {
+    for mode in [
+        crate::model::RuntimeMode::FullAccess,
+        crate::model::RuntimeMode::Ask,
+    ] {
+        let root = std::env::temp_dir().join(format!("summon-access-{}", Uuid::new_v4()));
+        let (backend, boss) = summon_test_backend(&root);
+        {
+            let mut state = backend.task_state.lock();
+            let session = state.session_mut(boss).unwrap();
+            backend.task_store.hydrate(session).unwrap();
+            session.runtime_mode = mode;
+            backend.task_store.save(&mut state).unwrap();
+            // A restart loads list columns; access posture is still in the blob.
+            *state = backend.task_store.load().unwrap();
+            assert!(
+                !state
+                    .sessions
+                    .iter()
+                    .find(|s| s.id == boss)
+                    .unwrap()
+                    .detail_loaded
+            );
+        }
+        set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 0, 1);
+        let BossResult::Summoned { session_id, .. } = backend
+            .handle_boss_operation(
+                Some(boss),
+                summon_op(
+                    &backend,
+                    &root,
+                    "inherits access",
+                    ProviderKind::Codex,
+                    Some("gpt-5.5"),
+                ),
+                &EventSink::detached(),
+            )
+            .unwrap()
+        else {
+            panic!("expected queued employee");
+        };
+        assert_eq!(
+            backend
+                .task_state
+                .lock()
+                .sessions
+                .iter()
+                .find(|s| s.id == session_id)
+                .unwrap()
+                .runtime_mode,
+            mode
+        );
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
+
 /// A backend wired for summon-queue tests: the boss session id set,
 /// the broker ledger rooted inside the temp dir (never the host's),
 /// and every provider binary pointed at a missing path so a granted
@@ -8684,6 +9260,8 @@ fn summon_test_backend(root: &Path) -> (WakuBackend, Uuid) {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -8995,6 +9573,8 @@ fn summon_response_waits_for_completed_dispatch() {
         backend.sessions.lock().insert(
             employee.session_id,
             RuntimeEntry {
+                mode: Default::default(),
+                _admission: None,
                 plan_gate: None,
                 runtime_id: Uuid::new_v4(),
                 driver: DriverHandle::from_control(capture.clone()),
@@ -9523,6 +10103,8 @@ fn a_summon_at_capacity_admits_a_durable_queued_ticket() {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(supervisor_capture.clone()),
@@ -10653,6 +11235,130 @@ fn start_now_flag_survives_restart_and_never_steals_held_resources() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// A queued ticket under the memory guard's pause fence reports the
+/// fence as its wait reason instead of hanging blank — the scheduler
+/// itself never clears a review fence, so a boss press keeps it. The
+/// human's `startNow` is the explicit continue the pause exists to wait
+/// for: it clears the fence, then the committed flag drives the same
+/// dispatch every press gets.
+// Host resource supervision is Unix-only; the admission path bails elsewhere.
+#[cfg(unix)]
+#[test]
+fn start_now_clears_the_memory_guard_pause_for_the_human() {
+    use waku_protocol::boss::{
+        AdmissionBlocker, BossOperation, BossResult, EmployeeControl, EmployeeLifecycle,
+    };
+    let root = std::env::temp_dir().join(format!("summon-startnow-pause-{}", Uuid::new_v4()));
+    let (mut backend, boss) = summon_test_backend(&root);
+    // No live headroom, burst room to spare: the ticket queues on the
+    // model cap and a forced admission spends the burst slot.
+    set_model_policy(&backend, ProviderKind::Codex, "gpt-5.5", 0, 2);
+    // Launches succeed, so a dispatched ticket lands Working instead of
+    // expiring on the fixture's missing binary.
+    backend.set_daemon_address("http://127.0.0.1:1".into());
+    backend.runtime_test_cli = Some("/usr/bin/true".into());
+    let launches = Arc::new(Mutex::new(0usize));
+    let counting = launches.clone();
+    backend.runtime_test_start = Some(Arc::new(move |_, _, _| {
+        *counting.lock() += 1;
+        Ok(DriverHandle::from_control(Arc::new(
+            CaptureDriver::default(),
+        )))
+    }));
+    let mut daemon_settings = backend.settings.get();
+    daemon_settings
+        .provider_binary_overrides
+        .insert(ProviderKind::Codex, stub_binary(&root, "codex-stub"));
+    backend.settings.replace(daemon_settings).unwrap();
+    let BossResult::Summoned {
+        session_id, state, ..
+    } = backend
+        .handle_boss_operation(
+            Some(boss),
+            summon_op(
+                &backend,
+                &root,
+                "paused job",
+                ProviderKind::Codex,
+                Some("gpt-5.5"),
+            ),
+            &EventSink::detached(),
+        )
+        .unwrap()
+    else {
+        panic!("expected a summoned result")
+    };
+    assert_eq!(state, EmployeeLifecycle::Queued);
+
+    // The containment's settled state — paused, no stop in flight.
+    backend.memory_guard.pause_for_test(session_id);
+
+    // A scheduler pass reports the fence as the ticket's wait reason
+    // rather than skipping it blank.
+    backend.run_summon_scheduler();
+    let ticket = backend.boss.employee(session_id).unwrap().ticket.unwrap();
+    assert!(
+        ticket.blocked_by.iter().any(|blocker| matches!(
+            blocker,
+            AdmissionBlocker::HostResources { detail } if detail.contains("paused")
+        )),
+        "the pause reports as the wait reason: {:?}",
+        ticket.blocked_by
+    );
+
+    // A boss press keeps the fence — only the human's explicit continue
+    // clears it — and the settled reply carries the same reason.
+    let result = backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Control {
+                session_id,
+                action: EmployeeControl::StartNow,
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    let BossResult::Summoned {
+        state, admission, ..
+    } = result
+    else {
+        panic!("startNow answers with the employee's settled state")
+    };
+    assert_eq!(state, EmployeeLifecycle::Queued);
+    assert!(backend.memory_guard.paused(session_id));
+    let admission = admission.expect("a queued result carries its admission");
+    assert!(
+        admission.blocked_by.iter().any(|blocker| matches!(
+            blocker,
+            AdmissionBlocker::HostResources { detail } if detail.contains("paused")
+        )),
+        "the kept fence reports as the wait reason: {:?}",
+        admission.blocked_by
+    );
+    assert_eq!(*launches.lock(), 0);
+
+    // The human's press clears the fence and dispatches in one motion —
+    // the committed flag spends the burst slot the same as any startNow.
+    let result = backend
+        .handle_boss_operation(
+            None,
+            BossOperation::Control {
+                session_id,
+                action: EmployeeControl::StartNow,
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    let BossResult::Summoned { state, .. } = result else {
+        panic!("startNow answers with the employee's settled state")
+    };
+    assert_eq!(state, EmployeeLifecycle::Working);
+    assert!(!backend.memory_guard.paused(session_id));
+    assert_eq!(*launches.lock(), 1);
+    drop(backend);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// `setResources` rewrites a queued ticket in place: the next
 /// admission attempt must satisfy the declared host set, so a ticket
 /// that would have dispatched on the freed model slot keeps waiting
@@ -10836,7 +11542,7 @@ fn set_resources_on_a_working_employee_swaps_in_place() {
     assert!(
         backend
             .boss
-            .mark_dispatching(session_id, 1, Some(reservation))
+            .mark_dispatching(session_id, 1, Some(reservation), false)
             .unwrap()
     );
     assert!(backend.boss.mark_working(session_id, 1).unwrap());
@@ -11743,7 +12449,7 @@ fn setmodel_on_a_working_employee_interrupts_and_requeues() {
     assert!(
         backend
             .boss
-            .mark_dispatching(session_id, 1, Some(reservation))
+            .mark_dispatching(session_id, 1, Some(reservation), false)
             .unwrap()
     );
     assert!(backend.boss.mark_working(session_id, 1).unwrap());
@@ -11766,6 +12472,8 @@ fn setmodel_on_a_working_employee_interrupts_and_requeues() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
@@ -11880,7 +12588,7 @@ fn setmodel_retunes_a_working_employees_runtime_in_place() {
     assert!(
         backend
             .boss
-            .mark_dispatching(session_id, 1, Some(reservation))
+            .mark_dispatching(session_id, 1, Some(reservation), false)
             .unwrap()
     );
     assert!(backend.boss.mark_working(session_id, 1).unwrap());
@@ -11905,6 +12613,8 @@ fn setmodel_retunes_a_working_employees_runtime_in_place() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
@@ -12114,6 +12824,8 @@ fn setmodel_recovers_an_expired_employee_atomically() {
         backend.sessions.lock().insert(
             session_id,
             RuntimeEntry {
+                mode: Default::default(),
+                _admission: None,
                 plan_gate: None,
                 runtime_id: Uuid::new_v4(),
                 driver: DriverHandle::from_control(capture.clone()),
@@ -12292,7 +13004,7 @@ fn setmodel_requeue_relaunches_on_the_new_provider() {
     assert!(
         backend
             .boss
-            .mark_dispatching(session_id, 1, Some(reservation))
+            .mark_dispatching(session_id, 1, Some(reservation), false)
             .unwrap()
     );
     assert!(backend.boss.mark_working(session_id, 1).unwrap());
@@ -12316,6 +13028,8 @@ fn setmodel_requeue_relaunches_on_the_new_provider() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -12365,6 +13079,8 @@ fn setmodel_requeue_relaunches_on_the_new_provider() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
@@ -12482,7 +13198,7 @@ fn setmodel_requeue_keeps_the_same_providers_cursor() {
     assert!(
         backend
             .boss
-            .mark_dispatching(session_id, 1, Some(reservation))
+            .mark_dispatching(session_id, 1, Some(reservation), false)
             .unwrap()
     );
     assert!(backend.boss.mark_working(session_id, 1).unwrap());
@@ -12508,6 +13224,8 @@ fn setmodel_requeue_keeps_the_same_providers_cursor() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(Arc::new(CaptureDriver::default())),
@@ -12545,6 +13263,8 @@ fn setmodel_requeue_keeps_the_same_providers_cursor() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
@@ -12773,7 +13493,7 @@ fn setmodel_retune_resets_to_the_models_default_effort() {
     assert!(
         backend
             .boss
-            .mark_dispatching(session_id, 1, Some(reservation))
+            .mark_dispatching(session_id, 1, Some(reservation), false)
             .unwrap()
     );
     assert!(backend.boss.mark_working(session_id, 1).unwrap());
@@ -12800,6 +13520,8 @@ fn setmodel_retune_resets_to_the_models_default_effort() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
@@ -13011,6 +13733,8 @@ fn a_boss_prompt_reaches_a_standalone_task() {
     backend.sessions.lock().insert(
         standalone_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
@@ -14104,6 +14828,7 @@ fn outcome_reminder_parks_once_and_marks_despite_delivery_failure() {
             task.id,
             Some(OutcomeWait::Dependency {
                 note: "awaiting review".into(),
+                recorded_at: None,
             }),
             None,
         )
@@ -14134,13 +14859,15 @@ fn outcome_reminder_parks_once_and_marks_despite_delivery_failure() {
         .unwrap();
     assert_eq!(parked().len(), 2);
 
-    // Once a runtime exists the parked copies drain, one per turn
-    // boundary — the same batch id names the delivered message, so a
-    // redriven enqueue folds onto the row that already landed.
+    // Restart loses the memory queue; durable references must still discard
+    // the first period and deliver only the reminder for the current period.
+    backend.agent.clear_session(boss);
     let capture = Arc::new(CaptureDriver::default());
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
@@ -14177,10 +14904,159 @@ fn outcome_reminder_parks_once_and_marks_despite_delivery_failure() {
         session.finish_active_turn(TurnStatus::Completed);
     }
     backend.deliver_pending_agent_prompts();
-    assert_eq!(reminders(), 2);
+    assert_eq!(reminders(), 1, "the obsolete period must never deliver");
     assert!(parked().is_empty());
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
+}
+
+/// Eligibility changes while the Boss is busy must reach both the durable
+/// transcript and provider boundary after restart, including mixed batches.
+#[test]
+fn outcome_reminder_revalidates_parked_batches_after_restart() {
+    use waku_protocol::boss::{EmployeeGoal, OutcomeState, OutcomeWait};
+    for keep_unattended in [false, true] {
+        let root = std::env::temp_dir().join(format!("reminder-stale-{}", Uuid::new_v4()));
+        let (backend, boss) = surface_test_backend(&root);
+        backend.boss.set_session_id(boss).unwrap();
+        backend
+            .agent
+            .note_driver_event(boss, &DriverEvent::TurnStarted);
+        let mut tasks = Vec::new();
+        for title in [
+            "Assigned meanwhile",
+            "Waiting meanwhile",
+            "Completed meanwhile",
+            "Still unattended",
+        ] {
+            tasks.push(
+                backend
+                    .boss
+                    .create_outcome(None, title, "verified")
+                    .unwrap(),
+            );
+        }
+        let now = crate::model::unix_time();
+        backend.deliver_outcome_reminders(now).unwrap();
+        backend
+            .deliver_outcome_reminders(now + waku_protocol::boss::OUTCOME_UNATTENDED_GRACE + 1)
+            .unwrap();
+        {
+            let state = backend.task_state.lock();
+            let queued = &state
+                .sessions
+                .iter()
+                .find(|session| session.id == boss)
+                .unwrap()
+                .queued_messages;
+            assert_eq!(queued.len(), 1);
+            assert_eq!(queued[0].outcome_reminder.len(), 4);
+        }
+        let assignment = backend
+            .boss
+            .assignment_admission(Some(tasks[0].id), None, false, None, Vec::new(), None)
+            .unwrap()
+            .unwrap();
+        let persona = backend.boss.document().personas[0].id;
+        let mut employee = backend
+            .boss
+            .prepare_employee(
+                boss,
+                Some(persona),
+                "Review".into(),
+                None,
+                false,
+                EmployeeGoal::Errand,
+                None,
+            )
+            .unwrap();
+        employee.assignment = Some(assignment);
+        backend.boss.add_employee(employee).unwrap();
+        backend
+            .boss
+            .set_outcome_waiting(
+                None,
+                tasks[1].id,
+                Some(OutcomeWait::Dependency {
+                    note: "review pending".into(),
+                    recorded_at: None,
+                }),
+                None,
+            )
+            .unwrap();
+        backend
+            .boss
+            .set_outcome_state(
+                None,
+                tasks[2].id,
+                OutcomeState::Completed,
+                Some("verified".into()),
+            )
+            .unwrap();
+        if !keep_unattended {
+            backend
+                .boss
+                .set_outcome_state(None, tasks[3].id, OutcomeState::Cancelled, None)
+                .unwrap();
+        }
+        if !keep_unattended {
+            // Legacy queued alerts have no IDs and cannot be safely replayed.
+            mirror_agent_queued_prompt(
+                &backend.task_state,
+                &backend.task_store,
+                boss,
+                Uuid::new_v4(),
+                &format!("{}• obsolete legacy task", summon::OUTCOME_REMINDER_HEADER),
+                None,
+                false,
+                None,
+            )
+            .unwrap();
+        }
+        // Do not scan again: delivery itself must detect the changed state.
+        backend.agent.clear_session(boss);
+        *backend.task_state.lock() = backend.task_store.load().unwrap();
+        let capture = Arc::new(CaptureDriver::default());
+        let driver = DriverHandle::from_control(capture.clone());
+        backend
+            .drain_agent_queue(boss, &driver, &EventSink::detached())
+            .unwrap();
+        let state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter()
+            .find(|session| session.id == boss)
+            .unwrap();
+        assert!(session.queued_messages.is_empty());
+        let reminders: Vec<_> = session
+            .messages
+            .iter()
+            .filter(|message| message.content.starts_with(summon::OUTCOME_REMINDER_HEADER))
+            .collect();
+        assert_eq!(reminders.len(), usize::from(keep_unattended));
+        let prompts = capture.prompts.lock();
+        assert_eq!(prompts.len(), usize::from(keep_unattended));
+        if keep_unattended {
+            let provider_reminder = prompts[0]
+                .split_once(summon::OUTCOME_REMINDER_HEADER)
+                .unwrap()
+                .1;
+            for text in [reminders[0].content.as_str(), provider_reminder] {
+                assert!(text.contains("Still unattended"));
+                for stale in [
+                    "Assigned meanwhile",
+                    "Waiting meanwhile",
+                    "Completed meanwhile",
+                ] {
+                    assert!(!text.contains(stale), "stale task reached delivery: {text}");
+                }
+            }
+        }
+        drop(prompts);
+        drop(state);
+        drop(backend);
+        let _ = std::fs::remove_dir_all(root);
+    }
 }
 
 /// A refresh must not resurrect a reminder the retired chat already held:
@@ -14369,6 +15245,7 @@ fn outcome_reminder_stays_suppressed_while_wait_or_assignment_covers_it() {
             task.id,
             Some(OutcomeWait::Dependency {
                 note: "awaiting review".into(),
+                recorded_at: None,
             }),
             None,
         )
@@ -14482,7 +15359,7 @@ fn legacy_dispatch_notifications_are_retired_without_delivery() {
     assert!(
         backend
             .boss
-            .mark_dispatching(session_id, 1, Some(reservation))
+            .mark_dispatching(session_id, 1, Some(reservation), false)
             .unwrap()
     );
     assert!(backend.boss.mark_working(session_id, 1).unwrap());
@@ -14501,6 +15378,8 @@ fn legacy_dispatch_notifications_are_retired_without_delivery() {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
@@ -14568,6 +15447,8 @@ fn employee_dispatch_is_silent_and_batches_queued_resumption() {
         backend.sessions.lock().insert(
             id,
             RuntimeEntry {
+                mode: Default::default(),
+                _admission: None,
                 plan_gate: None,
                 runtime_id: Uuid::new_v4(),
                 driver: DriverHandle::from_control(capture),
@@ -14631,6 +15512,8 @@ fn employee_dispatch_is_silent_and_batches_queued_resumption() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(resumed_capture.clone()),
@@ -14717,6 +15600,8 @@ fn a_wave_reports_once_when_every_member_settles() {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
@@ -14809,6 +15694,8 @@ fn an_all_cancelled_wave_reports_as_cancelled() {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
@@ -14934,6 +15821,8 @@ fn boss_set_workspace_moves_an_employee_between_workspaces() {
     backend.sessions.lock().insert(
         employee_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(first_capture.clone()),
@@ -15060,6 +15949,8 @@ fn boss_set_workspace_moves_an_employee_between_workspaces() {
     backend.sessions.lock().insert(
         employee_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(second_capture.clone()),
@@ -16097,6 +16988,8 @@ fn finalize_plan_steers_an_open_boss_turn() {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
@@ -16167,6 +17060,7 @@ fn finalize_plan_steers_an_open_boss_turn() {
         pending.sender.unwrap(),
         pending.hidden,
         pending.report_trigger,
+        pending.queued_id,
     );
     assert!(
         unmirror_agent_queued_prompt(&backend.task_state, &backend.task_store, boss, queued_id)
@@ -16308,17 +17202,16 @@ fn a_stale_client_save_cannot_unfreeze_a_planning_session() {
     assert_eq!(skeleton.planning.unwrap().finalized_at, Some(10));
 }
 
-/// The activation mark is the resurrection fence the `updated_at` order
-/// cannot give: a client whose copy predates the confirmed activation —
-/// e.g. a second desktop that never attached — carries newer timestamps
-/// yet still cannot overwrite the effective provider/model/effort.
+/// User metadata versions protect selected configuration independently of
+/// streaming timestamps and the provider's effective activation mark.
 #[test]
-fn a_pre_activation_client_save_cannot_overwrite_confirmed_config() {
+fn older_metadata_cannot_overwrite_the_shared_selected_configuration() {
     let activated = ConfigActivation {
         generation: 1,
         revision: 3,
     };
     let mut existing = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    existing.metadata_revision = 3;
     existing.model = Some("gpt-6".into());
     existing.reasoning_effort = Some("low".into());
     existing.config_activation = Some(activated);
@@ -16326,6 +17219,7 @@ fn a_pre_activation_client_save_cannot_overwrite_confirmed_config() {
     // A newer save from a client that never saw the activation: its
     // requested pair loses, the mark stays.
     let mut incoming = existing.clone();
+    incoming.metadata_revision = 2;
     incoming.model = Some("gpt-5.5".into());
     incoming.reasoning_effort = Some("high".into());
     incoming.config_activation = Some(ConfigActivation {
@@ -16339,10 +17233,12 @@ fn a_pre_activation_client_save_cannot_overwrite_confirmed_config() {
     assert_eq!(existing.config_activation, Some(activated));
 
     let mut skeleton = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    skeleton.metadata_revision = 3;
     skeleton.model = Some("gpt-6".into());
     skeleton.reasoning_effort = Some("low".into());
     skeleton.config_activation = Some(activated);
     let mut incoming = skeleton.clone();
+    incoming.metadata_revision = 2;
     incoming.model = Some("gpt-5.5".into());
     incoming.reasoning_effort = Some("high".into());
     incoming.config_activation = None;
@@ -16352,9 +17248,10 @@ fn a_pre_activation_client_save_cannot_overwrite_confirmed_config() {
     assert_eq!(skeleton.reasoning_effort.as_deref(), Some("low"));
     assert_eq!(skeleton.config_activation, Some(activated));
 
-    // A client at the current mark owns a newer requested selection —
-    // its save merges normally.
+    // A newer shared metadata choice owns selected settings even while
+    // the effective activation mark remains unchanged.
     let mut incoming = existing.clone();
+    incoming.metadata_revision = 4;
     incoming.model = Some("gpt-5.5".into());
     incoming.config_activation = Some(activated);
     incoming.updated_at = existing.updated_at + 1;
@@ -16523,6 +17420,8 @@ fn a_queued_prompt_survives_expiry_and_drains_before_the_revive_prompt() {
     backend.sessions.lock().insert(
         employee_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(child.clone()),
@@ -16581,6 +17480,8 @@ fn a_revived_employee_prompt_reaches_session_subscribers() {
     backend.sessions.lock().insert(
         employee_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: employee_runtime,
             driver: DriverHandle::from_control(child.clone()),
@@ -17196,6 +18097,8 @@ fn a_steer_echo_on_a_retired_boss_chat_unmirrors_the_carried_chip() {
     backend.sessions.lock().insert(
         predecessor,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: late_runtime,
             driver: DriverHandle::from_control(capture),
@@ -17210,6 +18113,7 @@ fn a_steer_echo_on_a_retired_boss_chat_unmirrors_the_carried_chip() {
     let (sender, receiver) = driver::test_event_channel();
     sender
         .send(DriverEvent::SteerAccepted {
+            submission_id: None,
             message: "employee report".into(),
             sent_by_task: None,
             hidden: false,
@@ -17382,6 +18286,8 @@ fn archived_active_boss_recovers_on_open_send_and_reconciliation() {
     backend.sessions.lock().insert(
         active,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id,
             driver: DriverHandle::from_control(capture.clone()),
@@ -17430,6 +18336,7 @@ fn archived_active_boss_recovers_on_open_send_and_reconciliation() {
                             session_id: active,
                             runtime_id,
                             command: Command::Prompt {
+                                runtime_mode: None,
                                 prompt: "Continue coordinating".into(),
                                 turn_id: None,
                                 message_id: None,
@@ -18116,6 +19023,8 @@ fn outcome_employee_fixture(
         backend.sessions.lock().insert(
             id,
             RuntimeEntry {
+                mode: Default::default(),
+                _admission: None,
                 plan_gate: None,
                 runtime_id: Uuid::new_v4(),
                 driver: DriverHandle::from_control(capture),
@@ -19959,6 +20868,25 @@ fn chains_execute_in_order_sealing_handoffs_quietly() {
         .clone();
     let attempt1 = chain.steps[1].attempts[0].clone();
     assert_eq!(Some(second.session_id), attempt1.employee_id);
+    let control = &document.employee_prompt_controls[&first.session_id];
+    assert!(control.reason.as_deref().unwrap().contains("replaced"));
+    assert_eq!(control.successor_id, Some(second.session_id));
+    let before = serde_json::to_value(&document.chains[0]).unwrap();
+    let error = backend
+        .employee_composer_prompt(
+            first.session_id,
+            Uuid::new_v4(),
+            "do more work".into(),
+            AgentPromptDelivery::Queue,
+            &EventSink::detached(),
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("replaced"));
+    assert!(backend.resume_employee(first.session_id, None).is_err());
+    assert_eq!(
+        serde_json::to_value(&backend.boss.document().chains[0]).unwrap(),
+        before
+    );
     let prompt = &second.ticket.as_ref().unwrap().prompt;
     assert!(prompt.contains("root cause found — fix lands next"));
     assert!(prompt.contains("the root cause you found"));
@@ -20268,6 +21196,236 @@ fn chain_successor_launch_error_reconciles_only_effect_free_attempts() {
         }
         remove_tree(root);
     }
+}
+
+#[test]
+fn chain_local_artifact_retry_binds_and_dispatches_at_current_source() {
+    use waku_protocol::chains::ChainBaseSource;
+    for drift in [false, true] {
+        let root = std::env::temp_dir().join(format!("waku-chain-local-retry-{}", Uuid::new_v4()));
+        let (backend, boss, head) = chain_backend(&root);
+        let project = backend.task_state.lock().projects[0].clone();
+        let outcome = backend
+            .boss
+            .create_outcome(Some(boss), "Local retry", "Evidence verified")
+            .unwrap();
+        let mut definition = chain_test_definition(
+            project.id,
+            outcome.id,
+            backend.boss.document().personas[0].id,
+            1,
+            head,
+        );
+        definition.steps[0].workspace = waku_protocol::AgentWorkspace::Local;
+        definition.steps[0].base_revision = Some(ChainBaseSource::Bare("main".into()));
+        let checks = vec![
+            "P4 plan exit criteria",
+            "P4 scoped verification and evidence limits",
+            "Completed implementation units committed",
+            "checkout and unrelated work preserved",
+        ];
+        definition.steps[0].required_checks = checks.iter().map(|s| (*s).into()).collect();
+        definition.steps[0].required_artifacts =
+            vec!["P4 phase evidence and successor handoff".into()];
+        backend
+            .handle_boss_operation(
+                Some(boss),
+                BossOperation::Chain {
+                    action: ChainOperation::Create {
+                        request_id: Uuid::new_v4(),
+                        definition: definition.clone(),
+                    },
+                },
+                &EventSink::detached(),
+            )
+            .unwrap();
+        backend.run_summon_scheduler();
+        let first = backend.boss.document().chains[0].steps[0].attempts[0]
+            .employee_id
+            .unwrap();
+        backend
+            .finish_boss_employee(
+                first,
+                false,
+                waku_protocol::boss::EmployeeSettle::ProcessExited { mid_turn: true },
+            )
+            .unwrap();
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&project.path)
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            String::from_utf8(output.stdout).unwrap().trim().to_owned()
+        };
+        std::fs::write(project.path.join("repair.txt"), "repair").unwrap();
+        git(&["add", "repair.txt"]);
+        git(&["commit", "-m", "repair"]);
+        let repaired = git(&["rev-parse", "HEAD"]);
+        std::fs::write(project.path.join("foreign.txt"), "keep").unwrap();
+        let chain = backend.boss.document().chains[0].clone();
+        let prior = chain.steps[0].attempts[0].clone();
+        backend
+            .handle_boss_operation(
+                Some(boss),
+                chain_control_op(
+                    chain.id,
+                    chain.revision,
+                    ChainControl::Retry,
+                    Some(ChainBaseSource::Bare(repaired.clone())),
+                ),
+                &EventSink::detached(),
+            )
+            .unwrap();
+        let chain = backend.boss.document().chains[0].clone();
+        let retry = chain.steps[0].attempts[1].clone();
+        let employee = retry.employee_id.expect("real retry binding");
+        assert_ne!(employee, first);
+        assert_ne!(retry.dispatch_id, prior.dispatch_id);
+        if drift {
+            std::fs::write(project.path.join("drift.txt"), "drift").unwrap();
+            git(&["add", "drift.txt"]);
+            git(&["commit", "-m", "source drift while queued"]);
+            backend.run_summon_scheduler();
+            let chain = backend.boss.document().chains[0].clone();
+            assert_eq!(chain.status, ChainStatus::Paused);
+            assert!(chain.steps[0].attempts[1].workspace.is_none());
+            assert!(!backend.sessions.lock().contains_key(&employee));
+            assert!(
+                chain.steps[0].attempts[1]
+                    .terminal
+                    .as_ref()
+                    .unwrap()
+                    .message
+                    .contains("current project HEAD")
+            );
+            remove_tree(root);
+            continue;
+        }
+        backend.run_summon_scheduler();
+        let chain = backend.boss.document().chains[0].clone();
+        assert_eq!(chain.steps[0].attempts[1].status, StepStatus::Working);
+        assert_eq!(
+            chain.steps[0].attempts[1].starting_revision,
+            Some(repaired.clone())
+        );
+        assert_eq!(
+            chain.steps[0].attempts[1].workspace.as_deref(),
+            Some(project.path.to_str().unwrap())
+        );
+        assert_eq!(
+            serde_json::to_value(&chain.steps[0].definition).unwrap(),
+            serde_json::to_value(&definition.steps[0]).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(&chain.steps[0].attempts[0].sealed).unwrap(),
+            serde_json::to_value(&prior.sealed).unwrap()
+        );
+        assert_eq!(git(&["rev-parse", "HEAD"]), repaired);
+        assert_eq!(
+            std::fs::read_to_string(project.path.join("foreign.txt")).unwrap(),
+            "keep"
+        );
+        // Missing original checks and artifact still fail; retry never accepts old evidence.
+        backend
+            .handle_boss_operation(
+                Some(employee),
+                chain_result_op(chain.id, &retry, ResultDisposition::Success),
+                &EventSink::detached(),
+            )
+            .unwrap();
+        write_employee_final(&backend, employee, "retry evidence is incomplete");
+        backend
+            .finish_boss_employee(
+                employee,
+                false,
+                waku_protocol::boss::EmployeeSettle::TurnFinished,
+            )
+            .unwrap();
+        let chain = backend.boss.document().chains[0].clone();
+        assert_eq!(chain.status, ChainStatus::Paused);
+        assert_eq!(chain.current_step, 0);
+        assert!(!chain.steps[0].attempts[1].handoff_accepted);
+        remove_tree(root);
+    }
+}
+
+/// A human's direct prompt to an expired chain-bound employee binds no
+/// recorded retry source — resume means continue in the same checkout, so
+/// dispatch verifies the shared workspace and resolves the live HEAD
+/// rather than demanding a pin the direct-prompt path never records.
+#[test]
+fn chain_local_direct_prompt_resume_dispatches_at_live_head() {
+    use waku_protocol::chains::ChainBaseSource;
+    let root = std::env::temp_dir().join(format!("waku-chain-resume-{}", Uuid::new_v4()));
+    let (backend, boss, head) = chain_backend(&root);
+    let project = backend.task_state.lock().projects[0].clone();
+    let outcome = backend
+        .boss
+        .create_outcome(Some(boss), "Direct resume", "Evidence verified")
+        .unwrap();
+    let mut definition = chain_test_definition(
+        project.id,
+        outcome.id,
+        backend.boss.document().personas[0].id,
+        1,
+        head.clone(),
+    );
+    definition.steps[0].workspace = waku_protocol::AgentWorkspace::Local;
+    definition.steps[0].base_revision = Some(ChainBaseSource::Bare("main".into()));
+    backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Chain {
+                action: ChainOperation::Create {
+                    request_id: Uuid::new_v4(),
+                    definition,
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    backend.run_summon_scheduler();
+    let first = backend.boss.document().chains[0].steps[0].attempts[0]
+        .employee_id
+        .unwrap();
+    backend
+        .finish_boss_employee(
+            first,
+            false,
+            waku_protocol::boss::EmployeeSettle::ProcessExited { mid_turn: true },
+        )
+        .unwrap();
+    let chain = backend.boss.document().chains[0].clone();
+    assert_eq!(chain.status, ChainStatus::Paused);
+    // The human's direct prompt re-admits the employee — the fresh attempt
+    // binds the session but records no source revision.
+    backend
+        .handle_boss_operation(
+            None,
+            BossOperation::Control {
+                session_id: first,
+                action: waku_protocol::boss::EmployeeControl::Prompt {
+                    prompt: "continue".into(),
+                    delivery: None,
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap();
+    let chain = backend.boss.document().chains[0].clone();
+    assert_eq!(chain.steps[0].attempts.len(), 2);
+    assert!(chain.steps[0].attempts[1].starting_revision.is_none());
+    backend.run_summon_scheduler();
+    let chain = backend.boss.document().chains[0].clone();
+    assert_eq!(chain.steps[0].attempts[1].status, StepStatus::Working);
+    assert_eq!(
+        chain.steps[0].attempts[1].starting_revision.as_deref(),
+        Some(head.as_str())
+    );
+    assert!(!backend.boss.employee(first).unwrap().expired());
+    remove_tree(root);
 }
 
 #[test]
@@ -21092,7 +22250,7 @@ fn chain_controls_win_the_finish_race() {
 }
 
 #[test]
-fn chain_employees_skip_ordinary_reporting_and_resume() {
+fn chain_employees_keep_reports_quiet_and_allow_direct_resume() {
     let root = std::env::temp_dir().join(format!("waku-chain-quiet-{}", Uuid::new_v4()));
     let (backend, boss, head) = chain_backend(&root);
     let project = backend.task_state.lock().projects[0].id;
@@ -21149,7 +22307,7 @@ fn chain_employees_skip_ordinary_reporting_and_resume() {
         "no report-blocker wake for chain employees"
     );
     drop(task_state);
-    // Chain-owned resume/retry paths refuse the generic employee revive.
+    // A direct human prompt can revive the latest released chain employee.
     backend
         .finish_boss_employee(
             employee.session_id,
@@ -21157,10 +22315,80 @@ fn chain_employees_skip_ordinary_reporting_and_resume() {
             waku_protocol::boss::EmployeeSettle::TurnFinished,
         )
         .unwrap();
-    assert!(
-        backend.resume_employee(employee.session_id).is_err(),
-        "chain attempts resume through chain controls"
+    let prior = backend.boss.document().chains[0].steps[0].attempts[0].clone();
+    let submission_id = Uuid::new_v4();
+    let send = |backend: &WakuBackend| {
+        backend.employee_composer_prompt(
+            employee.session_id,
+            submission_id,
+            "continue with the supplied credentials".into(),
+            AgentPromptDelivery::Queue,
+            &EventSink::detached(),
+        )
+    };
+    let control = backend.boss.document().employee_prompt_controls[&employee.session_id].clone();
+    assert!(control.reason.is_none());
+    assert!(control.resumes);
+    let error = backend
+        .handle_boss_operation(
+            Some(boss),
+            BossOperation::Control {
+                session_id: employee.session_id,
+                action: waku_protocol::boss::EmployeeControl::Prompt {
+                    prompt: "autonomous retry".into(),
+                    delivery: None,
+                },
+            },
+            &EventSink::detached(),
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("chain controls"));
+    send(&backend).unwrap();
+    send(&backend).unwrap(); // The same accepted submission cannot create another attempt.
+    let document = backend.boss.document();
+    let chain = &document.chains[0];
+    assert_eq!(chain.status, ChainStatus::Working);
+    assert_eq!(chain.steps[0].attempts.len(), 2);
+    assert_eq!(
+        serde_json::to_value(&chain.steps[0].attempts[0]).unwrap(),
+        serde_json::to_value(&prior).unwrap()
     );
+    let next = chain.steps[0].attempts[1].clone();
+    assert_eq!(next.employee_id, Some(employee.session_id));
+    assert_ne!(next.id, prior.id);
+    assert_ne!(next.dispatch_id, prior.dispatch_id);
+    assert!(next.provisional_result.is_none());
+    assert!(next.sealed.is_none());
+    backend.run_summon_scheduler();
+    let document = backend.boss.document();
+    assert_eq!(document.chains[0].steps[0].attempts.len(), 2);
+    assert_eq!(
+        document.chains[0].steps[0].attempts[1].status,
+        StepStatus::Working
+    );
+    // The resumed execution records fresh evidence and advances normally.
+    backend
+        .handle_boss_operation(
+            Some(employee.session_id),
+            chain_result_op(document.chains[0].id, &next, ResultDisposition::Success),
+            &EventSink::detached(),
+        )
+        .unwrap();
+    write_employee_final(&backend, employee.session_id, "credentials worked");
+    backend
+        .finish_boss_employee(
+            employee.session_id,
+            false,
+            waku_protocol::boss::EmployeeSettle::TurnFinished,
+        )
+        .unwrap();
+    assert_eq!(backend.boss.document().chains[0].current_step, 1);
+    drop(backend);
+    let backend = reopen_backend(&root);
+    send(&backend).unwrap(); // Accepted receipts survive restart, even after a successor owns the chain.
+    let document = backend.boss.document();
+    assert_eq!(document.chains[0].current_step, 1);
+    assert_eq!(document.chains[0].steps[0].attempts.len(), 2);
     remove_tree(root);
 }
 
@@ -21212,6 +22440,8 @@ fn automation_runs_wait_for_their_own_delivered_turns() {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id,
             driver: driver.clone(),
@@ -21960,6 +23190,7 @@ fn plan_blocker_receipt_replays_once_without_employee_cli_authentication() {
     remove_tree(root);
 }
 
+mod counsel;
 mod instruction_pins;
 mod plan_acceptance;
 mod rotation_oracle;
@@ -22387,6 +23618,116 @@ fn task_wireframes_require_opt_in_valid_documents_and_workspace_containment() {
 mod audit_regressions;
 
 #[test]
+fn worktree_moves_survive_stale_saves_and_reload() {
+    use waku_protocol::task_metadata::{TaskMetadataEdit, TaskMetadataUpdate};
+    let root = std::env::temp_dir().join(format!("task-worktree-move-{}", Uuid::new_v4()));
+    let (backend, id) = surface_test_backend(&root);
+    let original = backend.task_store.load_session_detail(id).unwrap().unwrap();
+    let workspace = SessionWorkspace::Worktree {
+        path: root.join("worktree"),
+        name: "worktree".into(),
+        branch: None,
+        base_branch: None,
+        adopted_by: None,
+        borrowed: false,
+    };
+    let request = |command| {
+        backend.handle(
+            Request {
+                request_id: Uuid::new_v4(),
+                session_id: Uuid::nil(),
+                runtime_id: Uuid::nil(),
+                command,
+            },
+            EventSink::detached(),
+            None,
+        )
+    };
+    let edit = TaskMetadataEdit::Workspace {
+        workspace: workspace.clone(),
+        moved_from: Some(root.join("repo")),
+    };
+    let move_request = || Command::UpdateTaskMetadata {
+        updates: vec![TaskMetadataUpdate {
+            session_id: id,
+            edit: edit.clone(),
+        }],
+    };
+    backend
+        .task_state
+        .lock()
+        .sessions
+        .iter_mut()
+        .find(|s| s.id == id)
+        .unwrap()
+        .status = SessionStatus::Working;
+    assert!(
+        request(move_request())
+            .unwrap_err()
+            .to_string()
+            .contains("busy")
+    );
+    backend
+        .task_state
+        .lock()
+        .sessions
+        .iter_mut()
+        .find(|s| s.id == id)
+        .unwrap()
+        .status = SessionStatus::Idle;
+    // Moving from a list row must hydrate and preserve the existing transcript.
+    assert!(
+        !backend
+            .task_state
+            .lock()
+            .sessions
+            .iter()
+            .find(|s| s.id == id)
+            .unwrap()
+            .detail_loaded
+    );
+    let ResponsePayload::TaskStateSaved { sessions } = request(move_request()).unwrap() else {
+        panic!("missing move acknowledgement");
+    };
+    assert_eq!(sessions[0].workspace, workspace);
+    assert_eq!(
+        sessions[0].metadata_revision,
+        original.metadata_revision + 1
+    );
+
+    // Delayed full and list saves can be newer by wall clock and still carry
+    // the checkout from before the move. Neither may revert the confirmed move.
+    for mut stale in [original.clone(), original.list_projection()] {
+        stale.updated_at = crate::model::unix_time() + 60;
+        request(Command::SaveTaskState {
+            projects: Vec::new(),
+            live_session_ids: vec![id],
+            sessions: vec![stale],
+            session_tails: Vec::new(),
+        })
+        .unwrap();
+        let stored = backend.task_store.load_session_detail(id).unwrap().unwrap();
+        assert_eq!(stored.workspace, workspace);
+        assert_eq!(stored.workspace_moved_from, Some(root.join("repo")));
+        assert_eq!(
+            serde_json::to_value(&stored.messages).unwrap(),
+            serde_json::to_value(&original.messages).unwrap()
+        );
+    }
+
+    // Stable-runtime merges preserve transcript ownership while consuming the
+    // one-shot move notice after the first prompt in the new workspace.
+    let mut stored = backend.task_store.load_session_detail(id).unwrap().unwrap();
+    let mut consumed = stored.clone();
+    assert!(consumed.take_workspace_move_notice().is_some());
+    merge_stale_session_metadata(&mut stored, consumed);
+    assert!(stored.workspace_moved_from.is_none());
+    assert_eq!(stored.workspace, workspace);
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn task_metadata_edits_survive_stale_saves_and_reload() {
     use waku_protocol::task_metadata::{TaskMetadataEdit, TaskMetadataUpdate};
     let root = std::env::temp_dir().join(format!("task-metadata-{}", Uuid::new_v4()));
@@ -22595,3 +23936,297 @@ fn task_metadata_incognito_adoption_keeps_the_client_high_water() {
     );
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn idle_shutdown_public_startup_fence_and_failed_launch_release() {
+    let root = std::env::temp_dir().join(format!("idle-startup-{}", Uuid::new_v4()));
+    let (mut backend, session) = surface_test_backend(&root);
+    runtime_generation_configure_launch(&mut backend, &root);
+    let (entered, wait_entered) = crossbeam_channel::bounded(1);
+    let (release, wait_release) = crossbeam_channel::bounded(1);
+    backend.runtime_test_start = Some(Arc::new(move |_, _, _| {
+        entered.send(()).unwrap();
+        wait_release.recv().unwrap();
+        anyhow::bail!("controlled startup failure")
+    }));
+    let backend = Arc::new(backend);
+    let owner = Uuid::new_v4();
+    let starter = {
+        let backend = backend.clone();
+        std::thread::spawn(move || {
+            runtime_generation_start(
+                &backend,
+                session,
+                Uuid::new_v4(),
+                &EventSink::detached(),
+                false,
+            )
+        })
+    };
+    wait_entered
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    assert!(
+        backend.sessions.lock().is_empty(),
+        "startup is not yet published"
+    );
+    assert!(
+        backend
+            .prepare_idle_shutdown(owner, Uuid::new_v4())
+            .is_none()
+    );
+    release.send(()).unwrap();
+    assert!(starter.join().unwrap().is_err());
+    // Construction also stages packaged resources on an owned worker. A
+    // failed provider start must release its own permit, while that worker
+    // remains legitimately busy until its copy finishes.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let fence = loop {
+        if let Some(fence) = backend.prepare_idle_shutdown(owner, Uuid::new_v4()) {
+            break fence;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "failed startup did not release admission; sessions={:?}",
+            backend
+                .task_state
+                .lock()
+                .sessions
+                .iter()
+                .map(|s| (s.status, s.active_turn_id(), s.queued_messages.len()))
+                .collect::<Vec<_>>()
+        );
+        std::thread::yield_now();
+    };
+    assert!(
+        backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: session,
+                    runtime_id: Uuid::nil(),
+                    command: Command::GetSettings,
+                },
+                EventSink::detached(),
+                None
+            )
+            .is_err()
+    );
+    backend.disconnect_idle_shutdown(owner);
+    assert!(!backend.commit_idle_shutdown(owner, fence, &|| panic!("stale fence")));
+    assert!(
+        backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: session,
+                    runtime_id: Uuid::nil(),
+                    command: Command::GetSettings,
+                },
+                EventSink::detached(),
+                None
+            )
+            .is_ok()
+    );
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn idle_shutdown_public_close_waits_for_detached_forwarder() {
+    let root = std::env::temp_dir().join(format!("idle-closing-{}", Uuid::new_v4()));
+    let (mut backend, session) = surface_test_backend(&root);
+    runtime_generation_configure_launch(&mut backend, &root);
+    backend.runtime_test_start = Some(Arc::new(|_, _, _| {
+        Ok(DriverHandle::from_control(Arc::new(
+            CaptureDriver::default(),
+        )))
+    }));
+    let (release, wait_release) = crossbeam_channel::bounded(1);
+    let (done, wait_done) = crossbeam_channel::bounded(1);
+    backend.runtime_test_forward = Some(Arc::new(move |name, forward| {
+        let wait_release = wait_release.clone();
+        let done = done.clone();
+        std::thread::Builder::new().name(name).spawn(move || {
+            wait_release.recv().unwrap();
+            forward();
+            done.send(()).unwrap();
+        })
+    }));
+    let runtime = runtime_generation_start(
+        &backend,
+        session,
+        Uuid::new_v4(),
+        &EventSink::detached(),
+        false,
+    )
+    .unwrap();
+    backend
+        .handle(
+            Request {
+                request_id: Uuid::new_v4(),
+                session_id: session,
+                runtime_id: runtime,
+                command: Command::CloseSession,
+            },
+            EventSink::detached(),
+            None,
+        )
+        .unwrap();
+    assert!(backend.sessions.lock().is_empty());
+    let owner = Uuid::new_v4();
+    assert!(
+        backend
+            .prepare_idle_shutdown(owner, Uuid::new_v4())
+            .is_none()
+    );
+    release.send(()).unwrap();
+    wait_done
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let fence = loop {
+        if let Some(fence) = backend.prepare_idle_shutdown(owner, Uuid::new_v4()) {
+            break fence;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "closing runtime retained admission"
+        );
+        std::thread::yield_now();
+    };
+    backend.release_idle_shutdown(owner, fence);
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn boss_database_survives_daemon_restart_and_ignores_legacy_backups() {
+    let root = std::env::temp_dir().join(format!("boss-database-daemon-{}", Uuid::new_v4()));
+    let settings = DaemonSettingsStore::open(root.join("settings.json")).unwrap();
+    let mut document = settings.get();
+    document.boss_experiment_enabled = true;
+    settings.replace(document).unwrap();
+    let (backend, session) = surface_test_backend(&root);
+    backend.boss.set_session_id(session).unwrap();
+    assert!(!root.join("boss/boss.json").exists());
+    drop(backend);
+    std::fs::write(root.join("boss/boss.json"), "stale backup").unwrap();
+    let backend = WakuBackend::new(
+        DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+        StateStore::daemon(root.join("app.db")),
+    )
+    .unwrap();
+    assert!(backend.boss.is_active());
+    assert_eq!(backend.boss.document().session_id, Some(session));
+    backend.boss.deactivate();
+    backend.boss.activate().unwrap();
+    assert_eq!(backend.boss.document().session_id, Some(session));
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn task_views_ordinary_runtime_records_output_without_a_desktop_observer() {
+    let root = std::env::temp_dir().join(format!("task-unobserved-{}", Uuid::new_v4()));
+    let (backend, session_id) = surface_test_backend(&root);
+    let runtime_id = Uuid::new_v4();
+    let driver = DriverHandle::from_control(Arc::new(IdleDriver));
+    backend.sessions.lock().insert(
+        session_id,
+        RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
+            plan_gate: None,
+            runtime_id,
+            driver: driver.clone(),
+            stable: None,
+            last_active: std::time::Instant::now(),
+            resumable: true,
+            computer_use_available: false,
+            provider: ProviderKind::Claude,
+            cwd: root.clone(),
+        },
+    );
+    let turn_id = Uuid::new_v4();
+    let (tx, rx) = crossbeam_channel::unbounded();
+    for event in [
+        DriverEvent::PromptSubmitted {
+            message: "hidden prompt".into(),
+            turn_id,
+            message_id: Uuid::new_v4(),
+            sent_by_task: None,
+            hidden: false,
+            report_trigger: None,
+            reference_context: None,
+        },
+        DriverEvent::TurnStarted,
+        DriverEvent::ReasoningDelta("hidden reasoning".into()),
+        DriverEvent::TextDelta("hidden ".into()),
+        DriverEvent::TextDelta("answer".into()),
+        DriverEvent::TurnFinished {
+            success: true,
+            summary: None,
+            summary_i18n: None,
+        },
+    ] {
+        tx.send(event).unwrap();
+    }
+    drop(tx);
+    forward_driver_events(
+        session_id,
+        runtime_id,
+        rx,
+        EventSink::detached().begin_session_runtime(session_id, runtime_id),
+        driver,
+        backend.agent.clone(),
+        backend.task_state.clone(),
+        backend.task_store.clone(),
+        backend.sessions.clone(),
+        backend.runtime_lifecycles.clone(),
+        backend.automations.clone(),
+        backend.boss.clone(),
+        backend.auto_prompts.clone(),
+        backend.repo_maps.clone(),
+        root.clone(),
+    );
+    let mut restored = backend.task_store.load().unwrap();
+    let session = restored
+        .sessions
+        .iter_mut()
+        .find(|s| s.id == session_id)
+        .unwrap();
+    backend.task_store.hydrate(session).unwrap();
+    assert!(
+        session
+            .messages
+            .iter()
+            .any(|m| m.content == "hidden answer")
+    );
+    assert!(
+        session
+            .transcript_blocks
+            .iter()
+            .flat_map(|b| &b.activities)
+            .any(|a| a
+                .reasoning
+                .as_ref()
+                .is_some_and(|r| r.content == "hidden reasoning"))
+    );
+    assert_eq!(session.turns.last().unwrap().id, turn_id);
+    assert_eq!(session.turns.last().unwrap().status, TurnStatus::Completed);
+    assert!(session.messages.iter().all(|m| !m.streaming));
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[path = "tests/task_views.rs"]
+mod task_views;
+
+#[path = "tests/scratch.rs"]
+mod scratch;
+
+#[path = "tests/configured_prompts.rs"]
+mod configured_prompts;
+
+mod stable_configuration_stop;

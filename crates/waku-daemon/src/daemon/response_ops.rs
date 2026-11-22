@@ -1,6 +1,160 @@
+use anyhow::ensure;
+
 use super::*;
 
 impl WakuBackend {
+    pub(super) fn switch_session_provider(
+        &self,
+        session_id: Uuid,
+        request: waku_protocol::ProviderSwitchRequest,
+        events: &EventSink,
+    ) -> anyhow::Result<AgentSession> {
+        let lifecycle = self.runtime_lifecycles.session(session_id);
+        let _owner = lifecycle.lock();
+        ensure!(
+            self.boss.employee_including_retired(session_id).is_none(),
+            "employee provider changes are handled by the Boss"
+        );
+        let mut state = self.task_state.lock();
+        let index = state
+            .sessions
+            .iter()
+            .position(|session| session.id == session_id)
+            .context("the task is unavailable")?;
+        let existing = &mut state.sessions[index];
+        self.task_store.hydrate(existing)?;
+        ensure!(!existing.is_busy(), "the task is busy");
+        ensure!(existing.archived_at.is_none(), "the task is archived");
+        ensure!(
+            existing.provider == request.source
+                && existing.history_generation == request.history_generation
+                && existing.transcript_boundary() == request.boundary,
+            "the task changed while the provider handoff was prepared"
+        );
+        let target = request.configuration.provider;
+        ensure!(
+            target != request.source,
+            "the task already uses this provider"
+        );
+        let mut switched = existing.clone();
+        let suspended = &mut switched.suspended_provider_sessions;
+        let target_entry = suspended.iter().find(|entry| entry.provider == target);
+        if let Some(cursor) = &request.resume_cursor {
+            ensure!(
+                cursor.provider() == target
+                    && target_entry.is_some_and(|entry| &entry.cursor == cursor),
+                "the target provider's resume cursor changed"
+            );
+        }
+        let resume_cursor = request
+            .resume_cursor
+            .filter(|_| target != ProviderKind::Antigravity || switched.antigravity_acp);
+        let restarted = target_entry.is_some() && resume_cursor.is_none();
+        suspended.retain(|entry| entry.provider != target);
+        if let Some(cursor) = switched.provider_cursor.take()
+            && cursor.provider() != target
+            && (cursor.provider() != ProviderKind::Antigravity || switched.antigravity_acp)
+        {
+            let provider = cursor.provider();
+            suspended.retain(|entry| entry.provider != provider);
+            suspended.push(crate::model::SuspendedProviderSession {
+                provider,
+                cursor,
+                boundary: request.boundary,
+            });
+        }
+        switched.preserve_title_for_provider_switch();
+        waku_protocol::task_metadata::TaskMetadataEdit::Configuration {
+            configuration: request.configuration,
+            auto_route: false,
+            route_decision: None,
+        }
+        .apply(&mut switched);
+        switched.antigravity_acp |= target == ProviderKind::Antigravity;
+        switched.provider_cursor = resume_cursor;
+        switched.provider_session_id = None;
+        switched.pending_model_switch = None;
+        switched.agent_preset = None;
+        switched.available_commands.clear();
+        switched.context_usage = None;
+        switched.runtime_event_cursor = None;
+        switched.pending_provider_context = Some(request.handoff);
+        for message in &mut switched.queued_messages {
+            if !message.is_agent_owned() {
+                message.configuration = None;
+            }
+        }
+        let from = request.source.display_name();
+        let to = target.display_name();
+        switched.push_notice_message(
+            crate::model::MessageRole::System,
+            if restarted {
+                tr!(
+                    "transcript.provider_switched_restarted",
+                    from = from,
+                    to = to
+                )
+            } else {
+                tr!("transcript.provider_switched", from = from, to = to)
+            },
+            crate::model::TranscriptNotice::ProviderSwitched {
+                from: request.source,
+                to: target,
+                restarted,
+            },
+        );
+        switched.updated_at = switched.updated_at.max(crate::model::unix_time());
+        switched.metadata_revision = switched
+            .metadata_revision
+            .checked_add(1)
+            .filter(|revision| *revision <= i64::MAX as u64)
+            .context("task metadata revision exhausted")?;
+
+        // A surviving provider host needs a confirmed stop before it can
+        // admit a different provider under the same task.
+        if self.task_store.stable_link(session_id)?.is_some() {
+            let driver = self
+                .sessions
+                .lock()
+                .get(&session_id)
+                .filter(|entry| entry.stable.is_some())
+                .map(|entry| entry.driver.clone())
+                .context("the surviving provider runtime must be attached before switching")?;
+            driver.delete_provider_session();
+            ensure!(
+                self.task_store.stable_link(session_id)?.is_none(),
+                "the provider runtime did not confirm it stopped"
+            );
+        }
+
+        let previous = std::mem::replace(existing, switched);
+        state.mark_session_dirty(session_id);
+        if let Err(error) = self.task_store.save(&mut state) {
+            state.sessions[index] = previous;
+            return Err(error).context("could not save the provider switch");
+        }
+        let switched = &state.sessions[index];
+        let mut reply = switched.list_projection();
+        reply.provider_cursor.clone_from(&switched.provider_cursor);
+        reply
+            .suspended_provider_sessions
+            .clone_from(&switched.suspended_provider_sessions);
+        reply
+            .pending_provider_context
+            .clone_from(&switched.pending_provider_context);
+        reply.messages.extend(switched.messages.last().cloned());
+        drop(state);
+
+        let removed = self.remove_runtime(session_id, None, false);
+        if let Some(entry) = &removed {
+            let sink = events.for_session(session_id, entry.runtime_id);
+            sink.notify_runtime_ended();
+            sink.end_session_runtime();
+        }
+        drop_detached(removed);
+        Ok(reply)
+    }
+
     /// Fork a response using only daemon-host state.
     ///
     /// A browser must never reconstruct or persist this operation itself:
@@ -98,6 +252,8 @@ impl WakuBackend {
         &self,
         session_id: Uuid,
         turn_count: usize,
+        runtime_id: Uuid,
+        cancellation: &crate::server::RuntimeCancellation,
     ) -> anyhow::Result<(AgentSession, Option<String>)> {
         let lifecycle = self.runtime_lifecycles.session(session_id);
         let _owner = lifecycle.lock();
@@ -121,6 +277,33 @@ impl WakuBackend {
             (source, cwd)
         };
         validate_message_rewind(&source, turn_count)?;
+        let next_history_generation = source
+            .history_generation
+            .checked_add(1)
+            .filter(|generation| *generation <= i64::MAX as u64)
+            .ok_or_else(|| anyhow!("task history generation exhausted"))?;
+
+        let cancellation = if source.provider == ProviderKind::Codex {
+            let sessions = self.sessions.lock();
+            let owner = match sessions.get(&session_id) {
+                Some(entry) => {
+                    anyhow::ensure!(
+                        runtime_id.is_nil() || entry.runtime_id == runtime_id,
+                        "rewind belongs to a stale runtime"
+                    );
+                    entry.stable.is_none().then_some(entry.runtime_id)
+                }
+                // The lifecycle lock excludes a replacement. Stop can target
+                // this cold request's identity without controlling a resident.
+                None => Some(runtime_id),
+            };
+            owner.map(|runtime_id| {
+                cancellation.bind_runtime(runtime_id, || {});
+                cancellation
+            })
+        } else {
+            None
+        };
 
         // Resolve the executable before touching the worktree. Even native
         // transcript operations are immediately followed by a replacement
@@ -140,6 +323,14 @@ impl WakuBackend {
             .checked_sub(1)
             .and_then(|index| source.turns.get(index))
             .and_then(|turn| turn.provider_resume_at.clone());
+
+        let capture_lane = self.checkpoint_capture_lane(&cwd)?;
+        let _checkpoint_mutation = capture_lane.preempt();
+        if let Some(cancellation) = cancellation.filter(|cancellation| cancellation.is_cancelled())
+        {
+            cancellation.settle_operation();
+            bail!("rewind stopped before changing worktree checkpoints");
+        }
 
         let turn_start_ref = crate::checkpoint::turn_start_ref(session_id, turn_count);
         let retained_ref = crate::checkpoint::checkpoint_ref(session_id, retained_turn_count);
@@ -164,22 +355,42 @@ impl WakuBackend {
             ));
         }
 
-        let provider_rewind = self.rewind_provider_response(
-            &source,
-            &cwd,
-            &binary,
-            retained_turn_count,
-            rollback_turns,
-            provider_turn_count,
-            provider_resume_at,
-        );
+        let provider_rewind = self
+            .rewind_provider_response(
+                &source,
+                &cwd,
+                &binary,
+                retained_turn_count,
+                rollback_turns,
+                provider_turn_count,
+                provider_resume_at,
+                cancellation,
+            )
+            .and_then(|result| {
+                anyhow::ensure!(
+                    !cancellation.is_some_and(|cancellation| cancellation.is_cancelled()),
+                    "rewind stopped before selecting new provider history"
+                );
+                Ok(result)
+            });
         let (provider_cursor, message_ids, reset_native_session) = match provider_rewind {
             Ok(result) => result,
             Err(error) => {
+                if let Some(cancellation) =
+                    cancellation.filter(|cancellation| cancellation.is_cancelled())
+                {
+                    // This path only uses a source-preserving native operation.
+                    // Settle Stop after the owned peer and original files settle.
+                    crate::checkpoint::restore_ref(&cwd, &safety_ref).with_context(||
+                        format!("stopped rewind could not restore the original worktree; safety snapshot: {safety_ref}"))?;
+                    let _ = crate::checkpoint::delete_ref(&cwd, &safety_ref);
+                    cancellation.settle_operation();
+                    return Err(error.context("rewind stopped; the original worktree was restored"));
+                }
                 return Err(restore_rewind_safety(
                     &cwd,
                     &safety_ref,
-                    "the provider rejected the rewind",
+                    "could not complete the provider rewind",
                     error,
                 ));
             }
@@ -204,6 +415,7 @@ impl WakuBackend {
         drop_detached(removed);
 
         let mut rewound = source.clone();
+        rewound.history_generation = next_history_generation;
         if !message_ids.is_empty() {
             for turn in rewound.turns.iter_mut().take(retained_turn_count) {
                 if let Some(remapped) = turn
@@ -218,11 +430,20 @@ impl WakuBackend {
         }
         if reset_native_session {
             rewound.provider_cursor = None;
+            rewound.provider_session_id = None;
         } else if let Some(cursor) = provider_cursor {
             rewound.provider_cursor = Some(cursor);
         }
         rewound.truncate_after_turn(retained_turn_count);
         rewound.status = SessionStatus::Idle;
+        if retained_turn_count == 0 {
+            // A completed user action is a durable task, even when no provider
+            // turns or cursor remain. Keep a real receipt rather than a draft.
+            rewound.push_message(
+                crate::model::MessageRole::System,
+                tr!("transcript.rewind_completed"),
+            );
+        }
 
         let pinned = self.sessions.lock().keys().copied().collect();
         let mut state = self.task_state.lock();
@@ -237,6 +458,16 @@ impl WakuBackend {
             .save(&mut state)
             .context("could not save the rewound task")?;
         trim_resident_transcripts(&mut state, &pinned);
+        drop(state);
+        if let Some(cancellation) = cancellation {
+            cancellation.settle_operation();
+            if cancellation.is_cancelled() {
+                self.notify_task_state();
+                bail!(
+                    "rewind completed before Stop; task history and files reflect the rewind; its follow-up prompt was withheld"
+                );
+            }
+        }
         Ok((rewound, cleanup_warning))
     }
 
@@ -366,12 +597,12 @@ impl WakuBackend {
         cwd: &Path,
         turns_to_remove: usize,
     ) -> anyhow::Result<ProviderResumeCursor> {
-        if let Some(driver) = self
+        let driver = self
             .sessions
             .lock()
             .get(&source.id)
-            .map(|entry| entry.driver.clone())
-        {
+            .map(|entry| entry.driver.clone());
+        if let Some(driver) = driver {
             return driver.fork(turns_to_remove);
         }
 
@@ -468,6 +699,7 @@ impl WakuBackend {
         rollback_turns: usize,
         provider_turn_count: usize,
         provider_resume_at: Option<String>,
+        cancellation: Option<&crate::server::RuntimeCancellation>,
     ) -> anyhow::Result<(Option<ProviderResumeCursor>, HashMap<String, String>, bool)> {
         if rollback_turns == 0 {
             return Ok((None, HashMap::new(), false));
@@ -475,7 +707,8 @@ impl WakuBackend {
         let reset_native_session = retained_turn_count == 0
             && matches!(
                 source.provider,
-                ProviderKind::Claude
+                ProviderKind::Codex
+                    | ProviderKind::Claude
                     | ProviderKind::Copilot
                     | ProviderKind::Cursor
                     | ProviderKind::Grok
@@ -485,6 +718,26 @@ impl WakuBackend {
         }
 
         match source.provider {
+            ProviderKind::Codex => {
+                // Keep the source conversation intact until task persistence
+                // selects the fork. A lost reply then leaves a recoverable
+                // original instead of an unknown in-place history mutation.
+                let Some(ProviderResumeCursor::Codex { thread_id }) =
+                    source.provider_cursor.as_ref()
+                else {
+                    bail!("Codex's native thread is unavailable");
+                };
+                let stopped =
+                    || cancellation.is_some_and(|cancellation| cancellation.is_cancelled());
+                let cursor = crate::codex_session::fork_session_without_recent_turns(
+                    binary,
+                    cwd,
+                    thread_id,
+                    rollback_turns,
+                    cancellation.map(|_| &stopped as &dyn Fn() -> bool),
+                )?;
+                Ok((Some(cursor), HashMap::new(), false))
+            }
             ProviderKind::Claude => {
                 let Some(ProviderResumeCursor::Claude { session_id, .. }) =
                     source.provider_cursor.as_ref()
@@ -500,12 +753,12 @@ impl WakuBackend {
                 Ok((Some(fork.cursor), fork.message_ids, false))
             }
             ProviderKind::OpenCode => {
-                let cursor = if let Some(driver) = self
+                let driver = self
                     .sessions
                     .lock()
                     .get(&source.id)
-                    .map(|entry| entry.driver.clone())
-                {
+                    .map(|entry| entry.driver.clone());
+                let cursor = if let Some(driver) = driver {
                     driver
                         .rollback(rollback_turns)?
                         .ok_or_else(|| anyhow!("OpenCode returned no rewound-session cursor"))?
@@ -582,12 +835,12 @@ impl WakuBackend {
                 Ok((Some(cursor), HashMap::new(), false))
             }
             ProviderKind::Muse => {
-                let cursor = if let Some(driver) = self
+                let driver = self
                     .sessions
                     .lock()
                     .get(&source.id)
-                    .map(|entry| entry.driver.clone())
-                {
+                    .map(|entry| entry.driver.clone());
+                let cursor = if let Some(driver) = driver {
                     driver
                         .rollback(rollback_turns)?
                         .ok_or_else(|| anyhow!("Muse Code returned no rewound-session cursor"))?
@@ -606,10 +859,7 @@ impl WakuBackend {
                 };
                 Ok((Some(cursor), HashMap::new(), false))
             }
-            ProviderKind::Codex
-            | ProviderKind::DeepSeek
-            | ProviderKind::OhMyPi
-            | ProviderKind::Pi => Ok((
+            ProviderKind::DeepSeek | ProviderKind::OhMyPi | ProviderKind::Pi => Ok((
                 self.rollback_response_with_driver(source, cwd, binary, rollback_turns)?,
                 HashMap::new(),
                 false,
@@ -637,12 +887,12 @@ impl WakuBackend {
         binary: &Path,
         rollback_turns: usize,
     ) -> anyhow::Result<Option<ProviderResumeCursor>> {
-        if let Some(driver) = self
+        let driver = self
             .sessions
             .lock()
             .get(&source.id)
-            .map(|entry| entry.driver.clone())
-        {
+            .map(|entry| entry.driver.clone());
+        if let Some(driver) = driver {
             return driver.rollback(rollback_turns);
         }
 

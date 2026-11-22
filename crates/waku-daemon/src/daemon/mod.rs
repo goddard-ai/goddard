@@ -21,8 +21,8 @@ use crate::model::{
     AgentAskOutcome, AgentModelOption, AgentProjectMapResult, AgentSession, AgentSessionSearchHit,
     BackgroundWorkEvent, Checkpoint, CheckpointStatus, ConfigActivation, DriverEvent,
     PermissionOption, Project, ProjectKind, ProjectMapIntent, ProjectMapRanking, ProviderKind,
-    ProviderModelOption, ProviderResumeCursor, ProviderSessionCatalogStatus, SessionStatus,
-    SessionWorkspace, TurnStatus, UserInputQuestion, detail_prefix_signature,
+    ProviderModelOption, ProviderResumeCursor, ProviderSessionCatalogStatus, RuntimeMode,
+    SessionStatus, SessionWorkspace, TurnStatus, UserInputQuestion, detail_prefix_signature,
 };
 use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
@@ -380,6 +380,8 @@ struct TerminalEntry {
 /// reads both stamps. `provider`/`cwd` exist for the stats sampler, which
 /// claims a descendant subtree by the directory its members run in.
 struct RuntimeEntry {
+    /// Permission posture actually installed in this provider runtime.
+    mode: RuntimeMode,
     plan_gate: Option<Arc<plan_delivery::PlanGate>>,
     runtime_id: Uuid,
     driver: DriverHandle,
@@ -391,6 +393,8 @@ struct RuntimeEntry {
     computer_use_available: bool,
     provider: ProviderKind,
     cwd: PathBuf,
+    // Dropped after the driver, including on detached teardown.
+    _admission: Option<crate::server::idle_shutdown::WorkPermit>,
 }
 
 /// The provider/model selection an `agent create` request carried. Every
@@ -486,12 +490,17 @@ type RotationObserver = Arc<dyn Fn(waku_boss::rotation_oracle::RotationObservati
 
 #[derive(Default)]
 struct RuntimeLifecycles {
+    /// One daemon-wide cadence, so concurrent hidden streams share a write.
+    stream_checkpoint: Mutex<Option<std::time::Instant>>,
+    admission: Arc<crate::server::idle_shutdown::IdleShutdownGate>,
     locks: Mutex<HashMap<Uuid, Arc<ReentrantMutex<std::cell::Cell<Option<Uuid>>>>>>,
     shutting_down: std::sync::atomic::AtomicBool,
     #[cfg(test)]
     event_received: Mutex<Option<Arc<dyn Fn(Uuid, Uuid) + Send + Sync>>>,
     #[cfg(test)]
     event_applying: Mutex<Option<Arc<dyn Fn(Uuid, Uuid) + Send + Sync>>>,
+    #[cfg(test)]
+    task_view_detail_read: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     #[cfg(test)]
     rotation_observer: Mutex<Option<RotationObserver>>,
 }
@@ -503,6 +512,7 @@ impl RuntimeLifecycles {
 }
 
 pub struct WakuBackend {
+    pub(crate) idle_shutdown: Arc<crate::server::idle_shutdown::IdleShutdownGate>,
     sessions: Arc<Mutex<HashMap<Uuid, RuntimeEntry>>>,
     managed_goal_claims: Mutex<HashMap<(Uuid, Uuid), HashSet<Uuid>>>,
     repo_maps: Arc<(Mutex<RepoMaps>, Condvar)>,
@@ -525,7 +535,10 @@ pub struct WakuBackend {
     /// The settings document only ever carries write-only slots and the
     /// `credential_configured` flags this store feeds.
     inference_secrets: crate::integrations::SecretStore,
+    sidebar_intent_order: parking_lot::ReentrantMutex<()>,
+    sidebar_intents: Mutex<sidebar_intents::Receipts>,
     task_store: Arc<StateStore>,
+    provider_timeline: driver::timeline::Timeline,
     task_state: Arc<Mutex<PersistedState>>,
     /// The hub's `task_state_changed` broadcast once `serve` installs it —
     /// daemon-side catalog mutations (boss project knobs) replay it so
@@ -540,7 +553,7 @@ pub struct WakuBackend {
     /// account, so a second call while a redemption is in flight is a
     /// double-click, not a second spend.
     codex_reset_credit_lock: Mutex<()>,
-    checkpoint_capture_locks: Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>,
+    checkpoint_capture_locks: Mutex<HashMap<PathBuf, Arc<lifecycle::CheckpointCaptureLane>>>,
     checkout_history: checkout_history::CheckoutHistoryCache,
     /// Scoped agent credentials, per-session prompt queues, and the live
     /// turn bookkeeping the runtime event forwarder maintains. `pub(crate)`
@@ -710,6 +723,7 @@ mod catalog_ops;
 mod chain_exec;
 mod chain_handoff;
 mod checkout_history;
+mod counsel;
 mod driver_commands;
 mod events;
 mod idle;
@@ -725,9 +739,12 @@ mod response;
 mod response_ops;
 mod rpc;
 mod runtime;
+mod scratch;
+mod sidebar_intents;
 mod summon;
 mod task_creation;
 mod transfer;
+mod workspace_recovery;
 
 use driver_commands::*;
 use events::*;

@@ -33,3 +33,23 @@
 - For provider-native content such as citations, reasoning, and tool events,
   verify the real provider payload and preserve its ordering. Never expose
   private provider control markers in the transcript.
+
+## Screen headers
+
+- Resolve the main column once through `MainScreen` in `src/app/render.rs`.
+  Use that same owner for body and header rendering. Add new screens to the
+  enum and its exhaustive matches; never infer a page's identity from the
+  remembered selected task.
+- Every screen owns its title, badges, and actions. Inbox, Drafts, Automations,
+  Projects, and Brain pass their header content to `render_header_frame` inside
+  the page's keyboard/action context. Do not stack a task header above them.
+- `render_header_frame` owns window controls, drag clearance, and the shared
+  sidebar toggle, unread bell, and history arrows. With the sidebar open, its
+  title bar owns those navigation buttons; with it collapsed, the frame does.
+  Unavailable arrows stay visible and disabled. Settings uses its dedicated
+  layout without the shared navigation buttons.
+- Task details belong only to task/chat surfaces (including their VoicePad).
+  Standalone terminals and deliverable previews use their own identity.
+- When adding a screen, check it after selecting a titled task, with the
+  sidebar open and collapsed. Confirm a single header, the screen's identity
+  and actions, accessible navigation, and working page shortcuts.

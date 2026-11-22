@@ -5,11 +5,16 @@ use waku_client::persistence::QaSessionRecord;
 use waku_client::workspace::{QaConfig, WorkspaceOperation, WorkspaceResult};
 
 pub(super) struct QaSetup {
+    pub(super) provider: ProviderKind,
+    pub(super) model: Option<String>,
     project_id: Uuid,
     start_after_save: bool,
     dev: Entity<TextInput>,
     install: Entity<TextInput>,
     branch: Entity<TextInput>,
+    primary_checkout: bool,
+    dependencies_ready: bool,
+    server_url: Entity<TextInput>,
     pending: bool,
     error: Option<String>,
 }
@@ -82,13 +87,19 @@ impl Waku {
         let dev = field(tr!("qa.dev_command"), window, cx);
         let install = field(tr!("qa.install_command"), window, cx);
         let branch = field(tr!("qa.branch"), window, cx);
+        let server_url = field("Existing server URL (optional)".into(), window, cx);
         window.focus(&dev.read(cx).focus_handle(cx), cx);
         self.qa_setup = Some(QaSetup {
             project_id,
+            provider: self.state.last_provider,
+            model: self.state.last_model.clone(),
             start_after_save: !edit,
             dev,
             install,
             branch,
+            primary_checkout: false,
+            dependencies_ready: false,
+            server_url,
             pending: true,
             error: None,
         });
@@ -122,6 +133,15 @@ impl Waku {
                 setup.pending = false;
                 match result {
                     Ok(config) => {
+                        setup.primary_checkout = config.primary_checkout;
+                        setup.dependencies_ready = config.dependencies_ready;
+                        setup
+                            .server_url
+                            .update(cx, |input, cx| input.set_content(config.server_url, cx));
+                        if let Some(provider) = config.provider {
+                            setup.provider = provider;
+                            setup.model = config.model;
+                        }
                         setup
                             .dev
                             .update(cx, |input, cx| input.set_content(config.dev_command, cx));
@@ -148,13 +168,30 @@ impl Waku {
         let project = setup.project_id;
         let start = setup.start_after_save;
         let config = QaConfig {
+            primary_checkout: setup.primary_checkout,
+            dependencies_ready: setup.dependencies_ready,
+            server_url: setup.server_url.read(cx).content().trim().to_owned(),
+            provider: Some(setup.provider),
+            model: setup.model.clone(),
             dev_command: setup.dev.read(cx).content().trim().to_owned(),
             install_command: setup.install.read(cx).content().trim().to_owned(),
             branch: setup.branch.read(cx).content().trim().to_owned(),
         };
-        if config.dev_command.is_empty() || config.branch.is_empty() {
+        if (config.dev_command.is_empty() && config.server_url.is_empty())
+            || config.branch.is_empty()
+        {
             if let Some(setup) = &mut self.qa_setup {
                 setup.error = Some(tr!("qa.required"));
+            }
+            cx.notify();
+            return;
+        }
+        if !config.server_url.is_empty()
+            && !(config.server_url.starts_with("http://")
+                || config.server_url.starts_with("https://"))
+        {
+            if let Some(setup) = &mut self.qa_setup {
+                setup.error = Some("Use an http:// or https:// server URL.".into());
             }
             cx.notify();
             return;
@@ -169,7 +206,11 @@ impl Waku {
         }
     }
 
-    fn prepare_qa(&mut self, project_id: Uuid, config: QaConfig, cx: &mut Context<Self>) {
+    fn prepare_qa(&mut self, project_id: Uuid, mut config: QaConfig, cx: &mut Context<Self>) {
+        if config.provider.is_none() {
+            config.provider = Some(self.state.last_provider);
+            config.model.clone_from(&self.state.last_model);
+        }
         let Some(project) = self.state.projects.iter().find(|p| p.id == project_id) else {
             return;
         };
@@ -183,6 +224,7 @@ impl Waku {
         }
         let daemon = self.daemon.clone();
         let branch = config.branch.clone();
+        let primary_checkout = config.primary_checkout;
         self.show_toast(tr!("qa.preparing"));
         cx.spawn(async move |this, cx| {
             let result = cx
@@ -190,8 +232,11 @@ impl Waku {
                 .spawn(async move {
                     let connection = daemon.independent_connection()?;
                     let checkout = match waku_client::WorkspaceClient::new(daemon.client())
-                        .request(WorkspaceOperation::QaStart { cwd, branch })?
-                    {
+                        .request(WorkspaceOperation::QaStart {
+                            cwd,
+                            branch,
+                            primary_checkout,
+                        })? {
                         WorkspaceResult::QaStarted { checkout } => checkout,
                         _ => anyhow::bail!("unexpected QA checkout response"),
                     };
@@ -203,14 +248,21 @@ impl Waku {
                 match result {
                     Ok((checkout, connection)) => {
                         let record = QaSessionRecord {
-                            session_id: Uuid::new_v4(),
+                            session_id: checkout.session_id.unwrap_or_else(Uuid::new_v4),
                             project_id,
                             checkout,
                             config,
                         };
+                        let record = this
+                            .state
+                            .qa_sessions
+                            .get(&record.session_id)
+                            .cloned()
+                            .unwrap_or(record);
                         this.state
                             .qa_sessions
                             .insert(record.session_id, record.clone());
+                        this.state.qa_session_ids.insert(record.session_id);
                         this.save();
                         this.qa_setup = None;
                         this.open_qa_window(record, connection, cx);
@@ -308,9 +360,12 @@ impl Waku {
             .iter()
             .any(|s| s.id == record.session_id);
         if is_new {
-            let mut session = self
-                .state
-                .new_session(record.project_id, self.state.last_provider);
+            let mut session = self.state.new_session(
+                record.project_id,
+                record.config.provider.unwrap_or(self.state.last_provider),
+            );
+            session.model.clone_from(&record.config.model);
+            session.auto_route = false;
             session.id = record.session_id;
             session.title = format!("QA: {}", record.checkout.commit.subject);
             session.environment = SessionEnvironment::Local;
@@ -320,7 +375,7 @@ impl Waku {
                 branch: None,
                 base_branch: Some(record.checkout.base_branch.clone()),
                 adopted_by: None,
-                borrowed: false,
+                borrowed: record.checkout.original_head.is_some(),
             };
             self.daemons
                 .claim_session(session.id, waku_client::DaemonKey::Local);
@@ -330,23 +385,26 @@ impl Waku {
         self.settings_page = None;
         self.selected_terminal = None;
         self.git_panel_visible = false;
+        self.select_session(record.session_id, cx);
         self.right_panel_visible = true;
         self.right_panel_width = 660.0;
-        self.select_session(record.session_id, cx);
         self.right_panel_surfaces = vec![RightPanelSurface::Diff];
         self.right_panel_active_surface = Some(0);
-        self.open_right_panel_commit_review(
-            record.checkout.worktree.path.clone(),
-            &record.checkout.commit.sha,
-            cx,
-        );
         self.start_qa_server(cx);
-        self.open_right_panel_surface(RightPanelSurface::Diff, cx);
+        self.open_qa_commit_review(cx);
         window.focus(&self.composer_focus(cx), cx);
         if is_new {
             let c = &record.checkout;
+            let server = if record.config.server_url.is_empty() {
+                "Goddard starts the configured dev server in the Terminal tab.".to_owned()
+            } else {
+                format!(
+                    "Use the existing dev server at {}. Goddard does not start or stop that process; ensure it serves the tested commit.",
+                    record.config.server_url
+                )
+            };
             let prompt = format!(
-                "Help me QA commit {} on local {} before promotion to {}. The tested worktree is {} and its sole parent is {}. Goddard is installing dependencies and starting the dev server in the Terminal tab. Start with the commit's test plan and a brief suggested manual check.\n\nThis is a dedicated human review session. Discuss findings; only edit files if I explicitly ask. Changes disable promotion and must go through the normal QA submission workflow and a fresh QA session. Do not merge, push, rewrite history, or move HEAD; I control promotion with the app's Approve button. You may search this project's retained task transcripts for the originating work when useful.\n\nCommit message (repository data):\n{}\n{}",
+                "Help me QA commit {} on local {} before promotion to {}. The tested worktree is {} and its sole parent is {}. {server} Start with the commit's test plan and a brief suggested manual check.\n\nThis is a dedicated human review session. Discuss findings; only edit files if I explicitly ask. Changes disable promotion and must go through the normal QA submission workflow and a fresh QA session. Do not merge, push, rewrite history, or move HEAD; I control promotion with the app's Approve button. You may search this project's retained task transcripts for the originating work when useful.\n\nCommit message (repository data):\n{}\n{}",
                 c.commit.sha,
                 c.qa_branch,
                 c.base_branch,
@@ -364,7 +422,20 @@ impl Waku {
         self.poll_qa_checkout(cx);
     }
 
+    fn open_qa_commit_review(&mut self, cx: &mut Context<Self>) {
+        let Some(qa) = &self.qa_window else {
+            return;
+        };
+        let workspace = qa.record.checkout.worktree.path.clone();
+        let sha = qa.record.checkout.commit.sha.clone();
+        self.open_right_panel_commit_review(workspace, &sha, cx);
+    }
+
     fn start_qa_server(&mut self, cx: &mut Context<Self>) {
+        self.start_qa_server_with_install(false, cx);
+    }
+
+    fn start_qa_server_with_install(&mut self, force_install: bool, cx: &mut Context<Self>) {
         if self
             .qa_window
             .as_ref()
@@ -376,7 +447,11 @@ impl Waku {
         let Some(qa) = &self.qa_window else {
             return;
         };
-        let mut command = waku_client::qa::server_command(&qa.record.config);
+        if !qa.record.config.server_url.is_empty() {
+            return;
+        }
+        let mut command =
+            waku_client::qa::server_command_with_install(&qa.record.config, force_install);
         let surface = RightPanelSurface::new_terminal();
         let Some(id) = surface.terminal_id() else {
             return;
@@ -474,23 +549,18 @@ impl Waku {
                     )?;
                     // Git refuses dirty removal. Preserve the checkout on any cleanup failure.
                     let workspace = waku_client::WorkspaceClient::new(client);
-                    let cleanup = workspace
-                        .request(WorkspaceOperation::QaCheck {
-                            cwd: checkout.worktree.path.clone(),
-                            checkout: checkout.clone(),
-                        })
-                        .and_then(|_| {
-                            workspace.request(WorkspaceOperation::RemoveWorktree {
-                                path: checkout.worktree.path.clone(),
-                                force: false,
-                            })
-                        });
-                    Ok::<_, anyhow::Error>(cleanup.err().map(|e| {
-                        format!(
-                            "Checkout kept at {}: {e:#}",
+                    let cleanup = workspace.request(WorkspaceOperation::QaFinish {
+                        cwd: checkout.worktree.path.clone(),
+                        checkout: checkout.clone(),
+                    });
+                    match cleanup {
+                        Ok(_) => Ok(None),
+                        Err(error) if checkout.original_head.is_none() => Ok(Some(format!(
+                            "Checkout kept at {}: {error:#}",
                             checkout.worktree.path.display()
-                        )
-                    }))
+                        ))),
+                        Err(error) => Err(error),
+                    }
                 })
                 .await;
             let completed = result.is_ok();
@@ -539,6 +609,7 @@ impl Waku {
         qa.finishing = true;
         qa.error = None;
         let record = qa.record.clone();
+        let borrowed = record.checkout.original_head.is_some();
         let parent = qa.parent.clone();
         self.stop_qa_server(cx);
         let client = self.daemon.client();
@@ -548,18 +619,12 @@ impl Waku {
                 .spawn(async move {
                     let workspace = waku_client::WorkspaceClient::new(client);
                     let checkout = record.checkout;
-                    // Ending a review never loses corrections: keep a changed
-                    // checkout and its conversation, and allow the next review.
+                    // Keep a borrowed checkout retryable until it is restored.
+                    // Isolated reviews may finish while retaining corrections.
                     workspace
-                        .request(WorkspaceOperation::QaCheck {
+                        .request(WorkspaceOperation::QaFinish {
                             cwd: checkout.worktree.path.clone(),
                             checkout: checkout.clone(),
-                        })
-                        .and_then(|_| {
-                            workspace.request(WorkspaceOperation::RemoveWorktree {
-                                path: checkout.worktree.path.clone(),
-                                force: false,
-                            })
                         })
                         .err()
                         .map(|e| {
@@ -570,17 +635,20 @@ impl Waku {
                         })
                 })
                 .await;
-            let _ = parent.update(cx, |parent, _| {
-                parent.state.qa_sessions.remove(&record.session_id);
-                parent.save();
-            });
+            let completed = retained.is_none() || !borrowed;
+            if completed {
+                let _ = parent.update(cx, |parent, _| {
+                    parent.state.qa_sessions.remove(&record.session_id);
+                    parent.save();
+                });
+            }
             let _ = this.update(cx, |this, cx| {
                 if let Some(qa) = &mut this.qa_window {
                     qa.finishing = false;
-                    qa.completed = true;
+                    qa.completed = completed;
                     qa.check_error = None;
                     qa.error = retained;
-                    qa.status = Some(tr!("qa.discarded"));
+                    qa.status = qa.completed.then(|| tr!("qa.discarded"));
                 }
                 cx.notify();
             });
@@ -590,6 +658,13 @@ impl Waku {
     }
 
     pub(super) fn qa_server_status(&self, cx: &App) -> String {
+        if self
+            .qa_window
+            .as_ref()
+            .is_some_and(|qa| !qa.record.config.server_url.is_empty())
+        {
+            return "Using existing server".into();
+        }
         let terminal = self
             .qa_window
             .as_ref()
@@ -628,6 +703,84 @@ impl Waku {
                 .child(div().w(px(180.0)).text_size(sp(13.0)).child(label))
                 .child(TextField::new(id, input).flex_1())
         };
+        let model_handle = {
+            let weak = cx.entity().downgrade();
+            let search = self.model_picker.search.clone();
+            let search_focus = self.model_picker.search.read(cx).focus_handle(cx);
+            let empty_focus = self.model_picker.empty_focus.clone();
+            self.menu_handle_with("qa-model-picker", cx, move |open, window, cx| {
+                let mut empty = false;
+                let _ = weak.update(cx, |this, cx| {
+                    if open {
+                        this.model_picker_target = model_picker::ModelPickerTarget::QaSetup;
+                        empty = this.model_picker_has_no_providers();
+                        for kind in ProviderKind::ALL {
+                            if model_picker::picker_lists_provider(
+                                Self::probes_on(&this.probes, waku_client::DaemonKey::Local),
+                                &this.state.disabled_providers,
+                                None,
+                                kind,
+                            ) {
+                                this.refresh_provider_model_discovery(kind);
+                            }
+                        }
+                        this.model_picker.highlight = None;
+                        search.update(cx, |search, cx| search.clear(cx));
+                        this.reveal_selected_picker_model(cx);
+                    } else {
+                        this.model_picker_target = model_picker::ModelPickerTarget::Composer;
+                        // Same rule as the composer picker: parked
+                        // unstars hold their slot only while open.
+                        this.pinned_unfavorites.clear();
+                        if let Some(editor) = this.qa_setup.as_ref() {
+                            let focus = editor.dev.read(cx).focus_handle(cx);
+                            window.focus(&focus, cx);
+                        }
+                    }
+                    cx.notify();
+                });
+                if open {
+                    // Same two-frame wait the composer picker needs: the
+                    // deferred panel's input only joins the dispatch tree
+                    // after its first draw.
+                    let picker_focus = if empty {
+                        empty_focus.clone()
+                    } else {
+                        search_focus.clone()
+                    };
+                    let reveal_weak = weak.clone();
+                    window.on_next_frame(move |window, _| {
+                        window.on_next_frame(move |window, cx| {
+                            window.focus(&picker_focus, cx);
+                            let _ = reveal_weak.update(cx, |this, cx| {
+                                this.reveal_selected_picker_model(cx);
+                            });
+                        });
+                    });
+                }
+            })
+        };
+        let model_label = format!(
+            "{} · {}",
+            setup.provider.display_name(),
+            self.model_display_name(setup.provider, setup.model.as_deref())
+        );
+        let entity = cx.entity();
+        let model_menu = popover(
+            MenuChip::new("qa-model")
+                .label(model_label)
+                .outlined()
+                .background(theme.raised)
+                .selected(model_handle.is_open()),
+            &model_handle,
+            MenuAlign::BelowRight,
+            move |popover, _window, cx| {
+                let weak = entity.downgrade();
+                entity.read_with(cx, move |this, cx| {
+                    this.render_model_picker_panel(&weak, popover, cx)
+                })
+            },
+        );
         Some(
             div()
                 .absolute()
@@ -640,6 +793,8 @@ impl Waku {
                 .child(
                     div()
                         .id("qa-setup")
+                        .max_h_full()
+                        .overflow_y_scroll()
                         .tab_group()
                         .w(px(680.0))
                         .max_w_full()
@@ -678,7 +833,52 @@ impl Waku {
                                     tr!("qa.install_optional"),
                                     setup.install.clone(),
                                 ))
-                                .child(field("qa-branch", tr!("qa.branch"), setup.branch.clone())),
+                                .child(field("qa-branch", tr!("qa.branch"), setup.branch.clone()))
+                                .child(settings::settings_button(
+                                    "qa-checkout",
+                                    if setup.primary_checkout {
+                                        "Testing checkout: Primary local checkout".into()
+                                    } else {
+                                        "Testing checkout: Isolated worktree".into()
+                                    },
+                                    !setup.pending,
+                                    false,
+                                    false,
+                                    theme,
+                                    cx,
+                                    |this, _, cx| {
+                                        if let Some(setup) = &mut this.qa_setup {
+                                            setup.primary_checkout = !setup.primary_checkout;
+                                        }
+                                        cx.notify();
+                                    },
+                                ))
+                                .child(settings::settings_button(
+                                    "qa-dependencies-ready",
+                                    if setup.dependencies_ready {
+                                        "Existing dependencies: Ready".into()
+                                    } else {
+                                        "Existing dependencies: Install on first use".into()
+                                    },
+                                    !setup.pending && setup.primary_checkout,
+                                    false,
+                                    false,
+                                    theme,
+                                    cx,
+                                    |this, _, cx| {
+                                        if let Some(setup) = &mut this.qa_setup {
+                                            setup.dependencies_ready = !setup.dependencies_ready;
+                                        }
+                                        cx.notify();
+                                    },
+                                ))
+                                .child(field(
+                                    "qa-server-url",
+                                    "Existing server URL (optional)".into(),
+                                    setup.server_url.clone(),
+                                ))
+                                .child(div().text_size(sp(12.0)).text_color(theme.text_secondary).child("Primary checkout requires a clean working tree and is reserved until QA ends. Restart any reused server after switching commits to ensure it serves the tested version."))
+                                .child(model_menu),
                         )
                         .children(setup.error.as_ref().map(|error| {
                             div()
@@ -733,6 +933,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.sync_browser_webviews(cx);
+        self.schedule_time_label_wake(cx);
         let theme = Theme::current(cx);
         let qa = self.qa_window.as_ref().expect("QA window renderer");
         let title = qa.record.checkout.commit.subject.clone();
@@ -790,9 +991,25 @@ impl Waku {
                         div()
                             .text_size(sp(12.0))
                             .text_color(theme.text_secondary)
-                            .child(detail),
+                            .child(detail)
+                            .children((!qa.record.config.server_url.is_empty()).then(|| {
+                                div().child(format!(
+                                    "Using running server: {}",
+                                    qa.record.config.server_url
+                                ))
+                            })),
                     ),
             )
+            .child(settings::settings_button(
+                "qa-show-diff",
+                tr!("diff.source_commit"),
+                true,
+                false,
+                false,
+                theme,
+                cx,
+                |this, _, cx| this.open_qa_commit_review(cx),
+            ))
             .child(dropdown_menu(
                 MenuChip::new("qa-actions").label(tr!("qa.actions")),
                 "qa-actions-menu",
@@ -801,14 +1018,22 @@ impl Waku {
                 {
                     let weak = cx.entity().downgrade();
                     let disabled = completed || qa.finishing;
+                    let external_server = !qa.record.config.server_url.is_empty();
                     move |_| {
                         let restart = weak.clone();
                         let discard = weak.clone();
+                        let install = weak.clone();
                         vec![
+                            MenuItem::new("Install now and restart server", move |_, cx| {
+                                let _ = install.update(cx, |this, cx| {
+                                    this.start_qa_server_with_install(true, cx);
+                                });
+                            })
+                            .disabled(disabled || external_server),
                             MenuItem::new(tr!("qa.restart_server"), move |_, cx| {
                                 let _ = restart.update(cx, |this, cx| this.start_qa_server(cx));
                             })
-                            .disabled(disabled),
+                            .disabled(disabled || external_server),
                             MenuItem::new(tr!("qa.discard"), move |_, cx| {
                                 let _ = discard.update(cx, |this, cx| this.discard_qa(cx));
                             })
@@ -845,6 +1070,8 @@ impl Waku {
                 .bg(theme.accent)
                 .text_color(theme.surface),
             );
+        let permission = self.render_permission(cx);
+        let approval_visible = permission.is_some();
         let transcript = self.transcript_pane.clone();
         let panel = self.right_panel_pane.clone();
         let content = div()
@@ -909,25 +1136,39 @@ impl Waku {
                 div()
                     .flex_1()
                     .min_h_0()
+                    .w_full()
                     .flex()
                     .child(
                         div()
+                            .h_full()
                             .flex_1()
+                            .min_h_0()
                             .min_w_0()
                             .flex()
                             .flex_col()
-                            .child(transcript.cached(StyleRefinement::default().flex_1().min_h_0()))
-                            .children(self.render_queued_messages(cx))
+                            .child(
+                                transcript
+                                    .cached(StyleRefinement::default().flex_1().min_h_0().w_full()),
+                            )
+                            .children(permission.map(|card| div().flex_none().child(card)))
                             .when(accepts_submission, |element| {
-                                element.child(self.render_composer(window, cx))
+                                element.child(self.render_session_composer_lane(
+                                    approval_visible,
+                                    window,
+                                    cx,
+                                ))
                             }),
                     )
                     .child(
-                        panel.cached(
-                            StyleRefinement::default()
-                                .w(px(self.right_panel_content_width))
-                                .h_full(),
-                        ),
+                        // Keep the review slot out of flex shrink. The chat
+                        // column receives the remaining width, just as in the
+                        // main workspace; cached panes need explicit bounds.
+                        div()
+                            .flex_none()
+                            .w(px(self.right_panel_content_width))
+                            .h_full()
+                            .relative()
+                            .child(panel.cached(StyleRefinement::default().size_full())),
                     ),
             )
             .children(self.render_full_access_dialog(cx))

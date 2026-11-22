@@ -101,8 +101,15 @@ pub(super) fn automation_prompt_waiting(
     if agent.has_open_turn(target) {
         return true;
     }
-    // A submitted human prompt already owns a turn even before the provider
-    // emits TurnStarted. An automation must not adopt that turn's identity.
+    pending_persisted_turn(target, task_state, task_store)
+}
+
+/// A human prompt owns its turn before the provider emits TurnStarted.
+fn pending_persisted_turn(
+    target: Uuid,
+    task_state: &Mutex<PersistedState>,
+    task_store: &StateStore,
+) -> bool {
     let mut state = task_state.lock();
     let Some(session) = state
         .sessions
@@ -112,10 +119,22 @@ pub(super) fn automation_prompt_waiting(
         return false;
     };
     if let Err(error) = task_store.hydrate(session) {
-        eprintln!("could not check automation target {target}: {error:#}");
+        eprintln!("could not check the active turn for task {target}: {error:#}");
         return true;
     }
     session.active_turn_id().is_some()
+}
+
+pub(super) fn automatic_counsel_waiting(
+    session_id: Uuid,
+    entry: &crate::agent::AgentPrompt,
+    boss: &crate::boss::BossService,
+    task_state: &Mutex<PersistedState>,
+    task_store: &StateStore,
+) -> bool {
+    super::counsel::is_automatic_counsel_prompt(entry)
+        && boss.is_counsel(session_id)
+        && pending_persisted_turn(session_id, task_state, task_store)
 }
 
 /// Only finalized plans bypass Boss notification and sender-settlement holds.
@@ -149,7 +168,8 @@ pub(super) fn agent_prompt_waiting(
         task_state,
         task_store,
         automations,
-    ) {
+    ) || automatic_counsel_waiting(target, entry, boss, task_state, task_store)
+    {
         return true;
     }
     if entry.is_plan_finalization() {
@@ -191,6 +211,21 @@ pub(super) fn deliver_agent_prompt(
     automations: &AutomationService,
     lineage: &[Uuid],
 ) -> anyhow::Result<()> {
+    let automatic_counsel =
+        super::counsel::is_automatic_counsel_prompt(&entry) && boss.is_counsel(session_id);
+    // Serialize the last check and dispatch against recommendation writes.
+    // This also covers event-forwarder drains and recovered queue entries.
+    let _counsel_operation = automatic_counsel.then(|| boss.operation_guard());
+    if automatic_counsel && boss.document().counsel.has_outstanding_recommendation() {
+        if let Some(id) = entry.queued_id
+            && let Err(error) = unmirror_agent_queued_prompt(task_state, task_store, session_id, id)
+        {
+            agent.requeue_front(session_id, entry);
+            return Err(error);
+        }
+        send_agent_queue_changed(task_state, sink, session_id);
+        return Ok(());
+    }
     boss.require_active(session_id)?;
     // An incident-fenced Boss chat holds its queued work: delivering now
     // would record a turn the fence-denied provider can never confirm.
@@ -211,7 +246,11 @@ pub(super) fn deliver_agent_prompt(
         agent.requeue_front(session_id, entry);
         return Ok(());
     }
+    if !refresh_outcome_reminder(session_id, &mut entry, sink, task_state, task_store, boss)? {
+        return Ok(());
+    }
     if !automation_prompt
+        && !automatic_counsel
         && driver.supports_steer()
         && (agent.has_parked_turn(session_id)
             || (employee_report_interrupts(&entry) && agent.has_open_turn(session_id)))
@@ -279,7 +318,7 @@ pub(super) fn deliver_agent_prompt(
         entry.report_trigger.clone(),
         reference_context.clone(),
         boss.is_boss(session_id),
-        automation_prompt,
+        automation_prompt || automatic_counsel,
         lineage,
     )? {
         PromptPersistence::Submitted => {}
@@ -293,6 +332,7 @@ pub(super) fn deliver_agent_prompt(
         }
     }
     automations.note_prompt_delivered(session_id, message_id, turn_id)?;
+    driver.trace_submission(turn_id, message_id);
     if automation_prompt {
         // Reserve the turn before the provider emits TurnStarted, so a queue
         // drain cannot deliver a second automation into the same runtime.
@@ -328,7 +368,7 @@ pub(super) fn deliver_agent_prompt(
                         session.pending_provider_context.clone()
                     }
                 } else {
-                    session.pending_provider_context.take()
+                    session.take_provider_context()
                 }
             })
     };
@@ -348,6 +388,26 @@ pub(super) fn deliver_agent_prompt(
         prompt,
     ));
     Ok(())
+}
+
+pub(super) fn latest_provider_switch(session: &AgentSession) -> Option<(Uuid, ProviderKind)> {
+    session
+        .messages
+        .iter()
+        .rev()
+        .find_map(|message| match &message.notice {
+            Some(crate::model::TranscriptNotice::ProviderSwitched { to, .. }) => {
+                Some((message.id, *to))
+            }
+            _ => None,
+        })
+}
+
+/// The desktop also sends the envelope for compatibility. Keep it staged on
+/// the daemon until the destination confirms its first turn.
+pub(super) fn has_provider_switch_handoff(session: &AgentSession) -> bool {
+    !session.boss_managed
+        && latest_provider_switch(session).is_some_and(|(_, provider)| provider == session.provider)
 }
 
 /// Mark daemon-owned context so submitted-prompt mirrors can keep it out of
@@ -409,6 +469,12 @@ pub(super) fn wrap_boss_outbound_prompt(
     prompt: String,
 ) -> String {
     let prompt = boss.prompt_with_context(session_id, prompt);
+    if boss.is_counsel(session_id) {
+        let state = task_state.lock();
+        let (context, _) =
+            waku_boss::counsel::recent_context(&state.projects, &state.sessions, session_id);
+        return format!("{context}\n\n{prompt}");
+    }
     if !boss.is_boss(session_id) {
         return prompt;
     }
@@ -424,7 +490,7 @@ pub(super) fn wrap_boss_outbound_prompt(
     let block = if pending && !work.digest.is_empty() {
         work.digest
     } else {
-        format!("{}\n{}", work.header, work.brief)
+        format!("{}{}", work.header, work.brief)
     };
     if block.is_empty() {
         return prompt;
@@ -455,7 +521,7 @@ pub(super) fn persist_agent_prompt(
     report_trigger: Option<crate::model::ReportTrigger>,
     reference_context: Option<crate::model::ReferenceContext>,
     boss_notification: bool,
-    automation_prompt: bool,
+    exclusive_turn: bool,
     lineage: &[Uuid],
 ) -> anyhow::Result<PromptPersistence> {
     let mut state = task_state.lock();
@@ -471,7 +537,7 @@ pub(super) fn persist_agent_prompt(
         state.sessions[index].archived_at.is_none(),
         "task is archived"
     );
-    if boss_notification || automation_prompt {
+    if boss_notification || exclusive_turn {
         // Claim the durable id under the same lock as the user queue and
         // active turn. A competing settlement/scheduler delivery may have
         // rehydrated this entry before the first delivery removed its mirror.
@@ -509,7 +575,7 @@ pub(super) fn persist_agent_prompt(
             .find(|session| session.id == *lineage_id)
             .is_some_and(|held| {
                 task_store.hydrate(held).is_ok()
-                    && (((boss_notification || automation_prompt)
+                    && (((boss_notification || exclusive_turn)
                         && (held.messages.iter().any(|m| m.id == message_id)
                             || held.queued_messages.iter().any(|m| m.id == message_id)))
                         || report_trigger.as_ref().is_some_and(|trigger| {
@@ -529,6 +595,7 @@ pub(super) fn persist_agent_prompt(
         return Ok(PromptPersistence::Duplicate);
     }
     let session = &mut state.sessions[index];
+    session.observe_prompt_dispatch(turn_id, std::time::Instant::now());
     if session.adopt_submitted_prompt(
         message,
         turn_id,
@@ -551,6 +618,62 @@ pub(super) fn persist_agent_prompt(
     Ok(PromptPersistence::Submitted)
 }
 
+/// Revalidate at the shared delivery boundary, including event-forwarder
+/// drains and restart recovery. Ordinary prompts never get rewritten.
+fn refresh_outcome_reminder(
+    session_id: Uuid,
+    entry: &mut crate::agent::AgentPrompt,
+    sink: &EventSink,
+    task_state: &Mutex<PersistedState>,
+    task_store: &StateStore,
+    boss: &crate::boss::BossService,
+) -> anyhow::Result<bool> {
+    if !boss.is_boss(session_id) {
+        return Ok(true);
+    }
+    let Some(queued_id) = entry.queued_id else {
+        return Ok(true);
+    };
+    let references = {
+        let mut state = task_state.lock();
+        let Some(session) = state.session_mut(session_id) else {
+            return Ok(true);
+        };
+        task_store.hydrate(session)?;
+        let Some(queued) = session
+            .queued_messages
+            .iter()
+            .find(|queued| queued.id == queued_id)
+        else {
+            return Ok(true);
+        };
+        if queued.outcome_reminder.is_empty() {
+            // Older daemon alerts carry no trustworthy task references.
+            // Discard their parked snapshots rather than revive stale claims.
+            if queued.source != (crate::model::QueuedMessageSource::Agent { sent_by: None })
+                || !queued
+                    .content
+                    .starts_with(super::summon::OUTCOME_REMINDER_HEADER)
+            {
+                return Ok(true);
+            }
+        }
+        queued.outcome_reminder.clone()
+    };
+    if let Some(prompt) = super::summon::outcome_reminder_prompt(
+        &boss.document(),
+        &references,
+        crate::model::unix_time(),
+    ) {
+        entry.prompt = prompt;
+        entry.transport = None;
+        return Ok(true);
+    }
+    unmirror_agent_queued_prompt(task_state, task_store, session_id, queued_id)?;
+    send_agent_queue_changed(task_state, sink, session_id);
+    Ok(false)
+}
+
 /// Park an agent prompt in the session document's follow-up queue so every
 /// client renders the wait as a queued chip. The entry's id doubles as the
 /// eventual transcript message id — delivery removes it.
@@ -564,12 +687,21 @@ pub(super) fn mirror_agent_queued_prompt(
     hidden: bool,
     report_trigger: Option<crate::model::ReportTrigger>,
 ) -> anyhow::Result<()> {
+    let mut entry = crate::model::QueuedMessage::agent(prompt, sent_by);
+    entry.id = queued_id;
+    entry.hidden = hidden;
+    entry.report_trigger = report_trigger;
+    mirror_agent_queued_message(task_state, task_store, session_id, entry)
+}
+
+pub(super) fn mirror_agent_queued_message(
+    task_state: &Mutex<PersistedState>,
+    task_store: &StateStore,
+    session_id: Uuid,
+    entry: crate::model::QueuedMessage,
+) -> anyhow::Result<()> {
     let mut state = task_state.lock();
-    let Some(session) = state
-        .sessions
-        .iter_mut()
-        .find(|session| session.id == session_id)
-    else {
+    let Some(session) = state.session_mut(session_id) else {
         bail!("task {session_id} is unknown to the daemon");
     };
     task_store.hydrate(session)?;
@@ -577,14 +709,10 @@ pub(super) fn mirror_agent_queued_prompt(
     if session
         .queued_messages
         .iter()
-        .any(|queued| queued.id == queued_id)
+        .any(|queued| queued.id == entry.id)
     {
         return Ok(());
     }
-    let mut entry = crate::model::QueuedMessage::agent(prompt, sent_by);
-    entry.id = queued_id;
-    entry.hidden = hidden;
-    entry.report_trigger = report_trigger;
     session.queued_messages.push(entry);
     session.updated_at = crate::model::unix_time();
     state.mark_session_dirty(session_id);
@@ -709,6 +837,7 @@ pub(super) fn record_agent_steer(
     sent_by_task: Uuid,
     hidden: bool,
     report_trigger: Option<crate::model::ReportTrigger>,
+    preferred_message_id: Option<Uuid>,
 ) {
     let mut state = task_state.lock();
     let Some(session) = state
@@ -734,6 +863,11 @@ pub(super) fn record_agent_steer(
     {
         return;
     }
+    // Same fold when the delivery's durable id already landed — a Counsel
+    // instruction steered once and retried must not double-write.
+    if preferred_message_id.is_some_and(|id| session.messages.iter().any(|stored| stored.id == id)) {
+        return;
+    }
     let message_id = session.push_user_message_with_presentation(
         message,
         None,
@@ -741,6 +875,14 @@ pub(super) fn record_agent_steer(
         Vec::new(),
         Some(sent_by_task),
     );
+    if let Some(preferred) = preferred_message_id
+        && let Some(stored) = session
+            .messages
+            .iter_mut()
+            .find(|stored| stored.id == message_id)
+    {
+        stored.id = preferred;
+    }
     if (hidden || report_trigger.is_some())
         && let Some(stored) = session
             .messages
@@ -749,6 +891,10 @@ pub(super) fn record_agent_steer(
     {
         stored.hidden = hidden;
         stored.report_trigger = report_trigger;
+    }
+    if !hidden {
+        session.updated_at = crate::model::unix_time();
+        session.last_reply_at = Some(session.updated_at);
     }
     state.mark_session_dirty(session_id);
     if let Err(error) = task_store.save(&mut state) {
@@ -795,21 +941,13 @@ pub(super) fn record_provider_cursor(
 /// activation cannot supersede the confirmed fields. The activation mark
 /// itself is durable: a redelivery from an older generation, or a lower
 /// revision of the same one, is rejected before any field can move back.
-pub(super) fn record_effective_config(
+/// Record replay progress without turning a provider fact into a user edit.
+pub(super) fn record_config_activation(
     task_state: &Mutex<PersistedState>,
     task_store: &StateStore,
     session_id: Uuid,
     activation: ConfigActivation,
-    provider: Option<&str>,
-    model: Option<&str>,
-    reasoning_effort: Option<&str>,
 ) {
-    let provider = provider.and_then(|id| {
-        ProviderKind::ALL
-            .iter()
-            .copied()
-            .find(|kind| kind.id() == id)
-    });
     let mut state = task_state.lock();
     let Some(session) = state
         .sessions
@@ -820,37 +958,19 @@ pub(super) fn record_effective_config(
     };
     if session
         .config_activation
-        .is_some_and(|current| current > activation)
+        .is_some_and(|current| current >= activation)
     {
         return;
     }
     if task_store.hydrate(session).is_err() {
         return;
     }
-    let mut changed = session.config_activation != Some(activation);
     session.config_activation = Some(activation);
-    if let Some(provider) = provider.filter(|provider| *provider != session.provider) {
-        session.provider = provider;
-        changed = true;
-    }
-    if let Some(model) = model.filter(|model| session.model.as_deref() != Some(*model)) {
-        session.model = Some(model.to_owned());
-        changed = true;
-    }
-    if let Some(effort) =
-        reasoning_effort.filter(|effort| session.reasoning_effort.as_deref() != Some(*effort))
-    {
-        session.reasoning_effort = Some(effort.to_owned());
-        changed = true;
-    }
-    if !changed {
-        return;
-    }
     session.updated_at = crate::model::unix_time();
     state.mark_session_dirty(session_id);
     if let Err(error) = task_store.save(&mut state) {
         eprintln!(
-            "goddard-daemon could not persist the effective configuration for task {session_id}: {error:#}"
+            "goddard-daemon could not persist the activation for task {session_id}: {error:#}"
         );
     }
 }

@@ -304,7 +304,10 @@ fn tunnel_repair_replaces_a_stale_forward_on_the_same_local_port() {
                 r#"#!/bin/sh
 printf '%s\n' "$*" >> "$GODDARD_SSH_TEST_ROOT/calls"
 for arg do
-  case "$arg" in ControlPath=*) control="${{arg#ControlPath=}}" ;; esac
+  case "$arg" in
+    ControlPath=*) control="${{arg#ControlPath=}}" ;;
+    127.0.0.1:*) forward="$arg" ;;
+  esac
 done
 case "$*" in
   *'-O check'*) exit 0 ;;
@@ -320,9 +323,12 @@ case "$*" in
     rm -f "$GODDARD_SSH_TEST_ROOT/forward"; exit 0 ;;
   *'-O forward'*)
     if [ -f "$GODDARD_SSH_TEST_ROOT/forward" ]; then
+      # OpenSSH accepts identical requests while preserving the listener.
+      if [ "$(cat "$GODDARD_SSH_TEST_ROOT/forward")" = "$forward" ]; then exit 0; fi
       echo 'local port is already forwarded' >&2; exit 1
     fi
-    : > "$GODDARD_SSH_TEST_ROOT/forward"; exit 0 ;;
+    printf '%s\n' "$forward" > "$GODDARD_SSH_TEST_ROOT/forward"
+    printf 'bound\n' >> "$GODDARD_SSH_TEST_ROOT/bindings"; exit 0 ;;
 esac
 echo 'unexpected ssh command' >&2
 exit 1
@@ -343,6 +349,32 @@ exit 1
     let calls = fs::read_to_string(root.join("calls")).unwrap();
     assert!(calls.contains("-O cancel -L 127.0.0.1:31337:127.0.0.1:4000"));
     assert!(calls.contains("-O forward -L 127.0.0.1:31337:127.0.0.1:5000"));
+
+    // The websocket supervisor can still be backing off after the tunnel
+    // recovers. Another repair must leave that working listener in place.
+    transport.restore_forward(SshAuth::Batch, 31337).unwrap();
+    let calls = fs::read_to_string(root.join("calls")).unwrap();
+    assert_eq!(calls.matches("-O cancel").count(), 1);
+    assert_eq!(
+        fs::read_to_string(root.join("bindings")).unwrap(),
+        "bound\nbound\n"
+    );
+
+    // A master recreated by another client can already be alive even though
+    // this transport's listener disappeared. Do not trust the cached mapping.
+    fs::remove_file(root.join("forward")).unwrap();
+    transport.restore_forward(SshAuth::Batch, 31337).unwrap();
+    assert_eq!(
+        fs::read_to_string(root.join("forward")).unwrap(),
+        "127.0.0.1:31337:127.0.0.1:5000\n"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("calls"))
+            .unwrap()
+            .matches("-O cancel")
+            .count(),
+        1
+    );
 
     // Losing the master removes its forwards. Recovery must reuse the local
     // endpoint without trying to cancel a forward on the new master.

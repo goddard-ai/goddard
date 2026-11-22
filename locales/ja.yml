@@ -699,9 +699,14 @@ dormant.confirm_description_busy_worktree: 進行中のターンがあり、チ�
 recent_prompts.action: 最近のプロンプトを復元…
 recent_prompts.menu_header: 最近送信したプロンプト
 reclaim.title: ディスク容量を解放
-reclaim.description: 使っていないタスクは依存関係やビルド成果物をそれぞれ保持しています。削除しても次回のインストールやビルドで再生成されます。ソースの変更やタスク自体はそのまま残ります。
-reclaim.scanning: ワークツリーをスキャン中…
-reclaim.empty: 解放できる再生成可能な出力を持つワークツリーはありません。
+reclaim.description: アイドル状態のタスクには依存関係、ビルド成果物、スクラッチファイルが残っていることがあります。削除するとディスク容量を解放できます。ソースの変更とタスク自体はそのまま残ります。
+reclaim.scanning: タスクをスキャン中…
+reclaim.scan_progress: "スキャン済み: %{done} / %{total} タスク"
+reclaim.scan_current: "%{title} をスキャン中…"
+reclaim.scan_failures: "%{count} 件のタスクを完全にスキャンできませんでした。結果が不完全な可能性があります。"
+reclaim.incomplete: "完了したスキャンの結果はありません。"
+reclaim.retry: "タスクを再スキャン"
+reclaim.empty: 解放できる成果物やスクラッチ領域を持つアイドルタスクはありません。
 reclaim.confirm: "%{size} を解放"
 reclaim.confirm_generic: 解放
 reclaim.completed: "%{size} を解放しました"
@@ -729,6 +734,7 @@ sidebar.ordering_last_created: 作成日
 sidebar.show_more: もっと見る
 sidebar.show_dormant: 休眠タスクを表示
 sidebar.pinned: ピン留め
+sidebar.rushed: 急ぎ
 sidebar.terminals: ターミナル
 sidebar.dormant: 休眠
 sidebar.chats: チャット
@@ -1371,6 +1377,7 @@ suggestions.prompt_text: 提案するプロンプトの本文
 suggestions.prompt_editor_description: 提案をクリックすると、この文が送信されます。
 suggestions.prompt_invalid: 2,000文字以内のプロンプトを入力してください。
 suggestions.prompt_duplicate: 別の提案アクションが同じプロンプトを送信します。
+suggestions.do_that: それを実行して
 suggestions.proceed: はい、進めてください。
 suggestions.make_it_happen: 作業を始めて
 suggestions.add_details: 詳細を入力
@@ -1473,6 +1480,7 @@ errors.session_not_found: タスクが見つかりません
 errors.task_not_found: タスクが見つかりません
 errors.task_not_loaded: このタスクは読み込まれていません
 errors.task_already_forking: このタスクはすでにフォーク中です
+errors.task_changed_during_prompt: プロンプトの準備中にタスクが変更されました。現在の変更が完了してから再試行してください。
 errors.task_already_rewinding: このタスクはすでに巻き戻し中です
 errors.no_live_runtime: このタスクには実行中のエージェントがありません
 errors.unexpected_daemon_response: "デーモンから %{expected} が返るはずでしたが、%{actual} を受信しました"
@@ -1798,6 +1806,7 @@ attachments.preview_unavailable: 画像を表示できません
 common.copy_named: "%{name} をコピー"
 
 transcript.worked: 完了
+transcript.rewind_completed: 巻き戻しが完了しました。
 transcript.worked_for: 作業時間 %{duration}
 transcript.you_stopped_after: "%{duration} 後にタスクを停止しました"
 transcript.working_for: 作業中 · %{duration}
@@ -2536,6 +2545,7 @@ models.auto: 自動
 models.auto_hint: 最適なプロバイダーを選択
 models.auto_missing_credential: 選択した Jev 評価バックエンドに認証情報がありません — ルーティングは最後に使ったプロバイダーにフォールバックします。Jev 設定で追加してください。
 models.auto_routed: "自動（Jev）· %{model}"
+models.auto_fallback: "%{model} · 代替"
 notifications.confirm_done: "%{title} を完了にしますか？"
 notifications.confirm_done_detail: 完了にすると GitHub 上のスレッドが削除されます — 元に戻せません。
 notifications.empty: 受信トレイは空です — 未読なし
@@ -3448,6 +3458,7 @@ experiments.voice_briefing_eager_caption: 戻る前に要約と音声を準備�
 experiments.voice_scratchpad_margin_double_click_title: チャットの余白をダブルクリックで VoicePad を切り替え
 experiments.voice_scratchpad_margin_double_click_description: チャットコンテンツの横の空白をダブルクリックすると、開いている VoicePad の表示・非表示を切り替えられます。デフォルトはオフです。
 sidebar.deliverables_view_all: すべての成果物を表示
+sidebar.group_option_peek: このグループの Option を長押し — ホバーで有効化、クリックまたは Enter で固定
 annotations.earlier_chat: 過去のボスチャット
 memory.add_note: メモを追加
 memory.save_note: メモを保存
@@ -3766,3 +3777,163 @@ settings.boss_keywords: "Boss 従業員 ペルソナ 計画セッション ア�
 boss.employee_groups: "サイドバーで従業員をグループ化"
 boss.employee_groups_description: "目的とキューの状態で従業員をグループ化します。オフにすると見出しのない1つのリストになり、計画セッションが先頭に表示されます。"
 boss.employee_search_description: "「従業員のチャットを検索」で、アーカイブ済みを含めて遡る期間です。オフにするとコマンドが非表示になります。"
+boss.chains: "チェーン"
+boss.chains_empty: "従業員チェーンはまだありません"
+boss.chain_select: "チェーンを選択すると詳細が表示されます"
+boss.chain_untitled: "従業員チェーン"
+boss.chain_gates: "承認ゲート"
+boss.chain_steps: "ステップ"
+boss.chain_current: "現在"
+boss.chain_revision: "リビジョン %{revision}"
+boss.chain_gate_pending: "判断待ち"
+boss.chain_gate_approved: "承認済み"
+boss.chain_gate_rejected: "却下済み"
+boss.chain_approve: "承認"
+boss.chain_reject: "却下"
+boss.chain_resume: "再開"
+boss.chain_pause: "一時停止"
+boss.chain_retry: "再試行"
+boss.chain_cancel: "チェーンをキャンセル"
+boss.chain_accept: "引き継ぎを承認"
+boss.chain_status_active: "実行中"
+boss.chain_status_paused: "一時停止中"
+boss.chain_status_pausing: "一時停止処理中"
+boss.chain_status_cancelling: "キャンセル処理中"
+boss.chain_status_cancelled: "キャンセル済み"
+boss.chain_status_completed: "完了"
+boss.chain_step_pending: "未開始"
+boss.chain_step_active: "実行中"
+boss.chain_step_succeeded: "成功"
+boss.chain_step_failed: "失敗"
+boss.chain_step_cancelled: "キャンセル済み"
+
+archive.agent_clean_and_archive: "エージェントにクリーンアップとアーカイブを依頼"
+archive.clean_and_archive: "ワークツリーをクリーンアップしてアーカイブ"
+archive.clean_failed: "アーカイブしたワークツリーをクリーンアップできませんでした。ファイルはディスク上に残っています。"
+archive.clean_warning: "ワークツリーをクリーンアップしてアーカイブすると、未コミットの変更は破棄されます。アーカイブを解除しても、復元されるのはコミット済みの作業だけです。"
+background.exited_processes: "終了したプロセス"
+boss.message_current_employee: "現在の従業員にメッセージを送信"
+command_palette.archived_task: "アーカイブ済み"
+command_palette.git_commit: "Git：コミット…"
+command_palette.git_pull: "Git：プル"
+command_palette.git_pull_rebase: "Git：リベースしてプル"
+command_palette.git_push: "Git：プッシュ"
+command_palette.hide_archived_tasks: "アーカイブ済みのタスクを非表示"
+command_palette.idle_task: "待機中"
+command_palette.main_checkout: "メインチェックアウト"
+command_palette.new_task_in_worktree: "このワークツリーで新しいタスク…"
+command_palette.rush_current_task: "現在のタスクを優先する"
+command_palette.search_worktrees: "ワークツリーを検索…"
+command_palette.show_archived_tasks: "アーカイブ済みのタスクを表示"
+command_palette.stop_rushing_current_task: "現在のタスクの優先モードを解除"
+command_palette.sync_complete: "プロジェクトをリモートホストに同期しました。"
+command_palette.sync_failed: "プロジェクトを同期できませんでした：%{error}"
+command_palette.sync_friend_pending: "同期のペアリングを申請しました。友達は「友達 → あなたと共有中」で有効にできます。"
+command_palette.sync_host_offline: "リモートホストがオフラインです。"
+command_palette.sync_host_placeholder: "リモートホストを選択…"
+command_palette.sync_running: "origin にプッシュしてからリモートホストでプルしています…"
+command_palette.sync_source_offline: "同期元のプロジェクトのホストがオフラインです。"
+command_palette.sync_to_friend: "友達に同期…"
+command_palette.sync_to_host: "リモートホストに同期…"
+command_palette.unarchive: "アーカイブを解除…"
+command_palette.unarchive_placeholder: "復元するアーカイブ済みチャットを検索…"
+command_palette.worktree_change_project: "プロジェクトを変更…"
+command_palette.worktree_task_count: "%{count} 件のタスク"
+command_palette.worktree_task_placeholder: "タスクを選択…"
+counsel.approve: "承認"
+counsel.approved: "承認済み · Counsel が送信中"
+counsel.command_description: "Counsel を開いて次に何をするか相談する"
+counsel.completed: "完了 · 結果の根拠を報告済み"
+counsel.delivery_failed: "送信に失敗しました"
+counsel.delivery_pending: "Boss に送信中"
+counsel.dismiss: "却下"
+counsel.dismissed: "却下済み"
+counsel.later: "あとで"
+counsel.message_to_boss: "Boss へのメッセージ"
+counsel.open_boss: "Boss を開く"
+counsel.recommendation: "次のおすすめ"
+counsel.revise: "修正"
+counsel.revise_prompt: "提案「%{title}」（ID：%{id}）を修正してください。修正版を提案するときは、元の ID を replaces に指定してください。変更点："
+counsel.saved_later: "あとで確認するために保存済み"
+counsel.sent: "Boss に送信済み · 待機中または実行中"
+counsel.source: "元のセッション"
+counsel.subtitle: "Counsel"
+counsel.title: "Counsel"
+deliverable.archived: "成果物をアーカイブしました。"
+deliverable.archived_many: "%{count} 件の成果物をアーカイブしました。"
+errors.send_workspace_preparation: "ワークスペースを準備できなかったため、メッセージを送信できませんでした。もう一度送信してください。"
+experiments.counsel_description: "最近の作業を確認し、承認または却下できる提案を出す、継続的な相談用チャットです。承認した指示は Boss に送信します。Boss の実験機能が必要です。"
+experiments.counsel_title: "Counsel"
+find.searching: "検索中…"
+friends.actions: "友達の操作"
+friends.copy_code: "自分のコードをコピー"
+friends.edit_profile: "名前を編集"
+git_panel.land_cancel_queued: "待機中の取り込みをキャンセル"
+git_panel.land_canceled: "取り込みをキャンセルしました"
+git_panel.land_canceling: "待機中の取り込みをキャンセルしています…"
+git_panel.land_queue: "取り込みキュー"
+git_panel.land_queue_more: "ほかに %{count} 件が待機中"
+git_panel.land_queue_submit: "従業員の提出"
+git_panel.land_queued_next: "待機中 · 次の順番"
+git_panel.land_queued_position: "待機中 · #%{position}"
+git_panel.land_refresh_status: "状態を更新"
+git_panel.land_requesting: "取り込みを申請中…"
+git_panel.land_result_unknown: "取り込み結果の有効期限が切れたか、デーモンが再起動しました。再試行する前にワークツリーを確認してください。"
+git_panel.land_status_unavailable: "取り込みの状態を取得できません"
+jev.title_rewrites_description: "ターンが完了すると、Jev が自動生成されたタスク名を確認し、必要に応じてわかりやすい名前への変更を依頼します。自分で付けた名前は変更されません。プロバイダーによる名前の更新は、この設定に関係なく行われます。"
+jev.title_rewrites_title: "タイトルの自動書き換え"
+models.auto_unavailable: "自動ルーティングを利用できません。歯車から Jev の設定を開いて構成してください。"
+rush.dismiss: "閉じる"
+rush.enabled: "優先モードが有効です"
+rush.toggle: "優先する"
+rush.tooltip: "利用できる場合は高速サービスを有効にします。切り替え時に進行中の作業が一時停止します。操作が必要になったときやターンが完了したときは、このタスクを前面に表示します。優先モードは無効にするか、このウィンドウを閉じるまで続きます。無効にしてもサービスティアは維持されます。"
+session.locate_worktree: "既存のワークツリーを選択…"
+session.more_recovery_worktrees: "ほかのワークツリー…"
+session.recover_workspace: "ワークスペースを復旧…"
+session.restore_task_workspace: "保存済みのワークスペースを復元"
+session.workspace_recovered: "ワークスペースを復旧しました。プロンプトを再送信できます。"
+session.workspace_recovery_detail: "すべてのファイルを保持するには既存のチェックアウトを選択してください。または、このタスクの最新の保存済みスナップショットからワークスペースを復元できます。スナップショットの作成後に行った変更は復元されません。送信待ちのプロンプトは、続行するまで保持されます。"
+session.workspace_recovery_failed: "ワークスペースを復旧できませんでした：%{error}"
+session.workspace_recovery_needed: "このタスクのワークスペースを復旧する必要があります。プロンプトは保持されています。"
+settings.prefer_starred_when_nothing_unread: "未読がないときはスター付きプロジェクトを優先"
+settings.prefer_starred_when_nothing_unread_description: "未読の完了通知がなくなると、%{action} はスター付きプロジェクトの待機中タスクを先に表示します。オフにすると、すべてのプロジェクトをサイドバーの順番で表示します。"
+settings.recent_transcript_limit: "最近のタスクの会話履歴をメモリに保持"
+settings.recent_transcript_limit_description: "最近のタスクをすばやく開き、進行中の会話履歴を最新の状態に保ちます。現在のタスクも含まれます。0 にすると最近のタスクを保持しません。値を大きくするとメモリ使用量が増えます。"
+sidebar.archive_inspection_failed: "アーカイブ前の安全確認に失敗しました。サイドバーの変更から再試行してください。"
+sidebar.archive_inspection_offline: "アーカイブ前にワークスペースを確認するには接続が必要です。"
+sidebar.archive_undo_detail: "元に戻すと、アーカイブした項目が復元されます。停止したターンや削除したサイドチャットは復元されません。"
+sidebar.changes_adopt: "デーモンの状態を使用"
+sidebar.changes_blocked: "%{count} 件のサイドバーの変更に対応が必要です"
+sidebar.changes_detail: "選択はすぐに表示され、バックグラウンドで同期されます。"
+sidebar.changes_hide_details: "詳細を非表示"
+sidebar.changes_local_host: "このコンピューター"
+sidebar.changes_not_saved: "サイドバーの変更が保存されていません"
+sidebar.changes_removed_host: "削除されたホスト"
+sidebar.changes_retry: "自分の変更を適用"
+sidebar.changes_show_details: "詳細"
+sidebar.changes_still_saving: "まだ保存中です…"
+sidebar.changes_syncing: "サイドバーの変更を %{count} 件同期中"
+sidebar.changes_undo: "アーカイブを元に戻す"
+suggestions.condition: "条件"
+suggestions.condition_help: "このプロンプトを提案するかどうかを Jev が判断するための指示です。"
+suggestions.fields_invalid: "ラベルは 1〜96 文字、条件は 1〜2,000 文字で入力してください。"
+suggestions.label: "ラベル"
+suggestions.label_help: "このプロンプトが提案されたとき、コンポーザーの上に表示されるテキストです。"
+suggestions.prompt_help: "この提案を選んだときにエージェントに送信されるテキストです。"
+suggestions.workflow_condition_help: "この提案はワークフローによって制御されます。条件は参考情報で、Jev による評価は行われません。"
+terminal.actions: "ターミナルの操作"
+terminal.copy_scrollback: "ターミナル：スクロール履歴をコピー"
+terminal.go_to_default_checkout: "ターミナル：デフォルトブランチのチェックアウトへ移動"
+terminal.go_to_previous_worktree: "ターミナル：前のワークツリーへ移動"
+terminal.go_to_primary_checkout: "ターミナル：主チェックアウトのルート（.git）へ移動"
+terminal.move_pane_out: "ペインをグループの外へ移動"
+terminal.unsplit_group: "グループの分割を解除"
+transcript.employee_prompt_unconfirmed: "送信を確認できませんでした。再送信する前に会話履歴を確認してください。"
+transcript.future_loading: "新しいメッセージを読み込み中…"
+transcript.history_loading: "以前のメッセージを読み込み中…"
+transcript.history_retry: "以前のメッセージの読み込みを再試行"
+transcript.navigation_load_failed: "そのターンを読み込めませんでした。選択して再試行してください。"
+transcript.possible_compaction: "待機中 · プロバイダーがコンテキストを圧縮している可能性があります"
+transcript.sending_prompt: "プロンプトを送信中…"
+usage.likely_compaction: "通常より長い待ち時間のあと、コンテキスト使用量が大きく減ったため、圧縮された可能性があります。"
+usage.possible_compaction: "コンテキストの使用量が上限に近く、プロバイダーの応答にも通常より時間がかかっています。圧縮中の可能性があります。"

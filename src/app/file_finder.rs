@@ -616,12 +616,7 @@ impl Waku {
             position: line.map(|line| (line, column.unwrap_or(1))),
             heading: None,
         });
-        if let Some(workspace) = self.right_panel_files_root.clone() {
-            self.reveal_right_panel_file_in_tree_at_root(relative_path.clone(), workspace, cx);
-        } else {
-            self.open_right_panel_surface(RightPanelSurface::Files, cx);
-        }
-        self.open_right_panel_file(relative_path, cx);
+        self.open_file_finder_tab(relative_path, cx);
         // Restoring the previous focus is harmless: the pending handoff above
         // moves it to the editor a frame later, and stays as the fallback if
         // the editor never materializes.

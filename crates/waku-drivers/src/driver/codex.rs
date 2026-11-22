@@ -1,7 +1,7 @@
 //! Codex app-server transport.
 
 use std::collections::{HashMap, HashSet};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, LazyLock, Weak};
@@ -9,6 +9,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, anyhow};
+use base64::Engine as _;
 use crossbeam_channel::{Sender, bounded, unbounded};
 use parking_lot::{Condvar, Mutex};
 use serde_json::{Value, json};
@@ -399,7 +400,7 @@ impl CodexDriver {
         let title_cwd = cwd.clone();
         let title_sandbox = sandbox.clone();
         let mut command = crate::command_env::command(&binary);
-        command.args(["app-server", "--stdio"]);
+        command.args(["app-server", "--listen", "stdio://"]);
         configure_computer_use_command(command.command_mut(), announce_computer_use, &mcp_servers);
         if let Some(agent) = &agent {
             crate::command_env::apply_agent_environment(command.command_mut(), agent);
@@ -1684,7 +1685,7 @@ fn generate_codex_title(
 ) -> anyhow::Result<String> {
     let mut command = crate::command_env::command(binary);
     let command = command
-        .args(["app-server", "--stdio"])
+        .args(["app-server", "--listen", "stdio://"])
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -2345,6 +2346,7 @@ fn handle_codex_message(
     {
         if let Some(error) = value.pointer("/error/message").and_then(Value::as_str) {
             let _ = events.send(DriverEvent::SteerRejected {
+                submission_id: None,
                 message,
                 reason: error.to_owned(),
                 reason_i18n: None,
@@ -2352,6 +2354,7 @@ fn handle_codex_message(
             });
         } else {
             let _ = events.send(DriverEvent::SteerAccepted {
+                submission_id: None,
                 message,
                 sent_by_task: None,
                 hidden: false,
@@ -2598,7 +2601,13 @@ fn handle_codex_message(
                         detail,
                         complete,
                     )
-                    .with_tool_name(item.get("tool").and_then(Value::as_str))
+                    .with_tool_name(
+                        if item.get("type").and_then(Value::as_str) == Some("imageGeneration") {
+                            Some("image_gen")
+                        } else {
+                            item.get("tool").and_then(Value::as_str)
+                        },
+                    )
                     .with_mcp_server(item.get("server").and_then(Value::as_str))
                     .with_arguments(codex_item_arguments(item))
                     .with_activity_source(Some(item))
@@ -2758,6 +2767,15 @@ fn handle_codex_message(
         }
         method if value.get("id").is_some() && method.contains("requestApproval") => {
             let request_id = rpc_id_string(value.get("id").unwrap());
+            if method == "item/commandExecution/requestApproval"
+                && crate::agent_readonly::readonly_agent_input(&params)
+            {
+                let _ = commands.send(CommandMessage::Respond {
+                    request_id,
+                    option_id: "accept".into(),
+                });
+                return;
+            }
             let (title, detail) = approval_copy(method, &params);
             let _ = events.send(DriverEvent::Permission {
                 request_id,
@@ -2890,6 +2908,8 @@ fn codex_activity_kind(item: &Value) -> Option<ActivityKind> {
         Some(ActivityKind::Search)
     } else if item_type.contains("plan") || item_type.contains("todo") {
         Some(ActivityKind::Plan)
+    } else if item_type == "imagegeneration" {
+        Some(ActivityKind::Tool)
     } else if item_type.contains("tool") || item_type.contains("collab") {
         Some(
             item.get("tool")
@@ -3137,6 +3157,39 @@ fn codex_item_output(item: &Value) -> Option<String> {
 }
 
 fn codex_item_image_urls(item: &Value) -> Vec<String> {
+    if item.get("type").and_then(Value::as_str) == Some("imageGeneration") {
+        if let Some(result) = item
+            .get("result")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+        {
+            return vec![format!("data:image/png;base64,{result}")];
+        }
+        // Newer Codex versions can store the result as an attachment and
+        // report its saved path instead of including bytes in the event.
+        const MAX_IMAGE_BYTES: u64 = 32 * 1024 * 1024;
+        if let Some(path) = item.get("savedPath").and_then(Value::as_str)
+            && let Ok(file) = std::fs::File::open(path)
+            && file
+                .metadata()
+                .is_ok_and(|m| m.is_file() && m.len() <= MAX_IMAGE_BYTES)
+        {
+            let mut bytes = Vec::new();
+            if file
+                .take(MAX_IMAGE_BYTES + 1)
+                .read_to_end(&mut bytes)
+                .is_ok()
+                && !bytes.is_empty()
+                && bytes.len() as u64 <= MAX_IMAGE_BYTES
+            {
+                return vec![format!(
+                    "data:image/png;base64,{}",
+                    base64::engine::general_purpose::STANDARD.encode(bytes)
+                )];
+            }
+        }
+        return Vec::new();
+    }
     let content = match item.get("type").and_then(Value::as_str) {
         Some("mcpToolCall") => item.pointer("/result/content"),
         _ => None,
@@ -3715,6 +3768,26 @@ mod tests {
                 &mut stream_state,
             );
         }
+    }
+
+    #[test]
+    fn readonly_agent_approval_bypasses_the_user() {
+        let harness = GoalHarness::new();
+        harness.handle(
+            json!({"id": "read-1", "method": "item/commandExecution/requestApproval",
+            "params": {"command": "goddard-agent history search --text 'earlier work'"}}),
+        );
+        assert!(
+            matches!(harness.command_rx.try_recv(), Ok(CommandMessage::Respond { option_id, .. }) if option_id == "accept")
+        );
+        assert!(harness.received.try_recv().is_err());
+        harness.handle(json!({"id": "write-1", "method": "item/commandExecution/requestApproval",
+            "params": {"command": "goddard-agent archive task", "reason": "goddard-agent read task"}}));
+        assert!(matches!(
+            harness.received.try_recv(),
+            Ok(DriverEvent::Permission { .. })
+        ));
+        assert!(harness.command_rx.try_recv().is_err());
     }
 
     fn goal_json() -> Value {
@@ -4982,6 +5055,65 @@ mod tests {
             state.rewrite_citation_delta("Claim.\u{e200}cite\u{e202}turn9search0\u{e201} After."),
             "Claim. After."
         );
+    }
+
+    #[test]
+    fn codex_generated_image_is_a_tool_activity_with_image_output() {
+        let item = json!({
+            "type": "imageGeneration", "id": "generation-1",
+            "status": "completed", "result": "aGVsbG8=", "savedPath": null
+        });
+        assert_eq!(codex_activity_kind(&item), Some(ActivityKind::Tool));
+        assert_eq!(
+            codex_item_image_urls(&item),
+            vec!["data:image/png;base64,aGVsbG8="]
+        );
+        assert!(codex_item_output(&item).is_none());
+        let thread_id = Mutex::new(Some("thread-1".to_owned()));
+        let turn_id = Mutex::new(Some("turn-1".to_owned()));
+        let turn_ids = Mutex::new(vec!["turn-1".to_owned()]);
+        let pending_rollbacks = Mutex::new(HashMap::new());
+        let pending_steers = Mutex::new(HashMap::new());
+        let background_rpcs = Mutex::new(BackgroundRpcState::default());
+        let goal_rpcs = Mutex::new(GoalRpcState::default());
+        let (commands, _) = unbounded();
+        let (events, received) = unbounded();
+        handle_codex_message(
+            json!({"method":"item/completed", "params":{
+                "threadId":"thread-1", "turnId":"turn-1", "item":item
+            }}),
+            &thread_id,
+            &turn_id,
+            &turn_ids,
+            &pending_rollbacks,
+            &pending_steers,
+            &background_rpcs,
+            &goal_rpcs,
+            &commands,
+            &events,
+            &mut CodexStreamState::default(),
+        );
+        let DriverEvent::RichActivity(activity) = received.try_recv().unwrap() else {
+            panic!("expected image activity");
+        };
+        assert!(activity.complete);
+        assert_eq!(activity.tool_name.as_deref(), Some("image_gen"));
+        assert_eq!(activity.image_urls, vec!["data:image/png;base64,aGVsbG8="]);
+    }
+
+    #[test]
+    fn codex_generated_image_can_use_the_saved_file() {
+        let path = std::env::temp_dir().join(format!("goddard-image-{}.png", Uuid::new_v4()));
+        std::fs::write(&path, b"hello").unwrap();
+        let item = json!({
+            "type": "imageGeneration", "status": "completed", "fileId": "file-1",
+            "savedPath": path,
+        });
+        assert_eq!(
+            codex_item_image_urls(&item),
+            vec!["data:image/png;base64,aGVsbG8="]
+        );
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

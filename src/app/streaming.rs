@@ -1,5 +1,59 @@
 use super::*;
 
+/// Shared by completed turns and approvals that need the user's attention.
+fn attention_sound(
+    state: &PersistedState,
+    session: &AgentSession,
+    focused_project: Option<Uuid>,
+    employee: bool,
+) -> Option<CompletionSound> {
+    if !state.completion_sound_enabled
+        || state.selected_session == Some(session.id)
+        || employee
+        || !session.queued_messages.is_empty()
+        || focused_project.is_some_and(|focused| session.project_id != focused)
+    {
+        return None;
+    }
+    let starred = state
+        .projects
+        .iter()
+        .any(|project| project.id == session.project_id && project.starred);
+    Some(if starred && state.starred_completion_sound {
+        CompletionSound::Crystal
+    } else {
+        state.completion_sound
+    })
+}
+
+/// A compact view's detail snapshot carries control state — list columns,
+/// the last turn, the send queue — but no transcript. Merge those fields
+/// into the resident session without touching materialized detail, so a
+/// detail-interest flip or daemon reconnect cannot blank an open transcript
+/// back into the loading facade.
+pub(super) fn apply_compact_task_view_snapshot(
+    existing: &mut AgentSession,
+    snapshot: &AgentSession,
+) {
+    // A compact update cannot replace a history lineage. Recovery loads the
+    // authoritative detail; an older attachment must not restore removed turns.
+    if snapshot.history_generation != existing.history_generation {
+        return;
+    }
+    super::runtime::merge_session_catalog_row(existing, snapshot.clone(), true);
+    super::transcript_window::merge_turns(&mut existing.turns, &snapshot.turns);
+    let mut queued = snapshot.queued_messages.clone();
+    queued.retain(|queued| queued.is_agent_owned());
+    queued.extend(
+        existing
+            .queued_messages
+            .iter()
+            .filter(|queued| !queued.is_agent_owned())
+            .cloned(),
+    );
+    existing.queued_messages = queued;
+}
+
 impl Waku {
     pub(super) fn finish_streaming_assistant(&mut self, session_id: Uuid) {
         if let Some(session) = self.state.session_mut(session_id) {
@@ -19,7 +73,9 @@ impl Waku {
         }
         let continuing = previous_phase == Some(StreamPhase::Text);
         append_text_delta_to_session(&mut self.state.sessions, session_id, continuing, delta);
-        self.state.mark_session_dirty(session_id);
+        if runtime.detail_visible.is_none() {
+            self.state.mark_session_dirty(session_id);
+        }
         runtime.stream_phase = Some(StreamPhase::Text);
     }
 
@@ -212,6 +268,25 @@ impl Waku {
         );
     }
 
+    fn play_attention_sound(&self, session_id: Uuid) {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return;
+        };
+        if let Some(sound) = attention_sound(
+            &self.state,
+            session,
+            self.focused_project_id(),
+            self.session_is_employee(session),
+        ) {
+            crate::platform::play_completion_sound(sound, self.state.completion_sound_volume);
+        }
+    }
+
     pub(super) fn accepts_turn_output(&mut self, session_id: Uuid) -> bool {
         // The turn begins at submission accept, before its prompt has reached
         // any provider. While preparation is still running, a reused runtime
@@ -240,6 +315,9 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> bool {
         runtime.last_active_at = Instant::now();
+        if let Some(session) = self.state.session_mut(session_id) {
+            session.observe_compaction(&event, Instant::now());
+        }
         // Keyed errors render in the client's locale, then flow through the
         // same handling as any opaque provider error.
         let event = match event {
@@ -251,6 +329,146 @@ impl Waku {
         // gets one labeled continuation on a fresh runtime first.
         let runtime_lost = matches!(event, DriverEvent::RuntimeLost);
         match event {
+            DriverEvent::TaskViewSnapshot {
+                session,
+                detail,
+                settle,
+            } => {
+                if session.id != session_id {
+                    return true;
+                }
+                let settlement = settle
+                    .then(|| {
+                        self.state
+                            .sessions
+                            .iter()
+                            .find(|existing| existing.id == session_id)
+                            .and_then(|existing| existing.active_turn_id())
+                            .and_then(|id| {
+                                session
+                                    .turns
+                                    .iter()
+                                    .find(|turn| {
+                                        turn.id == id && turn.status != TurnStatus::Running
+                                    })
+                                    .cloned()
+                            })
+                    })
+                    .flatten();
+                if let Some(previews) = self.employee_prompt_previews.get(&session_id) {
+                    let delivered: Vec<_> = previews
+                        .iter()
+                        .filter(|preview| {
+                            session
+                                .messages
+                                .iter()
+                                .any(|message| message.id == preview.id)
+                                || session
+                                    .queued_messages
+                                    .iter()
+                                    .any(|queued| queued.id == preview.id)
+                        })
+                        .map(|preview| preview.id)
+                        .collect();
+                    for id in delivered {
+                        self.take_employee_prompt_preview(session_id, id);
+                    }
+                }
+                runtime.detail_visible = Some(detail);
+                if detail {
+                    self.stale_task_details.remove(&session_id);
+                } else {
+                    self.stale_task_details.insert(session_id);
+                }
+                if session.detail_loaded {
+                    // A detail snapshot carries the complete transcript —
+                    // any bounded slice materialized for this session is
+                    // superseded wholesale.
+                    self.transcript_views.remove(&session_id);
+                    if let Some(existing) = self.state.session_mut(session_id) {
+                        let mut snapshot = *session;
+                        waku_protocol::streaming::merge_task_view_snapshot(
+                            existing,
+                            &mut snapshot,
+                            !detail || settle,
+                        );
+                        runtime.pending_reasoning_newlines = 0;
+                        runtime.stream_phase = if !snapshot.status.is_busy() {
+                            None
+                        } else if snapshot.messages.last().is_some_and(|m| m.streaming) {
+                            Some(StreamPhase::Text)
+                        } else if snapshot
+                            .transcript_blocks
+                            .last()
+                            .and_then(|b| b.activities.last())
+                            .is_some_and(|a| a.reasoning.is_some() && !a.complete)
+                        {
+                            Some(StreamPhase::Reasoning)
+                        } else if snapshot
+                            .transcript_blocks
+                            .last()
+                            .is_some_and(|block| !block.activities.is_empty())
+                        {
+                            Some(StreamPhase::Activity)
+                        } else {
+                            None
+                        };
+                        let retained: HashSet<_> =
+                            snapshot.messages.iter().map(|message| message.id).collect();
+                        let mut markdown = self.message_markdown.borrow_mut();
+                        for message in &existing.messages {
+                            if !retained.contains(&message.id) {
+                                markdown.remove(&message.id);
+                            }
+                        }
+                        *existing = snapshot;
+                    }
+                    if self.transcript_session_id() == Some(session_id) {
+                        self.reset_visible_state();
+                        self.reset_transcript_rows(self.transcript_row_count());
+                        self.reapply_transcript_landing(session_id, cx);
+                    }
+                } else if detail {
+                    // A compact view's detail snapshot carries control state —
+                    // list columns, the last turn, the send queue — but no
+                    // transcript. The resident detail, materialized window and
+                    // loading facade survive; only the control fields merge.
+                    let previous_kinds = self.snapshot_selected_transcript_rows(session_id);
+                    if let Some(existing) = self.state.session_mut(session_id) {
+                        apply_compact_task_view_snapshot(existing, &session);
+                    }
+                    if let Some(previous_kinds) = previous_kinds.as_deref() {
+                        self.splice_transcript_rows_after_visibility_change(previous_kinds);
+                    }
+                } else {
+                    self.stale_task_details.insert(session_id);
+                    if let Some(existing) = self.state.session_mut(session_id) {
+                        // A cold control attachment needs the active turn identity
+                        // for settlement and queue advancement, not its transcript.
+                        if existing.turns.is_empty() {
+                            existing.turns = session.turns.clone();
+                        }
+                    }
+                }
+                if let Some(turn) = settlement {
+                    let event = match turn.status {
+                        TurnStatus::Completed | TurnStatus::Failed => DriverEvent::TurnFinished {
+                            success: turn.status == TurnStatus::Completed,
+                            summary: None,
+                            summary_i18n: None,
+                        },
+                        TurnStatus::Interrupted => DriverEvent::TurnCancelled,
+                        TurnStatus::Running => unreachable!(),
+                    };
+                    return self.handle_driver_event(
+                        session_id,
+                        runtime,
+                        event,
+                        allow_queue_drain,
+                        cx,
+                    );
+                }
+            }
             DriverEvent::BossTerminalIntent {
                 title,
                 cwd,
@@ -298,20 +516,10 @@ impl Waku {
             DriverEvent::ConfigActivated {
                 generation,
                 revision,
-                provider,
-                model,
-                reasoning_effort,
                 ..
             } => {
                 if let Some(session) = self.state.session_mut(session_id) {
-                    project_effective_config(
-                        session,
-                        generation,
-                        revision,
-                        provider.as_deref(),
-                        model,
-                        reasoning_effort,
-                    );
+                    note_configuration_activation(session, generation, revision);
                 }
             }
             DriverEvent::AgentPresetSelected(agent_preset) => {
@@ -321,7 +529,7 @@ impl Waku {
             }
             DriverEvent::AutoTitleUpdated(title) => {
                 let finished_turn = self.state.session_mut(session_id).and_then(|session| {
-                    if !session.set_auto_title(title) || session.active_turn_id().is_some() {
+                    if !session.set_provider_title(title) || session.active_turn_id().is_some() {
                         return None;
                     }
                     session
@@ -361,6 +569,7 @@ impl Waku {
                 // is news; a mirrored turn is marked for the next save so the
                 // projection this client persists carries the prompt whose
                 // reply it is about to stream.
+                self.take_employee_prompt_preview(session_id, message_id);
                 if let Some(session) = self.state.session_mut(session_id)
                     && session.adopt_submitted_prompt(
                         &message,
@@ -385,13 +594,48 @@ impl Waku {
                 // The daemon owns the agent-sourced slice of the follow-up
                 // queue — a parked prompt appeared, delivered, or was
                 // cancelled. Composer-queued entries pass through untouched.
+                for queued in &messages {
+                    self.take_employee_prompt_preview(session_id, queued.id);
+                }
                 if let Some(session) = self.state.session_mut(session_id)
                     && session.merge_agent_queued(messages)
                 {
                     self.state.mark_session_dirty(session_id);
                 }
             }
+            DriverEvent::TaskTurnStarted(turn) => {
+                if let Some(session) = self.state.session_mut(session_id)
+                    && !session.turns.iter().any(|known| known.id == turn.id)
+                {
+                    let optimistic = session
+                        .turns
+                        .last()
+                        .filter(|previous| {
+                            previous.status == TurnStatus::Running
+                                && !previous.provider_turn_started
+                                && !session.messages.iter().any(|message| {
+                                    message.turn_id == Some(previous.id)
+                                        && message.role == MessageRole::User
+                                })
+                        })
+                        .map(|previous| previous.id);
+                    if optimistic.is_some() {
+                        session.turns.pop();
+                    }
+                    session.turns.push(turn);
+                }
+                return self.handle_driver_event(
+                    session_id,
+                    runtime,
+                    DriverEvent::TurnStarted,
+                    allow_queue_drain,
+                    cx,
+                );
+            }
             DriverEvent::TurnStarted => {
+                if runtime.detail_visible == Some(false) {
+                    self.stale_task_details.insert(session_id);
+                }
                 // A start already in flight when another client pressed
                 // Stop belongs to the cancelled turn until its settle lands.
                 if self.session_is_draining_cancel(session_id) {
@@ -550,6 +794,10 @@ impl Waku {
                     || request_id.starts_with(waku_protocol::AGENT_ARCHIVE_REQUEST_PREFIX)
                     || request_id.starts_with(waku_protocol::PLAN_FINALIZE_REQUEST_PREFIX)
                 {
+                    let new_request = runtime
+                        .pending_daemon_request
+                        .as_ref()
+                        .is_none_or(|pending| pending.request_id != request_id);
                     runtime.pending_daemon_request = Some(PendingPermission {
                         request_id,
                         title,
@@ -560,6 +808,10 @@ impl Waku {
                     });
                     if let Some(session) = self.state.session_mut(session_id) {
                         session.status = SessionStatus::Waiting;
+                    }
+                    if new_request {
+                        self.play_attention_sound(session_id);
+                        self.queue_rush_attention(session_id);
                     }
                     self.notify_waiting_input(session_id, tr!("session.waiting_for_approval"), cx);
                 } else if self.accepts_turn_output(session_id) {
@@ -575,6 +827,10 @@ impl Waku {
                     if already_allowed && self.state.computer_use_enabled {
                         runtime.driver.respond(request_id, "task".into());
                     } else {
+                        let new_request = runtime
+                            .pending_permission
+                            .as_ref()
+                            .is_none_or(|pending| pending.request_id != request_id);
                         runtime.pending_permission = Some(PendingPermission {
                             request_id,
                             title,
@@ -585,6 +841,10 @@ impl Waku {
                         });
                         if let Some(session) = self.state.session_mut(session_id) {
                             session.status = SessionStatus::Waiting;
+                        }
+                        if new_request {
+                            self.play_attention_sound(session_id);
+                            self.queue_rush_attention(session_id);
                         }
                         self.notify_waiting_input(
                             session_id,
@@ -599,11 +859,18 @@ impl Waku {
                 questions,
             } => {
                 if self.accepts_turn_output(session_id) && !questions.is_empty() {
+                    let new_request = runtime
+                        .pending_user_input
+                        .as_ref()
+                        .is_none_or(|pending| pending.request_id != request_id);
                     runtime.pending_user_input = Some(PendingUserInput::new(request_id, questions));
-                    if self.state.selected_session == Some(session_id) {
-                        self.user_input_answer
-                            .update(cx, |input, cx| input.clear(cx));
+                    if new_request {
+                        self.queue_rush_attention(session_id);
                     }
+                    // A fresh request starts its answer field empty —
+                    // the selected session's shared input or an employee
+                    // card's own, whichever this session edits through.
+                    self.clear_user_input_answer(session_id, cx);
                     if let Some(session) = self.state.session_mut(session_id) {
                         session.status = SessionStatus::Waiting;
                     }
@@ -655,6 +922,7 @@ impl Waku {
                 }
             }
             DriverEvent::SteerAccepted {
+                submission_id,
                 message,
                 sent_by_task,
                 hidden,
@@ -673,6 +941,23 @@ impl Waku {
                 if !accepts {
                     return true;
                 }
+                let preview =
+                    submission_id.and_then(|id| self.take_employee_prompt_preview(session_id, id));
+                if submission_id.is_some_and(|id| {
+                    self.state
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == session_id)
+                        .is_some_and(|session| {
+                            session
+                                .messages
+                                .iter()
+                                .any(|message| message.id == id && message.turn_id.is_some())
+                        })
+                }) {
+                    take_steer_submission(runtime, submission_id, &message);
+                    return true;
+                }
                 let queued_submission = self
                     .state
                     .sessions
@@ -682,7 +967,11 @@ impl Waku {
                         session
                             .queued_messages
                             .iter()
-                            .find(|queued| !queued.is_agent_owned() && queued.content == message)
+                            .find(|queued| {
+                                !queued.is_agent_owned()
+                                    && submission_id
+                                        .map_or(queued.content == message, |id| queued.id == id)
+                            })
                             .cloned()
                     })
                     .map(ComposerSubmission::from_queued_message);
@@ -721,17 +1010,15 @@ impl Waku {
                     }
                     return true;
                 }
-                let submission = runtime
-                    .pending_steers
-                    .iter()
-                    .position(|submission| submission.prompt == message)
-                    .and_then(|index| runtime.pending_steers.remove(index))
-                    // Providers normally echo the exact transport text, but a
-                    // normalized echo still acknowledges the oldest pending
-                    // steer. Preserve its attachment presentation metadata.
-                    .or_else(|| runtime.pending_steers.pop_front())
+                let mut submission = take_steer_submission(runtime, submission_id, &message)
                     .or(queued_submission)
                     .unwrap_or_else(|| ComposerSubmission::plain(message.clone()));
+                if let Some(preview) = preview {
+                    submission.display_content = preview.display_content;
+                    submission.attachments = preview.attachments;
+                    submission.message_atoms = preview.atoms;
+                }
+                submission.queued_id = submission_id.or(submission.queued_id);
                 // The provider folded the message into the live turn. Append
                 // it to the same turn so the transcript mirrors the provider
                 // conversation (no new turn boundary). Landing behind whatever
@@ -785,6 +1072,9 @@ impl Waku {
                             .retain(|queued| queued.id != queued_id);
                     }
                     session.updated_at = unix_time();
+                    // Accepted replies refresh Date grouping even when they
+                    // join the current turn or replace a queued preview.
+                    session.last_reply_at = Some(session.updated_at);
                     Some(message_id)
                 } else {
                     None
@@ -795,6 +1085,7 @@ impl Waku {
                 runtime.stream_phase = None;
             }
             DriverEvent::SteerRejected {
+                submission_id,
                 message,
                 reason,
                 reason_i18n,
@@ -806,13 +1097,16 @@ impl Waku {
                     return true;
                 }
                 let reason = reason_i18n.map(|i18n| i18n.render()).unwrap_or(reason);
-                let mut submission = runtime
-                    .pending_steers
-                    .iter()
-                    .position(|submission| submission.prompt == message)
-                    .and_then(|index| runtime.pending_steers.remove(index))
-                    .or_else(|| runtime.pending_steers.pop_front())
+                let preview =
+                    submission_id.and_then(|id| self.take_employee_prompt_preview(session_id, id));
+                let mut submission = take_steer_submission(runtime, submission_id, &message)
                     .unwrap_or_else(|| ComposerSubmission::plain(message));
+                if let Some(preview) = preview {
+                    submission.queued_id = Some(preview.id);
+                    submission.display_content = preview.display_content;
+                    submission.attachments = preview.attachments;
+                    submission.message_atoms = preview.atoms;
+                }
                 let (busy, settled_cleanly) = self
                     .state
                     .sessions
@@ -922,6 +1216,17 @@ impl Waku {
                 } else {
                     self.goal_observed_at.remove(&session_id);
                 }
+                let goal_stopped = self.state.sessions.iter().any(|session| {
+                    session.id == session_id
+                        && session.active_turn_id().is_none()
+                        && session.queued_messages.is_empty()
+                        && session.thread_goal.as_ref().is_some_and(|previous| {
+                            previous.status == crate::model::ThreadGoalStatus::Active
+                        })
+                        && goal.as_ref().is_some_and(|updated| {
+                            updated.status != crate::model::ThreadGoalStatus::Active
+                        })
+                });
                 if let Some(session) = self.state.session_mut(session_id) {
                     if let Some(goal) = &goal
                         && session.messages.is_empty()
@@ -934,6 +1239,9 @@ impl Waku {
                         session.thread_goal = goal;
                         self.state.mark_session_dirty(session_id);
                     }
+                }
+                if goal_stopped {
+                    self.queue_rush_attention(session_id);
                 }
             }
             DriverEvent::UsageUpdated {
@@ -1014,7 +1322,8 @@ impl Waku {
                 self.finish_streaming_assistant(session_id);
                 self.complete_turn_blocks(session_id);
                 runtime.stream_phase = None;
-                let needs_fallback = !self.turn_has_assistant_message(session_id);
+                let needs_fallback = runtime.detail_visible != Some(false)
+                    && !self.turn_has_assistant_message(session_id);
                 if let Some(session) = self.state.session_mut(session_id) {
                     session.status = if success {
                         SessionStatus::Idle
@@ -1149,34 +1458,20 @@ impl Waku {
                                     .is_some_and(|turn_id| Some(turn_id) == goal.managed_last_turn))
                     })
                 });
-                if self.state.completion_sound_enabled
-                    && self.state.selected_session != Some(session_id)
-                    && finished.is_some_and(|session| {
-                        !self.session_is_employee(session) && session.queued_messages.is_empty()
-                    })
-                    && inside_focus
-                    && !managed_goal_turn
-                {
-                    // A starred project's finish plays its own sound unless
-                    // the user disabled the override.
-                    let starred = finished.is_some_and(|session| {
-                        self.state
-                            .projects
-                            .iter()
-                            .any(|project| project.id == session.project_id && project.starred)
-                    });
-                    let sound = if starred && self.state.starred_completion_sound {
-                        waku_client::persistence::CompletionSound::Crystal
-                    } else {
-                        self.state.completion_sound
-                    };
-                    crate::platform::play_completion_sound(
-                        sound,
-                        self.state.completion_sound_volume,
-                    );
+                let continuing = success && finished.is_some_and(|session| {
+                    !session.queued_messages.is_empty()
+                        || session.thread_goal.as_ref().is_some_and(|goal| {
+                            goal.status == crate::model::ThreadGoalStatus::Active
+                        })
+                });
+                if !managed_goal_turn {
+                    self.play_attention_sound(session_id);
                 }
                 // A turn settling off screen is an away-completion
                 // candidate; on screen it is simply read.
+                if allow_queue_drain && !continuing {
+                    self.queue_rush_attention(session_id);
+                }
                 self.note_voice_briefing_completion(session_id, cx);
                 if let Some((title, body)) = task_notification
                     && inside_focus
@@ -1444,6 +1739,22 @@ fn finish_streaming_messages(session: &mut AgentSession) {
     }
 }
 
+// Older daemons and local drivers omit the id and can normalize the echo.
+fn take_steer_submission(
+    runtime: &mut SessionRuntime,
+    submission_id: Option<Uuid>,
+    message: &str,
+) -> Option<ComposerSubmission> {
+    let index = runtime.pending_steers.iter().position(|submission| {
+        submission_id.map_or(submission.prompt == message, |id| {
+            submission.queued_id == Some(id)
+        })
+    });
+    index
+        .or_else(|| submission_id.is_none().then_some(0))
+        .and_then(|index| runtime.pending_steers.remove(index))
+}
+
 fn complete_transcript_activities(session: &mut AgentSession) {
     for block in &mut session.transcript_blocks {
         for activity in &mut block.activities {
@@ -1550,44 +1861,18 @@ pub(super) fn push_transcript_activity(
     }
 }
 
-/// Mirror the daemon's confirmed selection. Missing adapter observations do
-/// not clear a pinned selection, unknown provider ids are not a retarget,
-/// and a redelivery from an older generation or a lower revision is
-/// rejected by the session's activation mark — a stale event can never
-/// roll back a superseded selection.
-fn project_effective_config(
-    session: &mut AgentSession,
-    generation: u64,
-    revision: u64,
-    provider: Option<&str>,
-    model: Option<String>,
-    reasoning_effort: Option<String>,
-) {
+/// Effective settings live in the native host and the event's payload.
+/// Task settings are user metadata: a delayed fact cannot replace a choice.
+fn note_configuration_activation(session: &mut AgentSession, generation: u64, revision: u64) {
     let activation = ConfigActivation {
         generation,
         revision,
     };
-    if session
-        .config_activation
-        .is_some_and(|current| current > activation)
-    {
-        return;
-    }
-    session.config_activation = Some(activation);
-    if let Some(provider) = provider.and_then(|id| {
-        ProviderKind::ALL
-            .iter()
-            .copied()
-            .find(|kind| kind.id() == id)
-    }) {
-        session.provider = provider;
-    }
-    if let Some(model) = model {
-        session.model = Some(model);
-    }
-    if let Some(effort) = reasoning_effort {
-        session.reasoning_effort = Some(effort);
-    }
+    session.config_activation = Some(
+        session
+            .config_activation
+            .map_or(activation, |current| current.max(activation)),
+    );
 }
 
 pub(super) fn stream_delta_kind(event: &DriverEvent) -> Option<StreamDeltaKind> {
@@ -1673,36 +1958,8 @@ pub(super) fn pop_stream_batch(
     }
 }
 
-/// Newline count when a reasoning delta is nothing but line breaks, e.g. the
-/// `"\n"` chunks GLM via OpenRouter interleaves between every text chunk.
-/// Mixed deltas keep their interior newlines untouched.
-fn reasoning_delta_newlines(delta: &str) -> Option<usize> {
-    delta
-        .bytes()
-        .all(|byte| matches!(byte, b'\n' | b'\r'))
-        .then(|| delta.bytes().filter(|byte| *byte == b'\n').count())
-}
-
-/// Fold one reasoning delta into a batch's chunk. Newline-only deltas are
-/// buffered rather than appended — a lone one is dropped and a run collapses
-/// to a single paragraph break once real text resumes — so providers that
-/// emit line-delimited reasoning don't render one token per line. A run left
-/// pending when the batch ends carries into the next one.
-pub(super) fn push_reasoning_delta(
-    content: &mut String,
-    pending_newlines: &mut usize,
-    delta: &str,
-) {
-    if let Some(newlines) = reasoning_delta_newlines(delta) {
-        *pending_newlines += newlines;
-        return;
-    }
-    if *pending_newlines >= 2 {
-        content.push_str("\n\n");
-    }
-    *pending_newlines = 0;
-    content.push_str(delta);
-}
+pub(super) use waku_protocol::streaming::push_reasoning_delta;
+use waku_protocol::streaming::text_delta_rejoins;
 
 pub(super) fn append_text_delta_to_session(
     sessions: &mut [AgentSession],
@@ -1756,121 +2013,91 @@ pub(super) fn append_text_delta_to_session(
     session.updated_at = unix_time();
 }
 
-/// Whether a text delta resumes a message a mid-stream boundary cut off.
-/// Providers emit token-granular chunks and dispatch tool calls wherever a
-/// sentence happens to be, so a split lands mid-thought while their own
-/// transcript keeps the text as one message. `previous` must read as
-/// unfinished — no terminal punctuation — and `delta` must not open a fresh
-/// sentence.
-fn text_delta_rejoins(previous: &str, delta: &str) -> bool {
-    let ends_mid_thought = previous
-        .trim_end()
-        .chars()
-        .next_back()
-        .is_some_and(|c| !matches!(c, '.' | '!' | '?' | ':' | '…'));
-    let opens_fresh = delta.chars().next().is_some_and(char::is_uppercase);
-    ends_mid_thought && !opens_fresh
-}
-
 #[cfg(test)]
 mod config_activation_tests {
     use super::*;
 
     #[test]
-    fn config_activation_projects_confirmed_fields_without_clearing_missing_selection() {
+    fn provider_activation_never_replaces_the_shared_user_selection() {
         let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
-        session.model = Some("pinned".into());
+        session.model = Some("selected-model".into());
         session.reasoning_effort = Some("high".into());
-        project_effective_config(&mut session, 1, 0, Some("unknown-provider"), None, None);
+        note_configuration_activation(&mut session, 1, 3);
+        note_configuration_activation(&mut session, 1, 3);
         assert_eq!(session.provider, ProviderKind::Codex);
-        assert_eq!(session.model.as_deref(), Some("pinned"));
+        assert_eq!(session.model.as_deref(), Some("selected-model"));
         assert_eq!(session.reasoning_effort.as_deref(), Some("high"));
-        project_effective_config(
-            &mut session,
-            1,
-            1,
-            Some("claude"),
-            Some("confirmed".into()),
-            Some("low".into()),
-        );
-        assert_eq!(session.provider, ProviderKind::Claude);
-        assert_eq!(session.model.as_deref(), Some("confirmed"));
-        assert_eq!(session.reasoning_effort.as_deref(), Some("low"));
-        project_effective_config(&mut session, 1, 2, None, Some("next".into()), None);
-        assert_eq!(session.provider, ProviderKind::Claude);
-        assert_eq!(session.model.as_deref(), Some("next"));
-        assert_eq!(session.reasoning_effort.as_deref(), Some("low"));
     }
 
     #[test]
-    fn config_activation_rejects_stale_revisions_and_older_generations() {
+    fn activation_marks_reject_stale_revisions_and_older_generations() {
         let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
-        project_effective_config(&mut session, 1, 3, None, Some("new".into()), None);
-        assert_eq!(
-            session.config_activation,
-            Some(ConfigActivation {
-                generation: 1,
-                revision: 3
-            })
-        );
+        for (generation, revision, expected) in [
+            (1, 3, (1, 3)),
+            (1, 2, (1, 3)),
+            (1, 3, (1, 3)),
+            (2, 0, (2, 0)),
+            (1, 99, (2, 0)),
+        ] {
+            note_configuration_activation(&mut session, generation, revision);
+            assert_eq!(
+                session.config_activation,
+                Some(ConfigActivation {
+                    generation: expected.0,
+                    revision: expected.1,
+                })
+            );
+        }
+    }
+}
 
-        // A lower revision of the same generation cannot move the mark or
-        // the fields back.
-        project_effective_config(
-            &mut session,
-            1,
-            2,
-            None,
-            Some("old".into()),
-            Some("low".into()),
-        );
-        assert_eq!(session.model.as_deref(), Some("new"));
-        assert_eq!(session.reasoning_effort, None);
-        assert_eq!(
-            session.config_activation,
-            Some(ConfigActivation {
-                generation: 1,
-                revision: 3
-            })
-        );
+#[cfg(test)]
+mod attention_sound_tests {
+    use super::*;
 
-        // The same revision may redeliver — the provider's correction still
-        // lands without lowering the mark.
-        project_effective_config(&mut session, 1, 3, None, None, Some("high".into()));
-        assert_eq!(session.reasoning_effort.as_deref(), Some("high"));
-
-        // A replacement generation's first activation supersedes everything
-        // its predecessor could still emit.
-        project_effective_config(&mut session, 2, 0, Some("devin"), Some("v2".into()), None);
-        assert_eq!(session.provider, ProviderKind::Devin);
-        assert_eq!(session.model.as_deref(), Some("v2"));
+    #[test]
+    fn approvals_follow_completion_sound_settings() {
+        let mut state = PersistedState::empty();
+        state.completion_sound_enabled = true;
+        state.completion_sound = CompletionSound::Gentle;
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.status = SessionStatus::Waiting;
         assert_eq!(
-            session.config_activation,
-            Some(ConfigActivation {
-                generation: 2,
-                revision: 0
-            })
+            attention_sound(&state, &session, None, false),
+            Some(CompletionSound::Gentle)
         );
-
-        // An older generation's event is stale no matter its revision — a
-        // late activation from the replaced provider cannot flip the
-        // session back.
-        project_effective_config(
-            &mut session,
-            1,
-            9,
-            Some("codex"),
-            Some("stale".into()),
-            None,
-        );
-        assert_eq!(session.provider, ProviderKind::Devin);
-        assert_eq!(session.model.as_deref(), Some("v2"));
+        state.selected_session = Some(session.id);
+        assert_eq!(attention_sound(&state, &session, None, false), None);
+        state.selected_session = None;
+        assert_eq!(attention_sound(&state, &session, None, true), None);
         assert_eq!(
-            session.config_activation,
-            Some(ConfigActivation {
-                generation: 2,
-                revision: 0
-            })
+            attention_sound(&state, &session, Some(Uuid::new_v4()), false),
+            None
         );
+        assert_eq!(
+            attention_sound(&state, &session, Some(session.project_id), false),
+            Some(CompletionSound::Gentle)
+        );
+        let mut project = Project::from_path(std::path::PathBuf::from("/tmp/waku-sound-test"));
+        project.id = session.project_id;
+        project.starred = true;
+        state.projects.push(project);
+        state.starred_completion_sound = true;
+        assert_eq!(
+            attention_sound(&state, &session, None, false),
+            Some(CompletionSound::Crystal)
+        );
+        state.starred_completion_sound = false;
+        assert_eq!(
+            attention_sound(&state, &session, None, false),
+            Some(CompletionSound::Gentle)
+        );
+        session
+            .queued_messages
+            .push(QueuedMessage::new("follow up"));
+        assert_eq!(attention_sound(&state, &session, None, false), None);
+        session.queued_messages.clear();
+        state.completion_sound_enabled = false;
+        assert_eq!(attention_sound(&state, &session, None, false), None);
     }
 }

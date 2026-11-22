@@ -49,7 +49,9 @@ pub struct PendingAction {
 pub fn reviews_natively(provider: crate::model::ProviderKind) -> bool {
     matches!(
         provider,
-        crate::model::ProviderKind::Fx | crate::model::ProviderKind::Droid
+        crate::model::ProviderKind::Fx
+            | crate::model::ProviderKind::Droid
+            | crate::model::ProviderKind::Antigravity
     )
 }
 

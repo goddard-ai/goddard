@@ -22,7 +22,7 @@ use github_copilot_sdk::handler::{
     UserInputResponse,
 };
 use github_copilot_sdk::rpc::{
-    PermissionDecision, PermissionDecisionApproveForSession,
+    ModelSwitchToRequest, PermissionDecision, PermissionDecisionApproveForSession,
     PermissionDecisionApproveForSessionApproval,
     PermissionDecisionApproveForSessionApprovalCommands,
     PermissionDecisionApproveForSessionApprovalRead,
@@ -37,8 +37,7 @@ use github_copilot_sdk::session_events::{
 use github_copilot_sdk::types::{
     Attachment, DeliveryMode, ExitPlanModeData, McpHttpServerConfig, McpServerConfig,
     McpStdioServerConfig, MessageOptions, PermissionRequestData, PermissionRequestKind, RequestId,
-    ResumeSessionConfig, SessionConfig, SessionEvent, SessionId, SetModelOptions,
-    SystemMessageConfig,
+    ResumeSessionConfig, SessionConfig, SessionEvent, SessionId, SystemMessageConfig,
 };
 use github_copilot_sdk::{CliProgram, Client, ClientInfo, ClientOptions};
 use parking_lot::Mutex;
@@ -57,6 +56,8 @@ use crate::model::{
     RuntimeMode, UserInputAnswer, UserInputOption, UserInputQuestion,
 };
 
+const OPTIONS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 enum CommandMessage {
     Prompt {
         text: String,
@@ -67,9 +68,8 @@ enum CommandMessage {
     /// Model, reasoning effort, and context tier ride one `session.set_model`
     /// call; the mode half lives in the handler's shared state.
     ApplyOptions {
-        model: String,
-        reasoning_effort: Option<String>,
-        context_tier: Option<ContextTier>,
+        options: SessionOptions,
+        reply: crossbeam_channel::Sender<bool>,
     },
     Shutdown,
 }
@@ -449,6 +449,7 @@ async fn run_inner(launch: CopilotRun) -> anyhow::Result<()> {
                         match session.send(message).await {
                             Ok(_) => {
                                 let _ = events.send(DriverEvent::SteerAccepted {
+                                    submission_id: None,
                                     message: text,
                                     sent_by_task: None,
                                     hidden: false,
@@ -471,21 +472,40 @@ async fn run_inner(launch: CopilotRun) -> anyhow::Result<()> {
                             )));
                         }
                     }
-                    CommandMessage::ApplyOptions {
-                        model,
-                        reasoning_effort,
-                        context_tier,
-                    } => {
-                        let set_model = SetModelOptions {
-                            reasoning_effort,
-                            context_tier,
+                    CommandMessage::ApplyOptions { options, reply } => {
+                        let model = options.model.as_deref().expect("validated model update");
+                        let request = ModelSwitchToRequest {
+                            model_id: model.to_owned(),
+                            reasoning_effort: options.reasoning_effort.clone(),
+                            context_tier: options.context_window.as_deref().map(context_tier),
+                            require_available: Some(true),
                             ..Default::default()
                         };
-                        if let Err(error) = session.set_model(&model, Some(set_model)).await {
+                        // The convenience set_model API discards deferred and
+                        // confirmation_required outcomes. Inspect the original
+                        // reply before allowing a prompt under these settings.
+                        let applied = match tokio::time::timeout(OPTIONS_TIMEOUT, async {
+                            session.rpc().model().switch_to(request).await
+                        }).await {
+                            Ok(Ok(result)) if result.deferred != Some(true)
+                                && result.confirmation.is_none()
+                                && result.status.as_deref().is_none_or(|status|
+                                    matches!(status, "completed" | "applied" | "unchanged"))
+                                && (result.model_id.as_deref() == Some(model)
+                                    || (model == "auto" && result.model_id.is_some())) => Ok(()),
+                            Ok(Ok(_)) => Err(anyhow!("the selected model settings are deferred or unconfirmed")),
+                            Ok(Err(error)) => Err(anyhow::Error::new(error)),
+                            Err(_) => Err(anyhow!("model settings were not confirmed within 30 seconds")),
+                        };
+                        if let Err(error) = applied {
+                            let _ = reply.send(false);
                             let _ = events.send(DriverEvent::Error(format!(
                                 "GitHub Copilot: {error}"
                             )));
+                            break;
                         }
+                        shared.lock().options = Some(options);
+                        let _ = reply.send(true);
                     }
                     CommandMessage::Shutdown => break,
                 }
@@ -947,6 +967,13 @@ impl PermissionHandler for CopilotHandler {
         if data.managed_settings_enabled {
             return PermissionResult::user_not_available();
         }
+        if matches!(data.kind, Some(PermissionRequestKind::Shell))
+            && permission_string(&data, "command")
+                .as_deref()
+                .is_some_and(crate::agent_readonly::readonly_agent_command)
+        {
+            return PermissionResult::approve_once();
+        }
         let (mode, eval) = {
             let shared = self.shared.lock();
             (
@@ -1205,8 +1232,7 @@ impl DriverControl for CopilotDriver {
     }
 
     fn apply_options(&self, options: SessionOptions) -> bool {
-        let mut shared = self.shared.lock();
-        let previous = shared.options.replace(options.clone());
+        let previous = self.shared.lock().options.clone();
         if previous.as_ref() == Some(&options) {
             return true;
         }
@@ -1221,17 +1247,29 @@ impl DriverControl for CopilotDriver {
                 || previous.context_window != options.context_window
         });
         if !modelled_change {
+            self.shared.lock().options = Some(options);
             return true;
         }
-        let Some(model) = options.model else {
+        if options.model.is_none() {
             return false;
-        };
-        let _ = self.commands.send(CommandMessage::ApplyOptions {
-            model,
-            reasoning_effort: options.reasoning_effort,
-            context_tier: options.context_window.as_deref().map(context_tier),
-        });
-        true
+        }
+        let (reply, response) = crossbeam_channel::bounded(1);
+        if self
+            .commands
+            .send(CommandMessage::ApplyOptions { options, reply })
+            .is_err()
+        {
+            return false;
+        }
+        match response
+            .recv_timeout(OPTIONS_TIMEOUT.saturating_add(std::time::Duration::from_secs(5)))
+        {
+            Ok(applied) => applied,
+            Err(_) => {
+                self.begin_shutdown();
+                false
+            }
+        }
     }
 
     fn delete_provider_session(&self) {

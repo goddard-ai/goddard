@@ -8,7 +8,7 @@ use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::sync::{Mutex, OnceLock, RwLock};
 
 use std::fs::{self, OpenOptions};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 #[cfg(unix)]
@@ -196,6 +196,27 @@ impl Proc {
     /// Spawn only if admission succeeds before the request's deadline.
     pub fn spawn_bounded_until(&mut self, deadline: Instant) -> io::Result<BoundedChild> {
         let permit = crate::subprocess::acquire_until(self.exec_label(), deadline)?;
+        self.spawn_with_permit(permit)
+    }
+
+    pub(crate) fn spawn_bounded_cancellable_until(
+        &mut self,
+        deadline: Instant,
+        cancellation: &AtomicBool,
+    ) -> io::Result<BoundedChild> {
+        let permit = crate::subprocess::acquire_cancellable_until(
+            self.exec_label(),
+            deadline,
+            cancellation,
+        )?;
+        // Cancellation may race a newly available permit. Drop it without
+        // spawning when the caller has already withdrawn this work.
+        if cancellation.load(Ordering::Acquire) {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "subprocess spawn cancelled",
+            ));
+        }
         self.spawn_with_permit(permit)
     }
 

@@ -7,7 +7,7 @@ use crate::ui::shortcut::ShortcutHint;
 use waku_client::friends::TransferStatus;
 use waku_client::persistence::SidebarProjectOrderEntry;
 
-actions!(waku_sidebar, [CancelSessionRename]);
+actions!(waku_sidebar, [CancelSessionRename, ReleaseSidebarGroupAlt]);
 
 #[derive(Clone)]
 struct SidebarProjectDrag {
@@ -42,15 +42,22 @@ impl gpui::Render for SidebarProjectDragView {
 
 pub(super) const SESSION_RENAME_PARENT_CONTEXT: &str = "SessionRename";
 const SESSION_RENAME_FIELD_CONTEXT: &str = "SessionRename > TextInput";
+const SIDEBAR_GROUP_ALT_CONTEXT: &str = "SidebarGroupAlt";
 
 /// Keep Escape inside the focused inline editor so it cancels the rename,
 /// rather than falling through to the window-wide Stop action.
 pub fn init(cx: &mut App) {
-    cx.bind_keys([KeyBinding::new(
-        "escape",
-        CancelSessionRename,
-        Some(SESSION_RENAME_FIELD_CONTEXT),
-    )]);
+    cx.bind_keys([
+        KeyBinding::new(
+            "escape",
+            CancelSessionRename,
+            Some(SESSION_RENAME_FIELD_CONTEXT),
+        ),
+        // Workspace's `escape → CancelTurn` outranks element `on_key_down`
+        // handlers in this GPUI fork, so the focused Option control needs
+        // its own context to see the release key at all.
+        KeyBinding::new("escape", ReleaseSidebarGroupAlt, Some(SIDEBAR_GROUP_ALT_CONTEXT)),
+    ]);
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -101,7 +108,9 @@ impl SessionDateGroup {
 /// between Project and Date grouping.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(super) enum SidebarGroup {
-    /// Pinned tasks, always the first section regardless of grouping.
+    /// Rushed tasks, above Pinned in either grouping.
+    Rushed,
+    /// Pinned tasks that are not rushed.
     Pinned,
     /// Every terminal — session-scoped and global — sitting between the
     /// search field and the session history. Starts collapsed; pinned
@@ -126,8 +135,9 @@ pub(super) enum SidebarGroup {
 }
 
 impl SidebarGroup {
-    fn element_key(self) -> SharedString {
+    pub(super) fn element_key(self) -> SharedString {
         match self {
+            Self::Rushed => "rushed".into(),
             Self::Pinned => "pinned".into(),
             Self::Terminals => "terminals".into(),
             Self::Dormant => "dormant".into(),
@@ -147,6 +157,7 @@ impl SidebarGroup {
     /// relaunch through `PersistedState::sidebar_collapsed_groups`.
     pub(super) fn persisted(self) -> PersistedSidebarGroup {
         match self {
+            Self::Rushed => PersistedSidebarGroup::Rushed,
             Self::Pinned => PersistedSidebarGroup::Pinned,
             Self::Terminals => PersistedSidebarGroup::Terminals,
             Self::Dormant => PersistedSidebarGroup::Dormant,
@@ -167,6 +178,7 @@ impl SidebarGroup {
     /// than dangles.
     pub(super) fn from_persisted(group: PersistedSidebarGroup) -> Option<Self> {
         Some(match group {
+            PersistedSidebarGroup::Rushed => Self::Rushed,
             PersistedSidebarGroup::Pinned => Self::Pinned,
             PersistedSidebarGroup::Terminals => Self::Terminals,
             PersistedSidebarGroup::Dormant => Self::Dormant,
@@ -184,6 +196,7 @@ impl SidebarGroup {
 
     fn mix_fingerprint(self, fingerprint: u64) -> u64 {
         match self {
+            Self::Rushed => mix(fingerprint, 0x800),
             Self::Pinned => mix(fingerprint, 0x300),
             Self::Terminals => mix(fingerprint, 0x400),
             Self::Dormant => mix(fingerprint, 0x500),
@@ -198,6 +211,77 @@ impl SidebarGroup {
             Self::Projectless => mix(fingerprint, 0x200),
         }
     }
+}
+
+/// Which group headers carry the group-local Option control: the boss's
+/// employee sections and every date/project session group. Pinned, Dormant,
+/// Terminals, Deliverables, and Planning headers keep only the fold click —
+/// pinned and dormant rows still answer to a physical Option hold.
+fn sidebar_group_has_alt_toggle(group: SidebarGroup) -> bool {
+    matches!(
+        group,
+        SidebarGroup::Outcomes
+            | SidebarGroup::Errands
+            | SidebarGroup::Waiting
+            | SidebarGroup::Employees
+            | SidebarGroup::Date(_)
+            | SidebarGroup::Project(_)
+            | SidebarGroup::Projectless
+    )
+}
+
+/// An engaged group-local Option header. Employee sections repeat once per
+/// boss, so the engaging header's row index — not its `SidebarGroup` — is
+/// the identity; the group is kept alongside to validate the index against
+/// a rebuilt snapshot.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct SidebarGroupAlt {
+    /// Index of the engaging `SidebarRow::Header` in the current rows
+    /// snapshot.
+    pub(super) row: usize,
+    /// The group that header rendered.
+    pub(super) group: SidebarGroup,
+    /// The Boss host whose section owns the header — employee groups repeat
+    /// once per host, so `row` and `group` alone cannot tell a rebuild's
+    /// identical-named section apart from the one that armed.
+    pub(super) boss: Option<waku_client::DaemonKey>,
+    /// Keyboard engagement survives the pointer leaving the group; a mouse
+    /// click engagement ends at the group's edge.
+    pub(super) sticky: bool,
+}
+
+/// Whether a stored engagement still heads the group it armed on. Rows
+/// rebuild on every structural sidebar change, so the index alone is not
+/// proof — the row it lands on must still be that group's header.
+fn sidebar_group_alt_active(rows: &[SidebarRow], engaged: SidebarGroupAlt) -> bool {
+    if rows.get(engaged.row) != Some(&SidebarRow::Header(engaged.group)) {
+        return false;
+    }
+    sidebar_group_alt_boss(rows, engaged.row, engaged.group) == engaged.boss
+}
+
+/// The Boss host whose block owns an employee-section header — the nearest
+/// `SidebarRow::Boss` above it. Session-side groups never sit in a boss
+/// block and return `None`.
+fn sidebar_group_alt_boss(
+    rows: &[SidebarRow],
+    index: usize,
+    group: SidebarGroup,
+) -> Option<waku_client::DaemonKey> {
+    if !matches!(
+        group,
+        SidebarGroup::Outcomes
+            | SidebarGroup::Errands
+            | SidebarGroup::Waiting
+            | SidebarGroup::Employees
+            | SidebarGroup::Planning
+    ) {
+        return None;
+    }
+    rows.get(..index)?.iter().rev().find_map(|row| match row {
+        SidebarRow::Boss(key) => Some(*key),
+        _ => None,
+    })
 }
 
 fn sidebar_purpose_group(
@@ -338,6 +422,39 @@ fn sidebar_group_header_status(
     }
 }
 
+#[derive(Default)]
+pub(super) struct SidebarEmployeeFolds {
+    expired_groups: HashSet<SidebarGroup>,
+    collapsed: HashSet<SidebarGroup>,
+}
+
+impl SidebarEmployeeFolds {
+    fn refresh(&mut self, employees: impl IntoIterator<Item = (SidebarGroup, bool)>) {
+        let mut groups = HashMap::new();
+        for (group, expired) in employees {
+            groups
+                .entry(group)
+                .and_modify(|all_expired| *all_expired &= expired)
+                .or_insert(expired);
+        }
+        let expired_groups: HashSet<_> = groups
+            .into_iter()
+            .filter_map(|(group, expired)| expired.then_some(group))
+            .collect();
+        self.collapsed
+            .retain(|group| expired_groups.contains(group));
+        // Fold only on entry into the all-expired state, so a deliberate
+        // expansion stays open until the group has live employees again.
+        self.collapsed
+            .extend(expired_groups.difference(&self.expired_groups).copied());
+        self.expired_groups = expired_groups;
+    }
+
+    fn is_collapsed(&self, group: SidebarGroup, manual: &HashSet<SidebarGroup>) -> bool {
+        manual.contains(&group) || self.collapsed.contains(&group)
+    }
+}
+
 /// One boss-employee section — Building, Helping, Waiting, or Employees — nested under its boss
 /// row: the header, the working members, then the finished tail capped by a
 /// "name finished ago" fold row. A collapsed group renders just its header —
@@ -409,21 +526,21 @@ fn append_sidebar_ungrouped_roster(
 }
 
 /// The member faces a collapsed employee group's header previews — up to
-/// `SIDEBAR_COLLAPSED_GROUP_AVATARS` non-expired members with a resolvable identity —
+/// `SIDEBAR_COLLAPSED_GROUP_AVATARS` members with a resolvable identity —
 /// and the member count its "+N more" tail omits. A member without an
 /// identity can't paint a face, so it falls into the omitted count.
 fn collapsed_employee_avatar_strip<'a>(
     members: &[Uuid],
     identities: &'a HashMap<Uuid, waku_client::boss::BossIdentity>,
     expired: &HashSet<Uuid>,
-) -> (Vec<&'a waku_client::boss::BossIdentity>, usize) {
+) -> (Vec<(&'a waku_client::boss::BossIdentity, bool)>, usize) {
     let mut faces = Vec::new();
     let mut omitted = 0;
-    for id in members.iter().filter(|id| !expired.contains(id)) {
+    for id in members {
         if faces.len() < SIDEBAR_COLLAPSED_GROUP_AVATARS
             && let Some(identity) = identities.get(id)
         {
-            faces.push(identity);
+            faces.push((identity, expired.contains(id)));
         } else {
             omitted += 1;
         }
@@ -782,15 +899,44 @@ fn dock_glyph_image(path: &'static str, color: Hsla, cx: &App) -> Option<Arc<gpu
 }
 
 /// The session row's trailing time: how long ago the agent last replied,
-/// shown through a live turn too. A session that has never replied shows
-/// nothing.
-pub(super) fn session_time_label(session: &AgentSession, now: u64) -> Option<String> {
+/// shown through a live turn too — or, while `absolute_date` is set (an
+/// Option hold or a group-local Option engagement), the reply's calendar
+/// date instead. A session that has never replied shows nothing.
+pub(super) fn session_time_label(
+    session: &AgentSession,
+    now: u64,
+    absolute_date: bool,
+) -> Option<String> {
     if session.status == SessionStatus::Background {
         return Some(tr!("sidebar.status_background"));
     }
-    session
-        .last_reply_at
-        .map(|last_reply_at| format_time_ago(now.saturating_sub(last_reply_at)))
+    session.last_reply_at.map(|last_reply_at| {
+        if absolute_date {
+            sidebar_short_date(last_reply_at, now)
+        } else {
+            format_time_ago(now.saturating_sub(last_reply_at))
+        }
+    })
+}
+
+/// The absolute counterpart to `format_time_ago`: an abbreviated local
+/// month and day for the current calendar year ("Oct 25"), the year tacked
+/// on for earlier ones ("Oct 25, 2025").
+pub(super) fn sidebar_short_date(timestamp: u64, now: u64) -> String {
+    let to_local = |at: u64| {
+        i64::try_from(at)
+            .ok()
+            .and_then(|at| DateTime::<Utc>::from_timestamp(at, 0))
+            .map(|at| at.with_timezone(&Local))
+    };
+    let Some(local) = to_local(timestamp) else {
+        return String::new();
+    };
+    if to_local(now).is_some_and(|now| now.year() == local.year()) {
+        local.format("%b %-d").to_string()
+    } else {
+        local.format("%b %-d, %Y").to_string()
+    }
 }
 
 /// The session row's draft line: the unsent composer text left on the task,
@@ -1405,6 +1551,7 @@ pub(super) enum SidebarRow {
     ErrandsShowMore(waku_client::DaemonKey),
     EmployeesShowMore(waku_client::DaemonKey),
     Boss(waku_client::DaemonKey),
+    Counsel(waku_client::DaemonKey),
     /// A daemon-managed planning session — the boss's own document, so the
     /// row sits under the boss like an employee but carries the plan's idea
     /// and kind label instead of a persona's name and job.
@@ -1459,6 +1606,35 @@ fn sidebar_row_selection(row: &SidebarRow) -> Option<SidebarSelection> {
     }
 }
 
+/// The header a sidebar row belongs to — the row's own index for a header,
+/// else the nearest preceding `Header` in the flat snapshot; `None` for the
+/// chrome rows above the first group and for the boss row that opens a new
+/// roster block. Group-local Option engagement uses it to bound the region
+/// the hover arm covers.
+fn sidebar_row_group_header(rows: &[SidebarRow], index: usize) -> Option<usize> {
+    if matches!(rows.get(index), Some(SidebarRow::Boss(_))) {
+        return None;
+    }
+    rows.get(..=index)?
+        .iter()
+        .rposition(|row| matches!(row, SidebarRow::Header(_)))
+}
+
+/// Which occurrence of its group a header row is. Employee-section headers
+/// repeat once per boss, so the group alone cannot name a header's focus
+/// handle, hover group, or element id — those need the header's position
+/// among the same-group headers in this snapshot, which stays stable while
+/// the roster keeps its order.
+fn sidebar_group_header_occurrence(rows: &[SidebarRow], index: usize) -> usize {
+    let Some(SidebarRow::Header(group)) = rows.get(index) else {
+        return 0;
+    };
+    rows[..index]
+        .iter()
+        .filter(|row| matches!(row, SidebarRow::Header(other) if other == group))
+        .count()
+}
+
 /// The session a row navigates to — `Planning` rows carry a session the
 /// same way `Session` rows do, so every traversal that walks "the session
 /// rows" (⌘D, ⌘1–9, multi-select ranges, landing indexes) sees them.
@@ -1472,6 +1648,23 @@ fn sidebar_row_session_id(row: &SidebarRow) -> Option<Uuid> {
 fn sidebar_selection_row_index(rows: &[SidebarRow], member: SidebarSelection) -> Option<usize> {
     rows.iter()
         .position(|row| sidebar_row_selection(row) == Some(member))
+}
+
+fn sidebar_multi_selection_range(
+    rows: &[SidebarRow],
+    anchor: Option<SidebarSelection>,
+    selected_deliverable: Option<SidebarSelection>,
+    selected_session: Option<Uuid>,
+    member: SidebarSelection,
+) -> Option<&[SidebarRow]> {
+    let target = sidebar_selection_row_index(rows, member)?;
+    let anchor = anchor
+        .into_iter()
+        .chain(selected_deliverable)
+        .chain(selected_session.map(SidebarSelection::Session))
+        .find_map(|candidate| sidebar_selection_row_index(rows, candidate))
+        .unwrap_or(target);
+    Some(&rows[anchor.min(target)..=anchor.max(target)])
 }
 
 pub(super) fn sidebar_session_row_index(rows: &[SidebarRow], session_id: Uuid) -> Option<usize> {
@@ -1542,7 +1735,7 @@ fn sidebar_row_height(row: SidebarRow) -> Pixels {
         SidebarRow::Session(_) | SidebarRow::Deliverable(..) | SidebarRow::Employee(_) => {
             SIDEBAR_SESSION_ROW_HEIGHT
         }
-        SidebarRow::Boss(_) | SidebarRow::Planning(_) => 42.0,
+        SidebarRow::Boss(_) | SidebarRow::Counsel(_) | SidebarRow::Planning(_) => 42.0,
         SidebarRow::Terminal(_) => terminals::SIDEBAR_TERMINAL_ROW_HEIGHT,
         SidebarRow::BossShowMore(_)
         | SidebarRow::ErrandsShowMore(_)
@@ -1808,6 +2001,7 @@ impl Waku {
             None,
             sweep,
             self.state.starred_idle_before_unseen,
+            self.state.prefer_starred_when_nothing_unread,
         );
         if target.is_none() && sweep.is_some() {
             target = sessions::next_attention_target(
@@ -1822,6 +2016,7 @@ impl Waku {
                 None,
                 None,
                 self.state.starred_idle_before_unseen,
+                self.state.prefer_starred_when_nothing_unread,
             );
         }
         let enabled = unread_target.is_some();
@@ -3633,6 +3828,15 @@ impl Waku {
             .child(
                 div()
                     .id("sidebar-scroll")
+                    .on_scroll_wheel(cx.listener(|this, _, _, _| {
+                        this.transcript_preloads.cancel_hover();
+                    }))
+                    // Leaving the history region ends a mouse-activated
+                    // group-local Option the same way entering a foreign row
+                    // does; keyboard engagement is untouched.
+                    .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                        this.sidebar_group_alt_pointer_enter(!*hovered, cx);
+                    }))
                     .flex_1()
                     .min_h_0()
                     .relative()
@@ -3671,6 +3875,9 @@ impl Waku {
                 div()
                     .flex_none()
                     .relative()
+                    .flex()
+                    .flex_col()
+                    .children(self.render_sidebar_intent_status(cx))
                     .child(self.render_sidebar_footer(cx))
                     // Hovering anywhere across the bottom strip — not just
                     // the settings cog — raises the quick-action dock. The
@@ -3759,6 +3966,7 @@ impl Waku {
                         session.has_started()
                             && session.archived_at.is_none()
                             && !session.is_side_chat()
+                            && !self.state.qa_session_ids.contains(&session.id)
                             && !self.friend_sessions.contains_key(&session.id)
                             && !self.session_is_boss_managed(session)
                     })
@@ -3951,6 +4159,72 @@ impl Waku {
             self.sidebar_shortcut_hints = false;
             cx.notify();
         }
+        if self.sidebar_group_alt.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// The engaged group-local Option header, validated against the rows
+    /// snapshot: the stored position must still head the group it armed on.
+    /// A rebuilt, regrouped, or shifted list drops the engagement rather
+    /// than letting it drift onto whatever row inherited the index.
+    fn sidebar_group_alt_engagement(&self, rows: &[SidebarRow]) -> Option<SidebarGroupAlt> {
+        let engaged = self.sidebar_group_alt.get()?;
+        if !sidebar_group_alt_active(rows, engaged) {
+            self.sidebar_group_alt.set(None);
+            return None;
+        }
+        Some(engaged)
+    }
+
+    /// Toggle the group-local modifier. Mouse activation lasts until the
+    /// pointer leaves the group; keyboard activation stays engaged until
+    /// explicitly released so its controls remain reachable without a mouse.
+    fn toggle_sidebar_group_alt(
+        &mut self,
+        row: usize,
+        group: SidebarGroup,
+        sticky: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let active = self
+            .sidebar_group_alt
+            .get()
+            .is_some_and(|alt| alt.row == row && alt.group == group);
+        let rows = self.sidebar_rows_snapshot.borrow().clone();
+        let boss = sidebar_group_alt_boss(&rows, row, group);
+        self.sidebar_group_alt
+            .set((!active).then_some(SidebarGroupAlt {
+                row,
+                group,
+                boss,
+                sticky,
+            }));
+        cx.notify();
+    }
+
+    /// Release the engagement — sticky or not — repainting only when one
+    /// was armed.
+    fn clear_sidebar_group_alt(&mut self, cx: &mut Context<Self>) {
+        if self.sidebar_group_alt.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// A pointer entering a row outside a mouse-activated group ends the arm:
+    /// the arm lives while the pointer stays inside the engaged header and
+    /// its member rows, so the controls the modifier reveals stay reachable
+    /// after the pointer leaves the small header control itself.
+    fn sidebar_group_alt_pointer_enter(&mut self, foreign: bool, cx: &mut Context<Self>) {
+        if foreign
+            && self
+                .sidebar_group_alt
+                .get()
+                .is_some_and(|alt| !alt.sticky)
+        {
+            self.sidebar_group_alt.set(None);
+            cx.notify();
+        }
     }
 
     /// The dormancy rule evaluated at the current time under the configured
@@ -4016,6 +4290,7 @@ impl Waku {
         fingerprint = mix(fingerprint, u64::from(dates.day_start_hour));
         fingerprint = mix(fingerprint, dates.calendar_year as u64);
         fingerprint = mix(fingerprint, self.boss_ui.revision);
+        fingerprint = mix(fingerprint, self.sidebar_intents.revision);
         // Pending archives stay hidden even if another update still carries
         // an unarchived session. HashMap iteration must not affect the cache.
         let pending_archives = self
@@ -4052,6 +4327,11 @@ impl Waku {
         // filtering, and deliverables join the list at all — with an empty
         // roster the session loop alone cannot see the flip.
         fingerprint = mix(fingerprint, u64::from(self.state.boss_experiment_enabled));
+        // Counsel's row hides on its own flag per host — remote hosts hold
+        // their own settings mirror, so mix every host's effective gate.
+        for key in &self.boss_ui.hosts {
+            fingerprint = mix(fingerprint, u64::from(self.counsel_enabled_on(*key)));
+        }
         fingerprint = mix_uuid(
             fingerprint,
             self.focused_project_id().unwrap_or(Uuid::nil()),
@@ -4068,6 +4348,7 @@ impl Waku {
             if !session.has_started()
                 || session.archived_at.is_some()
                 || session.is_side_chat()
+                || self.state.qa_session_ids.contains(&session.id)
                 || self.friend_sessions.contains_key(&session.id)
                 || self.session_is_boss_managed(session)
             {
@@ -4275,7 +4556,34 @@ impl Waku {
             fingerprint = mix_uuid(fingerprint, terminal_id);
         }
         if self.sidebar_rows_fingerprint.get() != Some(fingerprint) {
+            // Resolve before avatar gating: an arriving live employee must
+            // reopen its group even while its face is still being prepared.
+            self.sidebar_employee_folds.borrow_mut().refresh(
+                self.boss_ui
+                    .active
+                    .values()
+                    .flatten()
+                    .chain(self.boss_ui.recent.values().flatten())
+                    .filter(|id| {
+                        !self.sidebar_task_archiving(id)
+                            && sidebar_employee_shown(
+                                id,
+                                &self.state.sessions,
+                                &self.state.sidebar_archived_employees,
+                                self.boss_ui.working.contains(id),
+                            )
+                    })
+                    .map(|id| {
+                        (
+                            self.sidebar_employee_group(*id),
+                            self.boss_ui.expired.contains(id),
+                        )
+                    }),
+            );
             let (rows, collapsed_members, deliverables_unread) = self.sidebar_rows(dates);
+            // A rebuilt snapshot can move the armed group-local Option
+            // header — validate it before rows re-render against the drift.
+            self.sidebar_group_alt_engagement(&rows);
             *self.sidebar_rows_snapshot.borrow_mut() = Rc::new(rows);
             *self.sidebar_collapsed_group_members.borrow_mut() = Rc::new(collapsed_members);
             self.sidebar_deliverables_unread.set(deliverables_unread);
@@ -4297,6 +4605,7 @@ impl Waku {
             .sessions
             .iter()
             // Side chats are panel content under their parent, never rows.
+            // QA conversations belong to their dedicated review windows.
             // Watched friend sessions aren't sidebar rows either — they
             // open from the friends panel and stay out of local history.
             // Boss-managed sessions have dedicated Boss/Employee rows in
@@ -4306,8 +4615,9 @@ impl Waku {
             .filter(|session| {
                 session.has_started()
                     && session.archived_at.is_none()
-                    && !self.pending_task_metadata.is_archiving(&session.id)
+                    && !self.sidebar_task_archiving(&session.id)
                     && !session.is_side_chat()
+                    && !self.state.qa_session_ids.contains(&session.id)
                     && !self.friend_sessions.contains_key(&session.id)
                     && session
                         .planning
@@ -4466,7 +4776,7 @@ impl Waku {
                 let planning_ids = self
                     .sidebar_planning_session_ids(*key)
                     .into_iter()
-                    .filter(|id| !self.pending_task_metadata.is_archiving(id))
+                    .filter(|id| !self.sidebar_task_archiving(id))
                     .collect::<Vec<_>>();
                 if !self.state.sidebar_employee_groups {
                     let employees = self
@@ -4485,7 +4795,7 @@ impl Waku {
                         )
                         .copied()
                         .filter(|id| {
-                            !self.pending_task_metadata.is_archiving(id)
+                            !self.sidebar_task_archiving(id)
                                 && sidebar_employee_shown(
                                     id,
                                     &self.state.sessions,
@@ -4518,7 +4828,7 @@ impl Waku {
                 ] {
                     let shown = |id: &&Uuid| {
                         self.sidebar_employee_group(**id) == group
-                            && !self.pending_task_metadata.is_archiving(*id)
+                            && !self.sidebar_task_archiving(*id)
                             && sidebar_employee_shown(
                                 id,
                                 &self.state.sessions,
@@ -4551,7 +4861,7 @@ impl Waku {
                             .or_default()
                             .extend(active.iter().chain(idle.iter()).copied());
                     }
-                    let group_collapsed = self.sidebar_collapsed_groups.contains(&group);
+                    let group_collapsed = self.sidebar_group_collapsed(group);
                     // Member rows paint only while the group is expanded —
                     // a folded roster keeps its header aggregates while a
                     // face renders. An expanded member holds its row out
@@ -4575,33 +4885,39 @@ impl Waku {
                     );
                 }
             }
+            for key in &self.boss_ui.hosts {
+                if self.counsel_enabled_on(*key) {
+                    rows.push(SidebarRow::Counsel(*key));
+                }
+            }
             rows.push(SidebarRow::GroupSpacer);
         }
 
-        // Pinned tasks lead the sidebar in both groupings, ordered by the same
-        // recency the row displays — newest first, independent of the ordering
-        // preference applied to the ordinary groups below.
-        let mut pinned = sorted_sessions
-            .iter()
-            .filter(|session| session.pinned_at.is_some())
-            .copied()
-            .collect::<Vec<_>>();
+        let mut rushed_ids = Vec::new();
+        let mut pinned = Vec::new();
+        sorted_sessions.retain(|&session| {
+            if self.session_is_rushed(session.id) {
+                rushed_ids.push(session.id);
+            } else if session.pinned_at.is_some() {
+                pinned.push(session);
+            } else {
+                return true;
+            }
+            false
+        });
+        // Pinned tasks keep activity order independently of the sidebar preference.
         pinned.sort_by_key(|session| std::cmp::Reverse(sidebar_session_timestamp(session)));
         let pinned_ids = pinned.iter().map(|session| session.id).collect::<Vec<_>>();
-        let pinned_collapsed = self
-            .sidebar_collapsed_groups
-            .contains(&SidebarGroup::Pinned);
-        append_sidebar_group_rows(
-            &mut rows,
-            SidebarGroup::Pinned,
-            &pinned_ids,
-            pinned_collapsed,
-            None,
-        );
-        if pinned_collapsed {
-            collapsed_members.insert(SidebarGroup::Pinned, pinned_ids);
+        for (group, ids) in [
+            (SidebarGroup::Rushed, rushed_ids),
+            (SidebarGroup::Pinned, pinned_ids),
+        ] {
+            let collapsed = self.sidebar_collapsed_groups.contains(&group);
+            append_sidebar_group_rows(&mut rows, group, &ids, collapsed, None);
+            if collapsed && !ids.is_empty() {
+                collapsed_members.insert(group, ids);
+            }
         }
-        sorted_sessions.retain(|session| session.pinned_at.is_none());
 
         match self.state.sidebar_grouping {
             SidebarGrouping::Date => {
@@ -4762,29 +5078,18 @@ impl Waku {
         })
     }
 
-    /// ⌘-click: toggle `member` in the multi-selection without making it
-    /// the active surface. Creating the set seeds it with the active task —
-    /// ⌘-click extends the current selection rather than replacing it, like
-    /// Finder — so the viewed task joins the batch until ⌘-clicked back out,
-    /// when its row falls back to the neutral active highlight. The clicked
-    /// row becomes the range anchor either way — even when the toggle removed
-    /// it — matching Finder's pivot.
+    /// ⌘-click toggles a row without changing the active surface. The current
+    /// task can only join the batch through ⌘⇧-click range selection; a
+    /// subsequent ⌘-click can remove it. The clicked row becomes the range
+    /// anchor even when the toggle removes it.
     pub(super) fn toggle_sidebar_multi_selection(
         &mut self,
         member: SidebarSelection,
         cx: &mut Context<Self>,
     ) {
-        if self.sidebar_multi_selection.is_empty()
-            && let Some(active) = sidebar_multi_selection_seed(
-                &self.state.sessions,
-                self.state.selected_session,
-                member,
-            )
+        if !self.sidebar_multi_selection.remove(&member)
+            && Some(member) != self.state.selected_session.map(SidebarSelection::Session)
         {
-            self.sidebar_multi_selection
-                .insert(SidebarSelection::Session(active));
-        }
-        if !self.sidebar_multi_selection.remove(&member) {
             self.sidebar_multi_selection.insert(member);
         }
         self.sidebar_multi_selection_anchor = Some(member);
@@ -4794,24 +5099,33 @@ impl Waku {
     /// ⌘⇧-click: grow the multi-selection to cover every selectable row
     /// between the anchor and `member` in the current sidebar order — task
     /// and deliverable rows alike. The anchor is the last row a modified
-    /// click touched, then the active session, and finally the clicked row
-    /// itself.
+    /// click touched while a selection exists, then the selected deliverable
+    /// or task, and finally the clicked row itself.
     pub(super) fn extend_sidebar_multi_selection(
         &mut self,
         member: SidebarSelection,
         cx: &mut Context<Self>,
     ) {
         let rows = self.sidebar_rows_cached();
-        let Some(target) = sidebar_selection_row_index(&rows, member) else {
+        let anchor = (!self.sidebar_multi_selection.is_empty())
+            .then_some(self.sidebar_multi_selection_anchor)
+            .flatten();
+        let selected_deliverable = self
+            .boss_ui
+            .command_deliverable
+            .map(|(key, id)| SidebarSelection::Deliverable(key, id));
+        let Some(range) = sidebar_multi_selection_range(
+            &rows,
+            anchor,
+            selected_deliverable,
+            self.pending_session_activation
+                .map(|pending| pending.session_id)
+                .or(self.state.selected_session),
+            member,
+        ) else {
             return;
         };
-        let anchor = self
-            .sidebar_multi_selection_anchor
-            .or_else(|| self.state.selected_session.map(SidebarSelection::Session))
-            .and_then(|anchor| sidebar_selection_row_index(&rows, anchor))
-            .unwrap_or(target);
-        let (lo, hi) = (anchor.min(target), anchor.max(target));
-        for row in &rows[lo..=hi] {
+        for row in range {
             if let Some(member) = sidebar_row_selection(row) {
                 self.sidebar_multi_selection.insert(member);
             }
@@ -4926,7 +5240,13 @@ impl Waku {
         let Some(row) = rows.get(index) else {
             return div().into_any_element();
         };
-        match *row {
+        // The group-local Option arm: which header this row belongs to, and
+        // whether that header's engagement is live. Member rows of the armed
+        // group render exactly as if Option were held.
+        let group_header = sidebar_row_group_header(rows, index);
+        let engaged = self.sidebar_group_alt_engagement(rows);
+        let row_alt = engaged.is_some_and(|alt| Some(alt.row) == group_header);
+        let element = match *row {
             SidebarRow::Search => self.render_sidebar_search(window, cx).into_any_element(),
             SidebarRow::Projects => self.render_sidebar_projects(window, cx).into_any_element(),
             SidebarRow::Inbox => self.render_sidebar_inbox(window, cx).into_any_element(),
@@ -4940,6 +5260,7 @@ impl Waku {
                 self.render_boss_employee_show_more(key, SidebarGroup::Employees, cx)
             }
             SidebarRow::Boss(key) => self.render_boss_sidebar_row(key, cx),
+            SidebarRow::Counsel(key) => self.render_counsel_sidebar_row(key, cx),
             SidebarRow::Planning(session_id) => {
                 let shortcut_index = (self.sidebar_shortcut_hints
                     && self.sidebar_multi_selection.is_empty())
@@ -4951,7 +5272,7 @@ impl Waku {
                 .flatten();
                 self.render_boss_planning_row(session_id, shortcut_index, cx)
             }
-            SidebarRow::Employee(id) => self.render_boss_employee_row(id, cx),
+            SidebarRow::Employee(id) => self.render_boss_employee_row(id, row_alt, cx),
             SidebarRow::Deliverable(key, id) => self.render_sidebar_deliverable_row(key, id, cx),
             SidebarRow::Header(group) => {
                 // The header actions belong to the session history — the
@@ -4961,8 +5282,15 @@ impl Waku {
                     && !rows[..index].iter().any(|row| {
                         matches!(row, SidebarRow::Header(other) if !matches!(other, SidebarGroup::Terminals | SidebarGroup::Deliverables | SidebarGroup::Planning | SidebarGroup::Errands | SidebarGroup::Outcomes | SidebarGroup::Waiting | SidebarGroup::Employees))
                     });
-                self.render_sidebar_group_header(group, first, cx)
-                    .into_any_element()
+                self.render_sidebar_group_header(
+                    group,
+                    index,
+                    sidebar_group_header_occurrence(rows, index),
+                    row_alt,
+                    first,
+                    cx,
+                )
+                .into_any_element()
             }
             SidebarRow::Session(session_id) => {
                 let shortcut_index = (self.sidebar_shortcut_hints
@@ -4973,7 +5301,7 @@ impl Waku {
                         .position(|candidate| candidate == session_id)
                 })
                 .flatten();
-                self.render_sidebar_session_item(session_id, shortcut_index, cx)
+                self.render_sidebar_session_item(session_id, shortcut_index, row_alt, cx)
                     .into_any_element()
             }
             SidebarRow::Terminal(terminal_id) => self
@@ -4997,17 +5325,34 @@ impl Waku {
                     SIDEBAR_GROUP_SPACER_HEIGHT
                 }))
                 .into_any_element(),
+        };
+        // While a mouse activation is live, any row outside the armed group ends it
+        // on entry — the arm survives only inside the group's own header and
+        // member rows. A keyboard engagement ignores the pointer entirely.
+        if engaged.is_some_and(|alt| !alt.sticky && Some(alt.row) != group_header) {
+            return div()
+                .id(SharedString::from(format!("sidebar-alt-clear-{index}")))
+                .size_full()
+                .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                    this.sidebar_group_alt_pointer_enter(*hovered, cx);
+                }))
+                .child(element)
+                .into_any_element();
         }
+        element
     }
 
     fn render_sidebar_group_header(
         &self,
         group: SidebarGroup,
+        index: usize,
+        occurrence: usize,
+        alt_active: bool,
         first: bool,
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = Theme::current(cx);
-        let collapsed = self.sidebar_collapsed_groups.contains(&group);
+        let collapsed = self.sidebar_group_collapsed(group);
         // A folded group keeps its hidden rows' unread signal: the same dot a
         // session or terminal row earns for an unseen completion surfaces on
         // the header. Pinned terminals stay visible through the fold, so they
@@ -5132,44 +5477,21 @@ impl Waku {
             self.sidebar_collapsed_group_members
                 .borrow()
                 .get(&group)
-                .map(|members| {
-                    collapsed_employee_avatar_strip(
-                        members,
-                        &self.boss_ui.identities,
-                        &self.boss_ui.expired,
-                    )
-                })
-                .unwrap_or_default()
+                .filter(|members| !members.is_empty())
+                .map(|members| self.render_employee_avatar_strip(members, cx))
         })
-        .filter(|(faces, omitted)| !faces.is_empty() || *omitted > 0)
-        .map(|(faces, omitted)| {
-            div()
-                .flex_none()
-                .flex()
-                .items_center()
-                .gap(px(2.0))
-                // The letter a placeholder paints while its raster renders
-                // inherits this size to fit inside the small face box.
-                .text_size(sp(18.0))
-                .children(faces.into_iter().map(|identity| {
-                    self.boss_avatar(identity, SIDEBAR_COLLAPSED_GROUP_AVATAR_SIZE, cx)
-                }))
-                .when(omitted > 0, |strip| {
-                    strip.child(
-                        div()
-                            .flex_none()
-                            .text_size(sp(12.0))
-                            .text_color(theme.text_tertiary)
-                            .child(tr!("sidebar.collapsed_group_members", count = omitted)),
-                    )
-                })
-        });
+        .flatten();
         let group_key = group.element_key();
-        let group_name = SharedString::from(format!("sidebar-group-header-{group_key}"));
+        // Repeated employee-section headers each get their own hover group,
+        // element ids, and focus handles — a second boss's matching section
+        // must not share them, or hover reveals and keyboard focus leak
+        // across sections.
+        let group_name =
+            SharedString::from(format!("sidebar-group-header-{group_key}-{occurrence}"));
         let header_focus = self
             .sidebar_group_header_focuses
             .borrow_mut()
-            .entry(group)
+            .entry((group, occurrence))
             .or_insert_with(|| cx.focus_handle())
             .clone();
         // A compose affordance only exists where it can create something —
@@ -5227,6 +5549,7 @@ impl Waku {
             _ => "icons/folder-open.svg",
         };
         let label = match group {
+            SidebarGroup::Rushed => tr!("sidebar.rushed"),
             SidebarGroup::Pinned => tr!("sidebar.pinned"),
             SidebarGroup::Terminals => tr!("sidebar.terminals"),
             SidebarGroup::Dormant => tr!("sidebar.dormant"),
@@ -5285,6 +5608,7 @@ impl Waku {
                 | SidebarGroup::Errands
                 | SidebarGroup::Waiting
                 | SidebarGroup::Employees
+                | SidebarGroup::Rushed
                 | SidebarGroup::Pinned
                 | SidebarGroup::Terminals
                 | SidebarGroup::Dormant
@@ -5302,7 +5626,7 @@ impl Waku {
             let compose_focus = self
                 .sidebar_group_compose_focuses
                 .borrow_mut()
-                .entry(group)
+                .entry((group, occurrence))
                 .or_insert_with(|| cx.focus_handle())
                 .clone();
             div()
@@ -5387,12 +5711,12 @@ impl Waku {
                 let open_focus = self
                     .sidebar_group_open_focuses
                     .borrow_mut()
-                    .entry(group)
+                    .entry((group, occurrence))
                     .or_insert_with(|| cx.focus_handle())
                     .clone();
                 div()
                     .w(px(20.0))
-                    .h(px(22.0))
+                    .h(px(20.0))
                     .flex_none()
                     .flex()
                     .items_center()
@@ -5406,7 +5730,7 @@ impl Waku {
                             .tab_index(0)
                             .tab_stop(true)
                             .w_0()
-                            .h(px(22.0))
+                            .h(px(20.0))
                             .overflow_hidden()
                             .rounded(px(4.0))
                             .flex()
@@ -5444,6 +5768,103 @@ impl Waku {
                     )
             });
 
+        // The group-local Option control: clicking toggles the group's rows
+        // as if Option were held, until the pointer leaves the group. Keyboard
+        // activation pins it so the revealed controls remain reachable.
+        let alt_toggle = sidebar_group_has_alt_toggle(group).then(|| {
+            let alt_focus = self
+                .sidebar_group_alt_focuses
+                .borrow_mut()
+                .entry((group, occurrence))
+                .or_insert_with(|| cx.focus_handle())
+                .clone();
+            div()
+                .w(px(20.0))
+                .h(px(22.0))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_end()
+                .child(
+                    div()
+                        // Employee sections repeat once per boss, so the
+                        // element id carries the row index the engagement
+                        // keys on.
+                        .id(SharedString::from(format!(
+                            "sidebar-group-alt-{group_key}-{index}"
+                        )))
+                        .debug_selector(|| {
+                            format!("sidebar-group-alt-eye-{group_key}-{index}")
+                        })
+                        .key_context(SIDEBAR_GROUP_ALT_CONTEXT)
+                        .on_action(cx.listener(
+                            move |this, _: &ReleaseSidebarGroupAlt, _, cx| {
+                                if this
+                                    .sidebar_group_alt
+                                    .get()
+                                    .is_some_and(|alt| alt.row == index && alt.group == group)
+                                {
+                                    this.clear_sidebar_group_alt(cx);
+                                    cx.stop_propagation();
+                                }
+                            },
+                        ))
+                        .track_focus(&alt_focus)
+                        .tab_index(0)
+                        .tab_stop(true)
+                        .w_0()
+                        .h(px(20.0))
+                        .overflow_hidden()
+                        .rounded(px(4.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .cursor_default()
+                        .opacity(0.0)
+                        .group_hover(group_name.clone(), |style| style.w(px(20.0)).opacity(1.0))
+                        .when(alt_active, |style| style.w(px(20.0)).opacity(1.0))
+                        .focus_visible(|style| {
+                            style.w(px(20.0)).opacity(1.0).bg(theme.focus_highlight())
+                        })
+                        .hover(|style| style.bg(theme.overlay))
+                        .active(|style| style.bg(theme.overlay_strong))
+                        .aria_label(tr!("sidebar.group_option_peek"))
+                        .tooltip(Tooltip::text(tr!("sidebar.group_option_peek")))
+                        .child(icon(
+                            "icons/eye.svg",
+                            12.0,
+                            if alt_active {
+                                theme.accent
+                            } else {
+                                theme.text_secondary
+                            },
+                        ))
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.toggle_sidebar_group_alt(index, group, false, cx);
+                        }))
+                        .on_key_down(cx.listener(
+                            move |this, event: &KeyDownEvent, _, cx| {
+                                match event.keystroke.key.as_str() {
+                                    "enter" | "space" => {
+                                        this.toggle_sidebar_group_alt(index, group, true, cx);
+                                        cx.stop_propagation();
+                                    }
+                                    "escape"
+                                        if this.sidebar_group_alt.get().is_some_and(
+                                            |alt| alt.row == index && alt.group == group,
+                                        ) =>
+                                    {
+                                        this.clear_sidebar_group_alt(cx);
+                                        cx.stop_propagation();
+                                    }
+                                    _ => {}
+                                }
+                            },
+                        )),
+                )
+        });
         // The Terminals and Recent deliverables groups read as action rows —
         // they match the New Task and Search rows' metrics: height, padding,
         // icon box, gap, and regular label weight. Every other group keeps
@@ -5465,8 +5886,9 @@ impl Waku {
             },
         )
         .id(SharedString::from(format!(
-            "sidebar-group-toggle-{group_key}"
+            "sidebar-group-toggle-{group_key}-{occurrence}"
         )))
+        .debug_selector(|| format!("sidebar-group-toggle-{group_key}-{occurrence}"))
         .track_focus(&header_focus)
         .tab_index(0)
         .tab_group()
@@ -5485,6 +5907,10 @@ impl Waku {
                 .rounded(px(9.0))
                 .font_weight(FontWeight::NORMAL)
                 .text_size(sp(14.0))
+        })
+        // Match the Boss row's brain button and trailing status spacing.
+        .when(group == SidebarGroup::Deliverables, |element| {
+            element.pr(px(8.0)).gap(px(8.0))
         })
         // The boss-section groups' headers indent to the same column their
         // rows use — they read as nested under the boss block.
@@ -5545,7 +5971,8 @@ impl Waku {
                             element.child(
                                 div()
                                     .flex_none()
-                                    .mb(px(1.0))
+                                    .relative()
+                                    .top(px(-1.0))
                                     .text_size(sp(12.0))
                                     .text_color(theme.text_tertiary)
                                     .child(format!("{count}")),
@@ -5627,6 +6054,7 @@ impl Waku {
         )
         .when_some(compose, |element, compose| element.child(compose))
         .when_some(open_all, |element, open_all| element.child(open_all))
+        .when_some(alt_toggle, |element, alt_toggle| element.child(alt_toggle))
         // A folded employee group reports work in flight with the spinner
         // its hidden rows would carry, in the same accent a working row
         // earns from `status_color`.
@@ -5672,6 +6100,9 @@ impl Waku {
                     div()
                         .flex_none()
                         .size(px(12.0))
+                        .when(group == SidebarGroup::Deliverables, |slot| {
+                            slot.w(px(20.0)).h(px(18.0))
+                        })
                         .flex()
                         .items_center()
                         .justify_center()
@@ -5782,7 +6213,8 @@ impl Waku {
                 }
                 return;
             }
-            SidebarGroup::Pinned
+            SidebarGroup::Rushed
+            | SidebarGroup::Pinned
             | SidebarGroup::Planning
             | SidebarGroup::Outcomes
             | SidebarGroup::Errands
@@ -5881,6 +6313,38 @@ impl Waku {
         }
     }
 
+    #[track_caller]
+    fn render_employee_avatar_strip(&self, members: &[Uuid], cx: &Context<Self>) -> Div {
+        let theme = Theme::current(cx);
+        let (faces, omitted) = collapsed_employee_avatar_strip(
+            members,
+            &self.boss_ui.identities,
+            &self.boss_ui.expired,
+        );
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(2.0))
+            // Keep letter fallbacks sized for the small avatar box.
+            .text_size(sp(18.0))
+            .children(faces.into_iter().map(|(identity, expired)| {
+                div()
+                    .flex_none()
+                    .when(expired, |avatar| avatar.opacity(0.35))
+                    .child(self.boss_avatar(identity, SIDEBAR_COLLAPSED_GROUP_AVATAR_SIZE, cx))
+            }))
+            .when(omitted > 0, |strip| {
+                strip.child(
+                    div()
+                        .flex_none()
+                        .text_size(sp(12.0))
+                        .text_color(theme.text_tertiary)
+                        .child(tr!("sidebar.collapsed_group_members", count = omitted)),
+                )
+            })
+    }
+
     fn render_boss_employee_show_more(
         &self,
         key: waku_client::DaemonKey,
@@ -5888,11 +6352,9 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
-        // The fold row names the finished employee it would reveal
-        // next — "Rhea finished 3m ago" — rather than a bare
-        // "Show more". The age is minute-granular like every
-        // sidebar time label; it never counts seconds.
-        let label = {
+        // Preview the finished employees this button will reveal, using the
+        // same capped strip and expired treatment as a collapsed group.
+        let members = {
             let visible = self
                 .sidebar_employee_reveals(group)
                 .get(&key)
@@ -5914,7 +6376,7 @@ impl Waku {
                         )
                 });
             let shown = sidebar_employee_idle_shown(visible, no_active);
-            let mut idle = self
+            let idle = self
                 .boss_ui
                 .recent
                 .get(&key)
@@ -5930,33 +6392,7 @@ impl Waku {
                         self.boss_ui.working.contains(id),
                     )
                 });
-            let next = idle.nth(shown);
-            let remaining = idle.count();
-            next.and_then(|id| {
-                let name = self.boss_ui.identities.get(&id)?.name.clone();
-                let updated = self
-                    .state
-                    .sessions
-                    .iter()
-                    .find(|session| session.id == *id)?
-                    .updated_at;
-                let elapsed = unix_time().saturating_sub(updated);
-                let label = if elapsed < 60 {
-                    tr!("boss.finished_now", name = name)
-                } else {
-                    tr!(
-                        "boss.finished_ago",
-                        name = name,
-                        ago = format_time_ago(elapsed)
-                    )
-                };
-                Some(if remaining > 0 {
-                    tr!("boss.finished_more", label = label, count = remaining)
-                } else {
-                    label
-                })
-            })
-            .unwrap_or_else(|| tr!("sidebar.show_more"))
+            idle.skip(shown).copied().collect::<Vec<_>>()
         };
         let row_id = format!("boss-show-more-{}-{key:?}", group.element_key());
         div()
@@ -5974,7 +6410,9 @@ impl Waku {
                     .text_color(theme.text_tertiary)
                     .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .hover(|style| style.text_color(theme.text))
-                    .child(label)
+                    .aria_label(tr!("sidebar.show_more"))
+                    .tooltip(Tooltip::text(tr!("sidebar.show_more")))
+                    .child(self.render_employee_avatar_strip(&members, cx))
                     .on_activation(cx, move |this, _, cx| {
                         let counts = match group {
                             SidebarGroup::Errands => &mut this.boss_ui.sidebar_errand_idle_visible,
@@ -6076,8 +6514,14 @@ impl Waku {
             }
             return;
         }
-        let collapsed = !self.sidebar_collapsed_groups.contains(&group);
+        let collapsed = !self.sidebar_group_collapsed(group);
         self.set_sidebar_group_collapsed(group, collapsed, cx);
+    }
+
+    fn sidebar_group_collapsed(&self, group: SidebarGroup) -> bool {
+        self.sidebar_employee_folds
+            .borrow()
+            .is_collapsed(group, &self.sidebar_collapsed_groups)
     }
 
     pub(super) fn collapse_all_sidebar_groups(&mut self, cx: &mut Context<Self>) {
@@ -6111,6 +6555,12 @@ impl Waku {
         collapsed: bool,
         cx: &mut Context<Self>,
     ) {
+        let auto_expanded = !collapsed
+            && self
+                .sidebar_employee_folds
+                .borrow_mut()
+                .collapsed
+                .remove(&group);
         let collapse_changed = if collapsed {
             self.sidebar_collapsed_groups.insert(group)
         } else {
@@ -6127,7 +6577,7 @@ impl Waku {
                     .sidebar_project_dormant_reveals
                     .remove(&group)
                     .is_some());
-        if collapse_changed || reveal_reset {
+        if collapse_changed || auto_expanded || reveal_reset {
             self.sidebar_rows_fingerprint.set(None);
             cx.notify();
         }
@@ -6354,6 +6804,7 @@ impl Waku {
         &self,
         session_id: Uuid,
         shortcut_index: Option<usize>,
+        group_alt: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
@@ -6375,11 +6826,13 @@ impl Waku {
             .sidebar_multi_selection
             .contains(&SidebarSelection::Session(session_id));
         let pinned = session.pinned_at.is_some();
-        // Pinned rows mix projects, so they keep the flat layout and
+        // Rushed and pinned rows mix projects, so they keep the flat layout and
         // project-name detail even while Project grouping is active. A
         // dormant row sits inside its project there and indents like any
         // sibling; only Date grouping gives it the flat standalone group.
-        let grouped_by_project = self.state.sidebar_grouping == SidebarGrouping::Project && !pinned;
+        let grouped_by_project = self.state.sidebar_grouping == SidebarGrouping::Project
+            && !pinned
+            && !self.session_is_rushed(session_id);
         let left_padding = if grouped_by_project {
             SIDEBAR_GROUP_CHILD_PADDING
         } else {
@@ -6392,6 +6845,11 @@ impl Waku {
         let keyboard_menu = menu.clone();
         let row = div()
             .id(SharedString::from(format!("session-{}", session.id)))
+            .debug_selector(|| format!("session-row-{}", session.id))
+            .relative()
+            .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                this.set_transcript_preload_hover(session_id, *hovered, cx);
+            }))
             .w_full()
             .min_w_0()
             .pl(px(left_padding))
@@ -6422,7 +6880,12 @@ impl Waku {
                     theme.sidebar_item_background
                 })
             })
-            .child(self.render_session_row_body(session_id, grouped_by_project, cx))
+            .child(self.render_session_row_body(
+                session_id,
+                grouped_by_project,
+                group_alt,
+                cx,
+            ))
             .when(!renaming, |element| {
                 let drag_title = SharedString::from(localized_session_title(session));
                 element
@@ -6490,6 +6953,10 @@ impl Waku {
                 &menu,
                 move |cx| {
                     let rename_waku = waku.clone();
+                    let rush_waku = waku.clone();
+                    let rush_enabled = waku
+                        .read_with(cx, |waku, _| waku.session_is_rushed(session_id))
+                        .unwrap_or(false);
                     let pin_waku = waku.clone();
                     let unread_waku = waku.clone();
                     let copy_waku = waku.clone();
@@ -6546,7 +7013,7 @@ impl Waku {
                                 .collect::<Vec<_>>();
                             let any_reclaimable = targets.iter().any(|target| {
                                 session(target)
-                                    .is_some_and(|session| waku.session_reclaim_eligible(session))
+                                    .is_some_and(|session| waku.session_reclaimable(session))
                             });
                             (
                                 targets,
@@ -6589,6 +7056,13 @@ impl Waku {
                             });
                         })
                         .icon("icons/pencil.svg"),
+                        MenuItem::new(tr!("rush.toggle"), move |_, cx| {
+                            let _ = rush_waku.update(cx, |waku, cx| {
+                                waku.toggle_rush(session_id, cx);
+                            });
+                        })
+                        .icon("icons/zap.svg")
+                        .selected(rush_enabled),
                         MenuItem::new(
                             if all_pinned {
                                 item_label("session.unpin", "session.unpin_many", pin_targets.len())
@@ -6729,9 +7203,14 @@ impl Waku {
                             ),
                             move |window, cx| {
                                 let _ = archive_waku.update(cx, |waku, cx| {
-                                    for target in &archive_targets {
-                                        waku.archive_session(*target, window, cx)
-                                    }
+                                    let deliverables =
+                                        waku.sidebar_deliverable_multi_selection_targets();
+                                    waku.archive_sidebar_targets(
+                                        archive_targets.clone(),
+                                        deliverables,
+                                        window,
+                                        cx,
+                                    );
                                 });
                             },
                         )
@@ -6993,8 +7472,12 @@ impl Waku {
         &self,
         session_id: Uuid,
         grouped_by_project: bool,
+        group_alt: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        // Group-local Option stacks with a physical hold — either one swaps
+        // in the alternate details and retasks the pin control.
+        let alt_effective = self.sidebar_alt_held || group_alt;
         let theme = Theme::current(cx);
         let Some(session) = self
             .state
@@ -7181,9 +7664,8 @@ impl Waku {
         // model and reasoning effort this session is configured to use.
         // `session_options` resolves packed model suffixes and rejects traits
         // the selected model does not support, matching the driver options.
-        let model_detail = self
-            .sidebar_alt_held
-            .then(|| self.session_sidebar_model_detail(session));
+        let model_detail =
+            alt_effective.then(|| self.session_sidebar_model_detail(session));
         let has_detail_label = detail_label.is_some() || model_detail.is_some();
         let group_name = SharedString::from(format!("session-row-{session_id}"));
         let archive_focus = self
@@ -7258,7 +7740,7 @@ impl Waku {
             .focus_visible(|style| style.w(px(20.0)).opacity(1.0).bg(theme.focus_highlight()))
             .hover(|style| style.bg(theme.overlay))
             .active(|style| style.bg(theme.overlay_strong))
-            .when(!self.sidebar_alt_held, |element| {
+            .when(!alt_effective, |element| {
                 element.tooltip(Tooltip::text_with_action(
                     if pinned {
                         tr!("session.unpin")
@@ -7268,7 +7750,7 @@ impl Waku {
                     &ToggleSessionPin,
                 ))
             })
-            .when(self.sidebar_alt_held, |element| {
+            .when(alt_effective, |element| {
                 element.tooltip(Tooltip::text(if dormant {
                     tr!("session.restore")
                 } else {
@@ -7276,7 +7758,7 @@ impl Waku {
                 }))
             })
             .child(icon(
-                if self.sidebar_alt_held {
+                if alt_effective {
                     if dormant {
                         "icons/rotate-cw.svg"
                     } else {
@@ -7293,7 +7775,7 @@ impl Waku {
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 cx.stop_propagation();
-                if event.modifiers().alt || this.sidebar_alt_held {
+                if event.modifiers().alt || this.sidebar_alt_held || group_alt {
                     if dormant {
                         this.restore_dormant_sessions(&[session_id], cx);
                     } else {
@@ -7409,7 +7891,7 @@ impl Waku {
                             )
                     })
                     .when_some(
-                        detail_label.filter(|_| !self.sidebar_alt_held),
+                        detail_label.filter(|_| !alt_effective),
                         |element, label| {
                             element
                                 .child(icon(detail_icon, 12.5, theme.text_tertiary))
@@ -7421,7 +7903,7 @@ impl Waku {
                                         .text_color(theme.text_tertiary)
                                         .child(div().min_w_0().truncate().child(label))
                                         .when(
-                                            !self.sidebar_alt_held
+                                            !alt_effective
                                                 && checkout_status.is_some_and(|status| {
                                                     status.uncommitted_changes
                                                 }),
@@ -7435,7 +7917,7 @@ impl Waku {
                                         ),
                                 )
                                 .when_some(
-                                    (!self.sidebar_alt_held)
+                                    (!alt_effective)
                                         .then_some(checkout_status)
                                         .flatten()
                                         .map(|status| status.unpushed_commits)
@@ -7516,11 +7998,18 @@ impl Waku {
                         )
                     })
                     .when_some(
-                        session_time_label(session, unix_time()),
+                        session_time_label(session, unix_time(), alt_effective),
                         |element, label| {
                             element.child(
                                 div()
                                     .flex_none()
+                                    .debug_selector(|| {
+                                        format!(
+                                            "session-time-{}-{}",
+                                            session.id,
+                                            if alt_effective { "date" } else { "age" }
+                                        )
+                                    })
                                     .text_size(sp(12.5))
                                     .text_color(theme.text_tertiary)
                                     .child(SharedString::from(label)),
@@ -7533,95 +8022,14 @@ impl Waku {
 
     // ── Header ─────────────────────────────────────────────────────────────
 
-    pub(super) fn render_header(
+    /// Shared window chrome. Page headers supply only their own identity/actions;
+    /// navigation and native window controls always have exactly one owner.
+    pub(super) fn render_header_frame(
         &self,
-        deliverable_header: Option<AnyElement>,
+        content: AnyElement,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let theme = Theme::current(cx);
-        let brain_page = self.boss_ui.page.is_some();
-        let session = self.selected_session().filter(|_| !brain_page);
-        // A deliverable's preview page swaps the session's title and chips
-        // for the file's own chrome — the header is the page's top bar.
-        let deliverable_page = deliverable_header.is_some();
-        // The header's pull-request chip reads the same scan the sidebar
-        // badge does; the sidebar's own ensure never runs while it is hidden.
-        self.ensure_sidebar_pull_requests(cx);
-        let title = if brain_page {
-            String::new()
-        } else if let Some(terminal_id) = self.selected_terminal {
-            self.terminal_records
-                .get(&terminal_id)
-                .and_then(|record| record.custom_title.clone())
-                .or_else(|| {
-                    self.right_panel_terminals
-                        .get(&terminal_id)
-                        .map(|terminal| single_line_label(terminal.read(cx).title()))
-                        .filter(|title| !title.is_empty())
-                })
-                .unwrap_or_else(|| tr!("right_panel.terminal"))
-        } else if self.projects_page.is_some() {
-            tr!("projects.title")
-        } else {
-            session
-                .map(|session| {
-                    if session.display_title() == AgentSession::DEFAULT_TITLE && session.incognito {
-                        tr!("session.new_incognito_task")
-                    } else {
-                        localized_session_title(session)
-                    }
-                })
-                .unwrap_or_else(|| tr!("session.new_task"))
-        };
-        let employee_job_title = session.and_then(|session| {
-            self.boss_ui
-                .job_titles
-                .get(&session.id)
-                .filter(|title| !title.is_empty())
-        });
-        let agent_preset_label = (!deliverable_page)
-            .then(|| {
-                session
-                    .filter(|session| {
-                        session.provider == ProviderKind::DeepSeek && session.has_started()
-                    })
-                    .and_then(|session| self.agent_preset_label_for_session(session))
-            })
-            .flatten();
-        // The badge belongs to the session surface — the new-task composer or
-        // a selected session's transcript. When another page owns the main
-        // column the title still names that session, but the badge is not
-        // its to wear.
-        let session_surface = self.selected_terminal.is_none()
-            && !self.drafts_page
-            && !self.automations_page
-            && self.boss_ui.page.is_none()
-            && self.projects_page.is_none()
-            && !self.notifications.open
-            && !deliverable_page;
-        // A managed session's header leads with its Boss identity —
-        // avatar, name, and job title — in place of the session title the
-        // daemon keeps in sync with it.
-        let managed_identity = session_surface
-            .then(|| {
-                session.and_then(|session| {
-                    self.managed_session_meta(session.id)
-                        .map(|(_, identity, job_title)| (session.id, identity, job_title))
-                })
-            })
-            .flatten();
-        let environment = if session_surface && self.state.sandbox_experiment_enabled {
-            session.map(AgentSession::environment)
-        } else {
-            None
-        }
-        .unwrap_or_default();
-        // The chip reads durable state — `archived_at` plus the
-        // `boss_managed` stamp — so it still answers after the employee's
-        // roster record retires.
-        let archived_chip = session_surface
-            && session.is_some_and(|session| self.session_is_archived_employee(session));
         let left_window_controls = (!self.sidebar_visible)
             .then(|| {
                 self.render_client_window_controls(
@@ -7715,174 +8123,291 @@ impl Waku {
                             ),
                     )
             })
-            .child(
-                self.window_drag_region(
+            .child(div().flex_1().min_w_0().h_full().child(content))
+            .children(right_window_controls)
+    }
+
+    pub(super) fn render_header(
+        &self,
+        screen: super::render::MainScreen,
+        deliverable_header: Option<AnyElement>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let content = self.render_task_header_content(screen, deliverable_header, None, window, cx);
+        self.render_header_frame(content, window, cx)
+    }
+
+    pub(super) fn render_rush_task_header(
+        &self,
+        session_id: Uuid,
+        controls: AnyElement,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        div()
+            .h(px(HEADER_HEIGHT))
+            .flex_none()
+            .px(px(14.0))
+            .child(self.render_task_header_content(
+                super::render::MainScreen::Session,
+                None,
+                Some((session_id, controls)),
+                window,
+                cx,
+            ))
+    }
+
+    fn render_task_header_content(
+        &self,
+        screen: super::render::MainScreen,
+        deliverable_header: Option<AnyElement>,
+        rush: Option<(Uuid, AnyElement)>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        use super::render::MainScreen;
+        let deliverable_page = deliverable_header.is_some();
+        let session_surface = !deliverable_page
+            && matches!(screen, MainScreen::Session | MainScreen::VoiceScratchpad);
+        let session = if let Some((id, _)) = &rush {
+            self.state.sessions.iter().find(|session| session.id == *id)
+        } else {
+            session_surface.then(|| self.selected_session()).flatten()
+        };
+        if rush.is_none() {
+            self.ensure_sidebar_pull_requests(cx);
+        }
+        let title = match screen {
+            MainScreen::Terminal(terminal_id) => self
+                .terminal_records
+                .get(&terminal_id)
+                .and_then(|record| record.custom_title.clone())
+                .or_else(|| {
+                    self.right_panel_terminals
+                        .get(&terminal_id)
+                        .map(|terminal| single_line_label(terminal.read(cx).title()))
+                        .filter(|title| !title.is_empty())
+                })
+                .unwrap_or_else(|| tr!("right_panel.terminal")),
+            MainScreen::Session | MainScreen::VoiceScratchpad => session
+                .map(|session| {
+                    if session.display_title() == AgentSession::DEFAULT_TITLE && session.incognito {
+                        tr!("session.new_incognito_task")
+                    } else {
+                        localized_session_title(session)
+                    }
+                })
+                .unwrap_or_else(|| tr!("session.new_task")),
+            // These screens supply their own header content through render_header_frame.
+            MainScreen::Brain
+            | MainScreen::Drafts
+            | MainScreen::Automations
+            | MainScreen::Projects
+            | MainScreen::Inbox
+            | MainScreen::Deliverable => String::new(),
+        };
+        let employee_job_title = session.and_then(|session| {
+            self.boss_ui
+                .job_titles
+                .get(&session.id)
+                .filter(|title| !title.is_empty())
+        });
+        let agent_preset_label = (!deliverable_page)
+            .then(|| {
+                session
+                    .filter(|session| {
+                        session.provider == ProviderKind::DeepSeek && session.has_started()
+                    })
+                    .and_then(|session| self.agent_preset_label_for_session(session))
+            })
+            .flatten();
+        // A managed session's header leads with its Boss identity —
+        // avatar, name, and job title — in place of the session title the
+        // daemon keeps in sync with it.
+        let managed_identity = session_surface
+            .then(|| {
+                session.and_then(|session| {
+                    self.managed_session_meta(session.id)
+                        .map(|(_, identity, job_title)| (session.id, identity, job_title))
+                })
+            })
+            .flatten();
+        let environment = if session_surface && self.state.sandbox_experiment_enabled {
+            session.map(AgentSession::environment)
+        } else {
+            None
+        }
+        .unwrap_or_default();
+        // The chip reads durable state — `archived_at` plus the
+        // `boss_managed` stamp — so it still answers after the employee's
+        // roster record retires.
+        let archived_chip = session_surface
+            && session.is_some_and(|session| self.session_is_archived_employee(session));
+        let header = div()
+            .w_full()
+            .min_w_0()
+            .h_full()
+            .flex()
+            .items_center()
+            .gap(px(7.0));
+        let title = div()
+            .id("header-title-drag-region")
+            .h_full()
+            .min_w_0()
+            .flex_shrink(1.0)
+            .flex()
+            .items_center()
+            .gap(px(7.0))
+            .child(match (deliverable_header, &managed_identity) {
+                (Some(header), _) => header,
+                (None, Some((session_id, identity, job_title))) => {
+                    self.render_managed_session_identity(*session_id, identity, job_title, cx)
+                }
+                (None, None) => div()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(sp(13.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .child(SharedString::from(title.clone()))
+                    .into_any_element(),
+            })
+            .when(archived_chip, |element| {
+                element.child(
                     div()
-                        .id("header-title-drag-region")
-                        .h_full()
-                        .min_w_0()
-                        .flex_shrink(1.0)
+                        .id("session-archived-badge")
+                        .h(px(22.0))
+                        .px(px(6.0))
+                        .rounded(px(8.0))
+                        .flex_none()
                         .flex()
                         .items_center()
-                        .gap(px(7.0))
-                        .child(match (deliverable_header, &managed_identity) {
-                            (Some(header), _) => header,
-                            (None, Some((session_id, identity, job_title))) => self
-                                .render_managed_session_identity(
-                                    *session_id,
-                                    identity,
-                                    job_title,
-                                    cx,
-                                ),
-                            (None, None) => div()
-                                .min_w_0()
-                                .truncate()
-                                .text_size(sp(13.0))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text)
-                                .child(SharedString::from(title.clone()))
-                                .into_any_element(),
-                        })
-                        .when(archived_chip, |element| {
-                            element.child(
-                                div()
-                                    .id("session-archived-badge")
-                                    .h(px(22.0))
-                                    .px(px(6.0))
-                                    .rounded(px(8.0))
-                                    .flex_none()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(4.0))
-                                    .bg(theme.overlay)
-                                    .text_size(sp(12.5))
-                                    .text_color(theme.text_secondary)
-                                    .child(icon("icons/archive.svg", 11.0, theme.text_tertiary))
-                                    .child(tr_cow!("session.archived_chip")),
-                            )
-                        })
-                        .children(
-                            (managed_identity.is_none() && !deliverable_page)
-                                .then_some(employee_job_title)
-                                .flatten()
-                                .map(|job_title| {
-                                    div()
-                                        .h(px(22.0))
-                                        .max_w(px(180.0))
-                                        .px(px(6.0))
-                                        .rounded(px(8.0))
-                                        .flex_none()
-                                        .flex()
-                                        .items_center()
-                                        .gap(px(4.0))
-                                        .bg(theme.overlay)
-                                        .text_size(sp(12.5))
-                                        .text_color(theme.text_secondary)
-                                        .child(icon(
-                                            session
-                                                .and_then(|session| {
-                                                    self.boss_ui
-                                                        .employee_icons
-                                                        .get(&session.id)
-                                                        .copied()
-                                                        .flatten()
-                                                })
-                                                .map(crate::custom_commands::icon_path)
-                                                .unwrap_or_else(|| {
-                                                    super::boss::job_title_icon(job_title)
-                                                }),
-                                            11.0,
-                                            theme.text_tertiary,
-                                        ))
-                                        .child(div().min_w_0().truncate().child(job_title.clone()))
-                                }),
-                        )
-                        .children(agent_preset_label.map(|label| {
-                            div()
-                                .h(px(22.0))
-                                .max_w(px(180.0))
-                                .px(px(6.0))
-                                .rounded(px(8.0))
-                                .flex_none()
-                                .flex()
-                                .items_center()
-                                .gap(px(4.0))
-                                .bg(theme.overlay)
-                                .text_size(sp(12.5))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text_secondary)
-                                .child(icon("icons/bot.svg", 10.5, theme.text_tertiary))
-                                .child(div().min_w_0().truncate().child(SharedString::from(label)))
-                        }))
-                        // The environment's glyph only — the same icon the
-                        // access menu and its chip use, with the name on the
-                        // tooltip.
-                        .when(!environment.is_local(), |element| {
-                            let badge_label = match environment {
-                                SessionEnvironment::Sandbox => tr!("sandbox.badge"),
-                                SessionEnvironment::Cloud => tr!(
-                                    "sandbox.cloud_badge",
-                                    provider = session
-                                        .map(|session| session.provider.display_name())
-                                        .unwrap_or_default()
-                                ),
-                                SessionEnvironment::Local => unreachable!("filtered above"),
-                            };
-                            element.child(
-                                div()
-                                    .id("environment-badge")
-                                    .h(px(22.0))
-                                    .w(px(22.0))
-                                    .rounded(px(8.0))
-                                    .flex_none()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .bg(theme.overlay)
-                                    .child(icon(environment.icon(), 11.0, theme.text_secondary))
-                                    .tooltip(Tooltip::text(badge_label)),
-                            )
-                        })
-                        .when(
-                            session_surface && session.is_some_and(|session| session.incognito),
-                            |element| {
-                                element.child(
-                                    div()
-                                        .id("incognito-badge")
-                                        .h(px(22.0))
-                                        .w(px(22.0))
-                                        .rounded(px(8.0))
-                                        .flex_none()
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .bg(theme.overlay)
-                                        .child(icon("icons/ghost.svg", 11.0, theme.text_secondary))
-                                        .tooltip(Tooltip::text(tr!("session.incognito"))),
-                                )
-                            },
-                        ),
-                    cx,
-                ),
+                        .gap(px(4.0))
+                        .bg(theme.overlay)
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_secondary)
+                        .child(icon("icons/archive.svg", 11.0, theme.text_tertiary))
+                        .child(tr_cow!("session.archived_chip")),
+                )
+            })
+            .children(
+                (managed_identity.is_none() && !deliverable_page)
+                    .then_some(employee_job_title)
+                    .flatten()
+                    .map(|job_title| {
+                        div()
+                            .h(px(22.0))
+                            .max_w(px(180.0))
+                            .px(px(6.0))
+                            .rounded(px(8.0))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .gap(px(4.0))
+                            .bg(theme.overlay)
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_secondary)
+                            .child(icon(
+                                session
+                                    .and_then(|session| {
+                                        self.boss_ui
+                                            .employee_icons
+                                            .get(&session.id)
+                                            .copied()
+                                            .flatten()
+                                    })
+                                    .map(crate::custom_commands::icon_path)
+                                    .unwrap_or_else(|| super::boss::job_title_icon(job_title)),
+                                11.0,
+                                theme.text_tertiary,
+                            ))
+                            .child(div().min_w_0().truncate().child(job_title.clone()))
+                    }),
             )
+            .children(agent_preset_label.map(|label| {
+                div()
+                    .h(px(22.0))
+                    .max_w(px(180.0))
+                    .px(px(6.0))
+                    .rounded(px(8.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .bg(theme.overlay)
+                    .text_size(sp(12.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_secondary)
+                    .child(icon("icons/bot.svg", 10.5, theme.text_tertiary))
+                    .child(div().min_w_0().truncate().child(SharedString::from(label)))
+            }))
+            // The environment's glyph only — the same icon the
+            // access menu and its chip use, with the name on the
+            // tooltip.
+            .when(!environment.is_local(), |element| {
+                let badge_label = match environment {
+                    SessionEnvironment::Sandbox => tr!("sandbox.badge"),
+                    SessionEnvironment::Cloud => tr!(
+                        "sandbox.cloud_badge",
+                        provider = session
+                            .map(|session| session.provider.display_name())
+                            .unwrap_or_default()
+                    ),
+                    SessionEnvironment::Local => unreachable!("filtered above"),
+                };
+                element.child(
+                    div()
+                        .id("environment-badge")
+                        .h(px(22.0))
+                        .w(px(22.0))
+                        .rounded(px(8.0))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(theme.overlay)
+                        .child(icon(environment.icon(), 11.0, theme.text_secondary))
+                        .tooltip(Tooltip::text(badge_label)),
+                )
+            })
+            .when(
+                session_surface && session.is_some_and(|session| session.incognito),
+                |element| {
+                    element.child(
+                        div()
+                            .id("incognito-badge")
+                            .h(px(22.0))
+                            .w(px(22.0))
+                            .rounded(px(8.0))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .bg(theme.overlay)
+                            .child(icon("icons/ghost.svg", 11.0, theme.text_secondary))
+                            .tooltip(Tooltip::text(tr!("session.incognito"))),
+                    )
+                },
+            );
+        if let Some((_, controls)) = rush {
+            return header
+                .child(title)
+                .child(div().flex_1())
+                .child(controls)
+                .into_any_element();
+        }
+        header
+            .child(self.window_drag_region(title, cx))
             .child(
                 self.window_drag_region(
                     div().id("header-center-drag-region").h_full().flex_1(),
                     cx,
                 ),
             )
-            .when(!brain_page, |element| {
-                element.child(self.render_background_work_summary(cx))
-            })
+            .child(self.render_background_work_summary(cx))
             .children(self.render_reclaim_indicator(window, cx))
-            .when_some(self.selected_terminal, |element, terminal_id| {
-                element.child(self.render_terminal_split_button(
-                    "main-terminal-split",
-                    terminal_id,
-                    STANDALONE_TERMINAL_MAX_PANES,
-                    cx,
-                ))
-            })
             .when(!self.right_panel_slot_visible(), |element| {
                 element
                     .when(self.fps_counter_visible, |element| {
@@ -7890,7 +8415,7 @@ impl Waku {
                     })
                     .child(self.render_panel_toggles(cx))
             })
-            .children(right_window_controls)
+            .into_any_element()
     }
 
     // ── Empty states ───────────────────────────────────────────────────────
@@ -8095,30 +8620,13 @@ fn sidebar_planning_session_visible(
         })
 }
 
-fn localized_session_title(session: &AgentSession) -> String {
+pub(super) fn localized_session_title(session: &AgentSession) -> String {
     let title = session.display_title();
     if title == AgentSession::DEFAULT_TITLE {
         tr!("session.new_task")
     } else {
         title.to_owned()
     }
-}
-
-/// The task the current selection stands for when a ⌘-click creates the
-/// set — the viewed, started task unless the click landed on it directly.
-/// Deliverable clicks seed the same way: the active task is the selection
-/// being extended no matter which row kind was clicked.
-fn sidebar_multi_selection_seed(
-    sessions: &[AgentSession],
-    selected_session: Option<Uuid>,
-    clicked: SidebarSelection,
-) -> Option<Uuid> {
-    selected_session.filter(|active| {
-        SidebarSelection::Session(*active) != clicked
-            && sessions.iter().any(|session| {
-                session.id == *active && session.has_started() && session.archived_at.is_none()
-            })
-    })
 }
 
 pub(super) fn sidebar_session_selected(
@@ -8235,6 +8743,8 @@ mod tests {
 
     fn boss_state_with_deliverables(deliverables: Vec<BossDeliverable>) -> BossState {
         BossState {
+            counsel: Default::default(),
+            employee_prompt_controls: Default::default(),
             identity: BossIdentity {
                 id: Uuid::new_v4(),
                 name: "Boss".into(),
@@ -8743,6 +9253,56 @@ mod tests {
     }
 
     #[test]
+    fn expired_employee_groups_fold_without_overwriting_manual_choices() {
+        let group = SidebarGroup::Outcomes;
+        let mut folds = SidebarEmployeeFolds::default();
+        let mut manual = HashSet::new();
+        folds.refresh([]);
+        assert!(!folds.is_collapsed(group, &manual));
+
+        // The last live employee expires: member rows fold behind the header.
+        folds.refresh([(group, true)]);
+        let mut rows = Vec::new();
+        append_sidebar_employee_group(
+            &mut rows,
+            group,
+            waku_client::DaemonKey::Local,
+            &[],
+            &[Uuid::from_u128(1)],
+            folds.is_collapsed(group, &manual),
+            0,
+        );
+        assert_eq!(
+            rows,
+            vec![
+                SidebarRow::Header(group),
+                SidebarRow::CollapsibleGroupSpacer { collapsed: true },
+            ]
+        );
+
+        // A live arrival clears only the automatic fold.
+        folds.refresh([(group, true), (group, false)]);
+        assert!(!folds.is_collapsed(group, &manual));
+        folds.refresh([(group, true)]);
+        manual.insert(group);
+        folds.refresh([(group, true), (group, false)]);
+        assert!(folds.is_collapsed(group, &manual));
+        manual.clear();
+
+        // Opening an expired group survives unrelated snapshot refreshes.
+        folds.refresh([(group, true)]);
+        folds.collapsed.remove(&group);
+        folds.refresh([(group, true), (SidebarGroup::Employees, true)]);
+        assert!(!folds.is_collapsed(group, &manual));
+        assert!(folds.is_collapsed(SidebarGroup::Employees, &manual));
+
+        // A new live-to-expired transition folds it again.
+        folds.refresh([]);
+        folds.refresh([(group, true)]);
+        assert!(folds.is_collapsed(group, &manual));
+    }
+
+    #[test]
     fn employee_group_fold_hides_members_and_keeps_stable_order() {
         let key = waku_client::DaemonKey::Local;
         let active = [Uuid::from_u128(1), Uuid::from_u128(2)];
@@ -8856,7 +9416,7 @@ mod tests {
             let (faces, omitted) =
                 collapsed_employee_avatar_strip(&members(count), &identities, &HashSet::new());
             assert_eq!(
-                faces.iter().map(|face| face.id).collect::<Vec<_>>(),
+                faces.iter().map(|(face, _)| face.id).collect::<Vec<_>>(),
                 members(count)
             );
             assert_eq!(omitted, 0);
@@ -8879,21 +9439,26 @@ mod tests {
         assert_eq!(faces.len(), 4);
         assert_eq!(omitted, 1);
 
-        // Expired members neither take face slots nor inflate the tail,
-        // including when their identity is missing.
+        // Expired members retain roster order, share the face limit and
+        // overflow count, and carry the faded marker even in an all-expired group.
         let expired = HashSet::from([member_ids[0], member_ids[5], Uuid::from_u128(99)]);
         let mut mixed = members(7);
         mixed.push(Uuid::from_u128(99));
         let (faces, omitted) = collapsed_employee_avatar_strip(&mixed, &identities, &expired);
         assert_eq!(
-            faces.iter().map(|face| face.id).collect::<Vec<_>>(),
-            member_ids[1..5]
+            faces.iter().map(|(face, _)| face.id).collect::<Vec<_>>(),
+            members(4)
         );
-        assert_eq!(omitted, 1);
+        assert_eq!(
+            faces.iter().map(|(_, faded)| *faded).collect::<Vec<_>>(),
+            vec![true, false, false, false]
+        );
+        assert_eq!(omitted, 4);
         let expired = member_ids.iter().copied().collect();
         let (faces, omitted) = collapsed_employee_avatar_strip(&members(7), &identities, &expired);
-        assert!(faces.is_empty());
-        assert_eq!(omitted, 0);
+        assert_eq!(faces.len(), SIDEBAR_COLLAPSED_GROUP_AVATARS);
+        assert!(faces.iter().all(|(_, faded)| *faded));
+        assert_eq!(omitted, 3);
 
         // The strip rides the header the fold already leaves behind: a
         // collapsed employee group still emits only header and spacer.
@@ -9659,56 +10224,51 @@ mod tests {
     }
 
     #[test]
-    fn sidebar_multi_selection_skips_unstarted_and_archived_active_tasks() {
-        let mut active = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
-        let clicked = SidebarSelection::Session(Uuid::new_v4());
-        assert_eq!(
-            sidebar_multi_selection_seed(std::slice::from_ref(&active), Some(active.id), clicked),
-            None
-        );
-
-        active.begin_turn("Started task");
-        active.archived_at = Some(1);
-        assert_eq!(
-            sidebar_multi_selection_seed(std::slice::from_ref(&active), Some(active.id), clicked),
-            None
-        );
+    fn sidebar_multi_selection_range_includes_selected_deliverable_and_both_endpoints() {
+        let task = Uuid::new_v4();
+        let key = waku_client::DaemonKey::Local;
+        let first_id = Uuid::new_v4();
+        let last_id = Uuid::new_v4();
+        let first = SidebarSelection::Deliverable(key, first_id);
+        let last = SidebarSelection::Deliverable(key, last_id);
+        let rows = [
+            SidebarRow::Session(task),
+            SidebarRow::Deliverable(key, first_id),
+            SidebarRow::Session(Uuid::new_v4()),
+            SidebarRow::Deliverable(key, last_id),
+        ];
+        for (selected, clicked) in [(first, last), (last, first)] {
+            let range =
+                sidebar_multi_selection_range(&rows, None, Some(selected), Some(task), clicked)
+                    .unwrap();
+            let members: Vec<_> = range.iter().filter_map(sidebar_row_selection).collect();
+            assert_eq!(
+                members,
+                rows[1..]
+                    .iter()
+                    .filter_map(sidebar_row_selection)
+                    .collect::<Vec<_>>()
+            );
+        }
     }
 
     #[test]
-    fn sidebar_multi_selection_seeds_a_started_active_task_once() {
-        let mut active = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
-        active.begin_turn("Started task");
-        assert_eq!(
-            sidebar_multi_selection_seed(
-                std::slice::from_ref(&active),
-                Some(active.id),
-                SidebarSelection::Session(Uuid::new_v4())
-            ),
-            Some(active.id)
-        );
-        assert_eq!(
-            sidebar_multi_selection_seed(
-                std::slice::from_ref(&active),
-                Some(active.id),
-                SidebarSelection::Session(active.id)
-            ),
-            None
-        );
-    }
-
-    /// A ⌘-click that opens on a deliverable still extends the selection
-    /// the viewed task represents — the seed rule does not depend on the
-    /// clicked row's kind.
-    #[test]
-    fn sidebar_multi_selection_seeds_the_active_task_for_a_deliverable_click() {
-        let mut active = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
-        active.begin_turn("Started task");
-        let clicked = SidebarSelection::Deliverable(waku_client::DaemonKey::Local, Uuid::new_v4());
-        assert_eq!(
-            sidebar_multi_selection_seed(std::slice::from_ref(&active), Some(active.id), clicked),
-            Some(active.id)
-        );
+    fn sidebar_multi_selection_range_uses_task_selection_or_existing_anchor() {
+        let ids = [Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4()];
+        let rows = ids.map(SidebarRow::Session);
+        let clicked = SidebarSelection::Session(ids[2]);
+        let initial =
+            sidebar_multi_selection_range(&rows, None, None, Some(ids[0]), clicked).unwrap();
+        assert_eq!(initial.len(), 3);
+        let extended = sidebar_multi_selection_range(
+            &rows,
+            Some(SidebarSelection::Session(ids[1])),
+            None,
+            Some(ids[0]),
+            clicked,
+        )
+        .unwrap();
+        assert_eq!(extended.len(), 2);
     }
 
     #[test]
@@ -9776,6 +10336,123 @@ mod tests {
         let below = sidebar_reveal_offset(&rows, 24, top, height * 4.0).unwrap();
         assert_eq!(below.item_ix, 21);
         assert_eq!(below.offset_in_item, px(0.0));
+    }
+
+    #[test]
+    fn group_local_option_maps_rows_to_their_owning_header() {
+        let key = waku_client::DaemonKey::Local;
+        let rows = vec![
+            SidebarRow::Search,
+            SidebarRow::Boss(key),
+            SidebarRow::Header(SidebarGroup::Outcomes),
+            SidebarRow::Employee(Uuid::from_u128(1)),
+            SidebarRow::Header(SidebarGroup::Errands),
+            SidebarRow::Employee(Uuid::from_u128(2)),
+            SidebarRow::CollapsibleGroupSpacer { collapsed: false },
+            SidebarRow::Header(SidebarGroup::Date(SessionDateGroup::Today)),
+            SidebarRow::Session(Uuid::from_u128(3)),
+            SidebarRow::ShowMore(SidebarGroup::Date(SessionDateGroup::Today)),
+        ];
+        // Chrome rows and the boss row belong to no group.
+        assert_eq!(sidebar_row_group_header(&rows, 0), None);
+        assert_eq!(sidebar_row_group_header(&rows, 1), None);
+        // A header owns itself; member and fold rows own their header — the
+        // second boss section does not inherit the first's header.
+        assert_eq!(sidebar_row_group_header(&rows, 2), Some(2));
+        assert_eq!(sidebar_row_group_header(&rows, 3), Some(2));
+        assert_eq!(sidebar_row_group_header(&rows, 4), Some(4));
+        assert_eq!(sidebar_row_group_header(&rows, 5), Some(4));
+        assert_eq!(sidebar_row_group_header(&rows, 6), Some(4));
+        assert_eq!(sidebar_row_group_header(&rows, 7), Some(7));
+        assert_eq!(sidebar_row_group_header(&rows, 8), Some(7));
+        assert_eq!(sidebar_row_group_header(&rows, 9), Some(7));
+
+        // The engagement validates against the snapshot: only the armed
+        // header's own index and group pass, so a rebuild that shifts rows
+        // drops it rather than letting it drift onto a neighbor.
+        let engaged = SidebarGroupAlt {
+            row: 7,
+            group: SidebarGroup::Date(SessionDateGroup::Today),
+            boss: None,
+            sticky: false,
+        };
+        assert!(sidebar_group_alt_active(&rows, engaged));
+        assert!(!sidebar_group_alt_active(
+            &rows,
+            SidebarGroupAlt { row: 2, ..engaged }
+        ));
+        assert!(!sidebar_group_alt_active(
+            &rows,
+            SidebarGroupAlt {
+                row: 7,
+                group: SidebarGroup::Date(SessionDateGroup::Yesterday),
+                ..engaged
+            }
+        ));
+        let shifted = [&rows[..7], &rows[7..]].concat();
+        let mut shifted = shifted;
+        shifted.insert(0, SidebarRow::Inbox);
+        assert!(!sidebar_group_alt_active(&shifted, engaged));
+    }
+
+    #[test]
+    fn repeated_group_headers_get_distinct_occurrences() {
+        // Two boss blocks repeat the same employee-section headers; each
+        // header's occurrence — not just its group — names its focus handle
+        // and hover group, so controls never leak across sections.
+        let rows = vec![
+            SidebarRow::Search,
+            SidebarRow::Boss(waku_client::DaemonKey::Local),
+            SidebarRow::Header(SidebarGroup::Employees),
+            SidebarRow::Employee(Uuid::from_u128(1)),
+            SidebarRow::Boss(waku_client::DaemonKey::Remote(Uuid::from_u128(9))),
+            SidebarRow::Header(SidebarGroup::Employees),
+            SidebarRow::Employee(Uuid::from_u128(2)),
+            SidebarRow::Header(SidebarGroup::Employees),
+            SidebarRow::Employee(Uuid::from_u128(3)),
+            SidebarRow::Header(SidebarGroup::Date(SessionDateGroup::Today)),
+        ];
+        assert_eq!(sidebar_group_header_occurrence(&rows, 2), 0);
+        assert_eq!(sidebar_group_header_occurrence(&rows, 5), 1);
+        assert_eq!(sidebar_group_header_occurrence(&rows, 7), 2);
+        // Singleton groups always land on zero; non-header rows do too.
+        assert_eq!(sidebar_group_header_occurrence(&rows, 9), 0);
+        assert_eq!(sidebar_group_header_occurrence(&rows, 6), 0);
+        assert_eq!(sidebar_group_header_occurrence(&rows, 0), 0);
+    }
+
+    #[test]
+    fn group_local_option_date_label_marks_only_previous_years() {
+        let now = Local
+            .with_ymd_and_hms(2026, 11, 7, 15, 0, 0)
+            .earliest()
+            .unwrap()
+            .timestamp() as u64;
+        let this_year = Local
+            .with_ymd_and_hms(2026, 10, 25, 9, 0, 0)
+            .earliest()
+            .unwrap()
+            .timestamp() as u64;
+        assert_eq!(sidebar_short_date(this_year, now), "Oct 25");
+        let last_year = Local
+            .with_ymd_and_hms(2025, 10, 25, 9, 0, 0)
+            .earliest()
+            .unwrap()
+            .timestamp() as u64;
+        assert_eq!(sidebar_short_date(last_year, now), "Oct 25, 2025");
+        // The year boundary compares calendar years, not elapsed time — a
+        // December reply stays current-year on January first.
+        let new_year = Local
+            .with_ymd_and_hms(2027, 1, 1, 0, 30, 0)
+            .earliest()
+            .unwrap()
+            .timestamp() as u64;
+        let december = Local
+            .with_ymd_and_hms(2026, 12, 31, 23, 0, 0)
+            .earliest()
+            .unwrap()
+            .timestamp() as u64;
+        assert_eq!(sidebar_short_date(december, new_year), "Dec 31, 2026");
     }
 
     #[test]

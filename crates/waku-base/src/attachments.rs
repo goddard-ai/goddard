@@ -14,6 +14,25 @@ pub use waku_protocol::attachments::{
     MAX_ATTACHMENT_FILES, StoredAttachment,
 };
 
+// Versioned references distinguish the snapshot layout from legacy trees,
+// whose single attachment could itself be named "archive" or "working".
+const SNAPSHOT_REFERENCE_PREFIX: &str = "waku-attachment:v2:";
+
+/// Resolve a provider path to its archived original without filesystem I/O.
+/// Desktop open/reveal actions use this; remote clients read via `read_file`.
+pub fn archived_path(reference: &str, provider_path: &Path) -> Option<PathBuf> {
+    let id = Uuid::parse_str(reference.strip_prefix(SNAPSHOT_REFERENCE_PREFIX)?).ok()?;
+    let id = id.to_string();
+    provider_path.ancestors().find_map(|root| {
+        if root.file_name()? != id.as_str() {
+            return None;
+        }
+        let relative = provider_path.strip_prefix(root.join("working")).ok()?;
+        safe_relative_path(relative).ok()?;
+        Some(root.join("archive").join(relative))
+    })
+}
+
 pub struct AttachmentStore {
     root: PathBuf,
 }
@@ -87,16 +106,26 @@ impl AttachmentStore {
     ) -> io::Result<StoredAttachment> {
         let name = safe_name(name)?;
         let id = Uuid::new_v4();
-        let reference = format!("{ATTACHMENT_SCHEME}{id}");
+        let reference = format!("{SNAPSHOT_REFERENCE_PREFIX}{id}");
         let staging = self.root.join(format!(".{id}.tmp"));
         let destination = self.root.join(id.to_string());
+        let archive = staging.join("archive");
+        let working = staging.join("working");
         fs::create_dir_all(&staging)?;
-        let target = staging.join(&name);
-        let materialized = populate(&target);
+        let materialized = (|| {
+            fs::create_dir(&archive)?;
+            fs::create_dir(&working)?;
+            let original = archive.join(&name);
+            let is_dir = populate(&original)?;
+            copy_source(&original, &working.join(&name))?;
+            set_files_readonly(&working, false)?;
+            set_files_readonly(&archive, true)?;
+            Ok(is_dir)
+        })();
         let is_dir = match materialized {
             Ok(is_dir) => is_dir,
             Err(error) => {
-                let _ = fs::remove_dir_all(&staging);
+                let _ = remove_materialization(&staging);
                 return Err(error);
             }
         };
@@ -104,12 +133,14 @@ impl AttachmentStore {
             fs::create_dir_all(parent)?;
         }
         if let Err(error) = fs::rename(&staging, &destination) {
-            let _ = fs::remove_dir_all(&staging);
+            let _ = remove_materialization(&staging);
             return Err(error);
         }
         Ok(StoredAttachment {
             reference,
-            path: destination.join(&name),
+            // Only the working path reaches the provider. Transcript reads
+            // resolve the reference to the untouched archive instead.
+            path: destination.join("working").join(&name),
             name,
             is_dir,
         })
@@ -117,6 +148,7 @@ impl AttachmentStore {
 
     pub fn path_for(&self, reference: &str) -> Option<PathBuf> {
         let id = reference.strip_prefix(ATTACHMENT_SCHEME)?;
+        let id = id.strip_prefix("v2:").unwrap_or(id);
         let id = Uuid::parse_str(id).ok()?;
         Some(self.root.join(id.to_string()))
     }
@@ -125,14 +157,26 @@ impl AttachmentStore {
         let root = self.path_for(reference).ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidInput, "invalid attachment reference")
         })?;
-        let relative = path.strip_prefix(&root).map_err(|_| {
+        let snapshot = reference.starts_with(SNAPSHOT_REFERENCE_PREFIX);
+        let provider_root = if snapshot {
+            root.join("working")
+        } else {
+            root.clone()
+        };
+        let relative = path.strip_prefix(&provider_root).map_err(|_| {
             io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "attachment path does not belong to its reference",
             )
         })?;
         safe_relative_path(relative)?;
-        fs::read(path)
+        if snapshot {
+            fs::read(root.join("archive").join(relative))
+        } else {
+            // Older attachments have no separate snapshot. Keep their
+            // persisted paths readable without rewriting user-owned data.
+            fs::read(path)
+        }
     }
 
     /// Removes daemon-owned attachment trees that are no longer referenced by
@@ -168,7 +212,9 @@ impl AttachmentStore {
             let Ok(id) = Uuid::parse_str(&name) else {
                 continue;
             };
-            if live.contains(&format!("{ATTACHMENT_SCHEME}{id}")) {
+            if live.contains(&format!("{ATTACHMENT_SCHEME}{id}"))
+                || live.contains(&format!("{SNAPSHOT_REFERENCE_PREFIX}{id}"))
+            {
                 continue;
             }
             if cutoff.is_some_and(|cutoff| {
@@ -180,7 +226,7 @@ impl AttachmentStore {
                 continue;
             }
             reclaimed += directory_size(&entry.path()).unwrap_or_default();
-            fs::remove_dir_all(entry.path())?;
+            remove_materialization(&entry.path())?;
         }
         Ok(reclaimed)
     }
@@ -201,7 +247,7 @@ fn copy_source(source: &Path, target: &Path) -> io::Result<bool> {
                 "attachment is larger than 32 MB",
             ));
         }
-        let copied = fs::copy(source, target)?;
+        let copied = clone_or_copy_file(source, target)?;
         if copied > MAX_ATTACHMENT_BYTES as u64 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -257,7 +303,7 @@ fn copy_source(source: &Path, target: &Path) -> io::Result<bool> {
                     "attachment directory is too large",
                 ));
             }
-            let copied = fs::copy(source_path, target_path)?;
+            let copied = clone_or_copy_file(&source_path, &target_path)?;
             if copied > metadata.len() {
                 total_bytes = total_bytes
                     .checked_add(copied - metadata.len())
@@ -277,6 +323,49 @@ fn copy_source(source: &Path, target: &Path) -> io::Result<bool> {
         }
     }
     Ok(true)
+}
+
+fn clone_or_copy_file(source: &Path, target: &Path) -> io::Result<u64> {
+    match reflink_copy::reflink_or_copy(source, target)? {
+        Some(bytes) => Ok(bytes),
+        None => Ok(fs::metadata(target)?.len()),
+    }
+}
+
+fn set_files_readonly(root: &Path, readonly: bool) -> io::Result<()> {
+    let mut pending = vec![root.to_owned()];
+    while let Some(path) = pending.pop() {
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.is_dir() {
+            for entry in fs::read_dir(&path)? {
+                pending.push(entry?.path());
+            }
+        } else if metadata.is_file() {
+            let mut permissions = metadata.permissions();
+            if readonly {
+                permissions.set_readonly(true);
+            } else {
+                // set_readonly(false) would enable every write bit on Unix.
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    permissions.set_mode(permissions.mode() | 0o200);
+                }
+                #[cfg(not(unix))]
+                permissions.set_readonly(false);
+            }
+            fs::set_permissions(path, permissions)?;
+        }
+    }
+    Ok(())
+}
+
+fn remove_materialization(path: &Path) -> io::Result<()> {
+    // Windows refuses to delete read-only files. Skip symlink entries when
+    // clearing attributes in the provider-writable tree.
+    #[cfg(windows)]
+    set_files_readonly(path, false)?;
+    fs::remove_dir_all(path)
 }
 
 fn directory_size(root: &Path) -> io::Result<u64> {
@@ -357,24 +446,98 @@ mod tests {
     }
 
     #[test]
-    fn imports_any_daemon_file_without_routing_bytes_through_the_client() {
+    fn imported_file_snapshot_survives_source_and_provider_edits() {
         let source_directory =
             std::env::temp_dir().join(format!("waku-file-source-{}", Uuid::new_v4()));
         let root = std::env::temp_dir().join(format!("waku-attachments-{}", Uuid::new_v4()));
         fs::create_dir_all(&source_directory).unwrap();
-        let source = source_directory.join("design.md");
+        let source = source_directory.join("design notes.md");
         fs::write(&source, "daemon-owned").unwrap();
         let store = AttachmentStore::new(root.clone());
 
         let stored = store.import_path(&source).unwrap();
 
-        assert_eq!(stored.name, "design.md");
+        assert_eq!(stored.name, "design notes.md");
         assert!(!stored.is_dir);
         assert_eq!(fs::read_to_string(&stored.path).unwrap(), "daemon-owned");
         assert!(store.import_path(Path::new("relative.txt")).is_err());
 
+        fs::write(&source, "source changed").unwrap();
+        fs::write(&stored.path, "provider changed").unwrap();
+        let reopened = AttachmentStore::new(root.clone());
+        assert_eq!(
+            reopened.read_file(&stored.reference, &stored.path).unwrap(),
+            b"daemon-owned"
+        );
+        let original_path = archived_path(&stored.reference, &stored.path).unwrap();
+        assert!(
+            fs::metadata(&original_path)
+                .unwrap()
+                .permissions()
+                .readonly()
+        );
+        assert!(!fs::metadata(&stored.path).unwrap().permissions().readonly());
+        assert_eq!(fs::read(original_path).unwrap(), b"daemon-owned");
+        fs::remove_file(&stored.path).unwrap();
+        assert_eq!(
+            reopened.read_file(&stored.reference, &stored.path).unwrap(),
+            b"daemon-owned"
+        );
+
         fs::remove_dir_all(source_directory).unwrap();
-        fs::remove_dir_all(root).unwrap();
+        remove_materialization(&root).unwrap();
+    }
+
+    #[test]
+    fn uploaded_directory_snapshot_and_legacy_references_remain_readable() {
+        let root = std::env::temp_dir().join(format!("waku-attachments-{}", Uuid::new_v4()));
+        let store = AttachmentStore::new(root.clone());
+        let stored = store
+            .import(
+                "reference files",
+                AttachmentUpload::Directory {
+                    entries: vec![AttachmentUploadEntry {
+                        relative_path: PathBuf::from("nested/Screen Shot.png"),
+                        data_base64: "b3JpZ2luYWw=".into(),
+                    }],
+                },
+            )
+            .unwrap();
+        assert!(stored.is_dir);
+        let working_file = stored.path.join("nested/Screen Shot.png");
+        fs::write(&working_file, "changed").unwrap();
+        assert_eq!(
+            store.read_file(&stored.reference, &working_file).unwrap(),
+            b"original"
+        );
+        assert!(
+            store
+                .read_file(&stored.reference, &stored.path.join("../archive/file"))
+                .is_err()
+        );
+
+        // Legacy payload names can collide with either new layout directory.
+        let legacy_id = Uuid::new_v4();
+        let legacy_root = root.join(legacy_id.to_string());
+        fs::create_dir_all(&legacy_root).unwrap();
+        let legacy_path = legacy_root.join("working");
+        fs::write(&legacy_path, "legacy").unwrap();
+        let legacy_reference = format!("{ATTACHMENT_SCHEME}{legacy_id}");
+        assert!(archived_path(&legacy_reference, &legacy_path).is_none());
+        assert_eq!(
+            store.read_file(&legacy_reference, &legacy_path).unwrap(),
+            b"legacy"
+        );
+        assert!(store.read_file(&stored.reference, &legacy_path).is_err());
+        assert!(store.read_file(&legacy_reference, &working_file).is_err());
+        let live = HashSet::from([stored.reference.clone(), legacy_reference]);
+        assert_eq!(store.retain(&live).unwrap(), 0);
+        fs::remove_dir_all(&stored.path).unwrap();
+        assert_eq!(
+            store.read_file(&stored.reference, &working_file).unwrap(),
+            b"original"
+        );
+        remove_materialization(&root).unwrap();
     }
 
     #[cfg(unix)]
@@ -396,7 +559,7 @@ mod tests {
         assert_eq!(fs::read_to_string(stored.path).unwrap(), "secret");
         fs::remove_dir_all(outside).unwrap();
         if root.exists() {
-            fs::remove_dir_all(root).unwrap();
+            remove_materialization(&root).unwrap();
         }
     }
 
@@ -422,11 +585,17 @@ mod tests {
             .unwrap();
         let live = HashSet::from([keep.reference.clone()]);
 
-        assert_eq!(store.retain(&live).unwrap(), 6);
+        // Cleanup counts both the archived original and the working copy.
+        assert_eq!(store.retain(&live).unwrap(), 12);
         assert!(keep.path.is_file());
         assert!(!remove.path.exists());
+        assert!(!store.path_for(&remove.reference).unwrap().exists());
+        assert_eq!(
+            store.read_file(&keep.reference, &keep.path).unwrap(),
+            b"keep"
+        );
 
-        fs::remove_dir_all(root).unwrap();
+        remove_materialization(&root).unwrap();
     }
 
     #[test]
@@ -453,6 +622,6 @@ mod tests {
         );
         assert!(recent.path.exists());
 
-        fs::remove_dir_all(root).unwrap();
+        remove_materialization(&root).unwrap();
     }
 }

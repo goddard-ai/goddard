@@ -21,5 +21,6 @@ pub mod driver;
 pub mod integrations;
 pub mod model;
 pub mod model_catalog;
+pub mod agent_readonly;
 pub mod permission_review;
 pub mod slash_command_catalog;

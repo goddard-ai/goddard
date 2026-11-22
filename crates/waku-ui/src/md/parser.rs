@@ -977,28 +977,31 @@ fn linkify_bare_urls(pieces: Vec<InlinePiece>) -> Vec<InlinePiece> {
     linked
 }
 
+pub(super) fn bare_web_url_ranges(text: &str) -> impl Iterator<Item = Range<usize>> + '_ {
+    BARE_WEB_URL.find_iter(text).filter_map(|candidate| {
+        let end = trimmed_bare_url_end(text, candidate.start(), candidate.end());
+        (end > candidate.start()).then_some(candidate.start()..end)
+    })
+}
+
 fn push_linkified_run(run: InlineRun, pieces: &mut Vec<InlinePiece>) {
     let mut cursor = 0;
-    for candidate in BARE_WEB_URL.find_iter(&run.text) {
-        let end = trimmed_bare_url_end(&run.text, candidate.start(), candidate.end());
-        if end <= candidate.start() {
-            continue;
-        }
-        if cursor < candidate.start() {
+    for range in bare_web_url_ranges(&run.text) {
+        if cursor < range.start {
             pieces.push(InlinePiece::Run(InlineRun {
-                text: run.text[cursor..candidate.start()].to_owned(),
+                text: run.text[cursor..range.start].to_owned(),
                 style: run.style.clone(),
             }));
         }
 
-        let url = &run.text[candidate.start()..end];
+        let url = &run.text[range.clone()];
         let mut link_style = run.style.clone();
         link_style.link = Some(url.to_owned());
         pieces.push(InlinePiece::Run(InlineRun {
             text: url.to_owned(),
             style: link_style,
         }));
-        cursor = end;
+        cursor = range.end;
     }
 
     if cursor < run.text.len() {

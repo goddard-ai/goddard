@@ -14,7 +14,9 @@ use uuid::Uuid;
 use crate::process::DaemonSupervisor;
 
 /// The daemon a catalog row belongs to.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(
+    Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
+)]
 pub enum DaemonKey {
     /// The supervisor the app spawned or was configured to use as primary.
     Local,

@@ -143,7 +143,7 @@ impl WakuBackend {
     /// scoped credentials, but every action through either is denied: the
     /// pointer, not the credential, defines who may coordinate.
     pub(super) fn boss_fenced_chat(&self, session_id: Uuid) -> bool {
-        if self.boss.is_boss(session_id) {
+        if self.boss.is_boss(session_id) || self.boss.is_counsel(session_id) {
             return false;
         }
         let journal_fenced = RotationJournal::load(&self.boss_journal_path())
@@ -358,6 +358,7 @@ impl WakuBackend {
     /// launch as BossOperation::Open. Every pass republishes the journal's
     /// lifecycle position so a delayed or paused refresh stays visible.
     pub(super) fn reconcile_boss_rotation(&self, now: u64) -> anyhow::Result<()> {
+        let _admission = self.idle_shutdown.enter()?;
         let settings = self.settings.get();
         if !settings.boss_experiment_enabled || !self.boss.is_active() {
             return Ok(());
@@ -1348,6 +1349,7 @@ impl WakuBackend {
                 session.boss_managed
                     && session.project_id == identity.id
                     && session.planning.is_none()
+                    && !self.boss.is_counsel(session.id)
             }) {
                 self.task_store.hydrate(session)?;
                 ids.extend(session.messages.iter().filter_map(|message| {
@@ -1453,6 +1455,7 @@ impl WakuBackend {
                     session.boss_managed
                         && session.project_id == identity.id
                         && session.id != new_id
+                        && !self.boss.is_counsel(session.id)
                         && session.planning.is_none()
                         && self.boss.employee_including_retired(session.id).is_none()
                 })
@@ -1589,6 +1592,25 @@ impl crate::driver::DriverControl for RotationObservedDriver {
         self.inner.prompt_with_attachments(prompt, attachments);
     }
 
+    fn prompt_with_gate(
+        &self,
+        prompt: String,
+        attachments: Vec<crate::model::MessageAttachment>,
+        gate: &crate::driver::EnqueueGate<'_>,
+    ) -> anyhow::Result<()> {
+        self.admit(AdmissionBoundary::Request);
+        self.inner.prompt_with_gate(prompt, attachments, gate)
+    }
+
+    fn steer_with_gate(
+        &self,
+        prompt: String,
+        gate: &crate::driver::EnqueueGate<'_>,
+    ) -> anyhow::Result<()> {
+        self.admit(AdmissionBoundary::Continuation);
+        self.inner.steer_with_gate(prompt, gate)
+    }
+
     fn supports_steer(&self) -> bool {
         self.inner.supports_steer()
     }
@@ -1687,6 +1709,15 @@ impl crate::driver::DriverControl for RotationObservedDriver {
 
     fn apply_options(&self, options: crate::driver::SessionOptions) -> bool {
         self.inner.apply_options(options)
+    }
+
+    fn apply_options_with_cancellation(
+        &self,
+        options: crate::driver::SessionOptions,
+        cancelled: &dyn Fn() -> bool,
+    ) -> bool {
+        self.inner
+            .apply_options_with_cancellation(options, cancelled)
     }
 
     fn rollback(&self, turns: usize) -> anyhow::Result<Option<crate::model::ProviderResumeCursor>> {
@@ -1998,6 +2029,35 @@ impl crate::driver::DriverControl for BossOwnershipDriver {
         self.inner.prompt_with_attachments(prompt, attachments);
         #[cfg(test)]
         self.observe_delivery_submitted();
+    }
+
+    fn prompt_with_gate(
+        &self,
+        prompt: String,
+        attachments: Vec<crate::model::MessageAttachment>,
+        gate: &crate::driver::EnqueueGate<'_>,
+    ) -> anyhow::Result<()> {
+        if !self.admit("prompt") {
+            self.hold_prompt(&prompt);
+            return Ok(());
+        }
+        self.inner.prompt_with_gate(prompt, attachments, gate)?;
+        #[cfg(test)]
+        self.observe_delivery_submitted();
+        Ok(())
+    }
+
+    fn steer_with_gate(
+        &self,
+        prompt: String,
+        gate: &crate::driver::EnqueueGate<'_>,
+    ) -> anyhow::Result<()> {
+        if self.admit("steer") {
+            self.inner.steer_with_gate(prompt, gate)
+        } else {
+            self.hold_prompt(&prompt);
+            Ok(())
+        }
     }
 
     fn supports_steer(&self) -> bool {

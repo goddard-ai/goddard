@@ -7,13 +7,25 @@ use super::*;
 /// queue in submission order, a `steerAccepted` echo is annotated with the
 /// sending task, and a dead runtime drops its credential and registry entry
 /// with it.
-/// Managed chats must remain readable without a connected UI. Streaming deltas
+/// Every task must remain readable without a connected UI. Streaming deltas
 /// update the resident projection; durable writes occur at semantic boundaries.
 pub(super) fn record_boss_event(
     task_state: &Mutex<PersistedState>,
     task_store: &StateStore,
     session_id: Uuid,
     event: &DriverEvent,
+) -> anyhow::Result<()> {
+    record_event_with_prompt(task_state, task_store, session_id, event, &[], None)
+}
+
+/// Persist composer presentation with the submission, before publishing it.
+pub(super) fn record_event_with_prompt(
+    task_state: &Mutex<PersistedState>,
+    task_store: &StateStore,
+    session_id: Uuid,
+    event: &DriverEvent,
+    attachments: &[crate::model::MessageAttachment],
+    presentation: Option<&waku_protocol::PromptPresentation>,
 ) -> anyhow::Result<()> {
     use crate::model::{ActivityItem, MessageRole, ReasoningBlock, TranscriptBlock};
     let mut state = task_state.lock();
@@ -56,11 +68,21 @@ pub(super) fn record_boss_event(
             "Boss chat is archived; reopen the active Boss chat"
         );
     }
+    let now = std::time::Instant::now();
+    let previous_hint = session.compaction_hint(now);
+    session.observe_compaction(event, now);
+    if session.compaction_hint(now) == Some(waku_protocol::compaction::CompactionHint::Likely)
+        && previous_hint != Some(waku_protocol::compaction::CompactionHint::Likely)
+    {
+        eprintln!(
+            "likely silent compaction in session {session_id}: delayed first activity and context usage drop (advisory only)"
+        );
+    }
     let mut activity = None;
     match event {
         DriverEvent::AgentPresetSelected(preset) => session.agent_preset.clone_from(preset),
         DriverEvent::AutoTitleUpdated(title) => {
-            session.set_auto_title(title.clone());
+            session.set_provider_title(title.clone());
         }
         DriverEvent::AvailableCommands(commands) => session.available_commands.clone_from(commands),
         DriverEvent::PromptSubmitted {
@@ -86,9 +108,41 @@ pub(super) fn record_boss_event(
                 .find(|message| message.id == *message_id)
             {
                 prompt.reference_context = reference_context.clone();
+                if let Some(presentation) = presentation {
+                    prompt
+                        .display_content
+                        .clone_from(&presentation.display_content);
+                    prompt.atoms.clone_from(&presentation.atoms);
+                }
+                if !attachments.is_empty() {
+                    prompt.attachments = attachments.to_vec();
+                    // The composer appends exact mention strings. Strip only
+                    // that suffix; whitespace within a filename is literal.
+                    let mut body = message.as_str();
+                    for attachment in attachments.iter().rev() {
+                        let mention = format!("@{}", attachment.mention);
+                        let Some(prefix) = body.strip_suffix(&mention) else {
+                            break;
+                        };
+                        if !prefix.is_empty()
+                            && !prefix.chars().next_back().is_some_and(char::is_whitespace)
+                        {
+                            break;
+                        }
+                        body = prefix.trim_end();
+                    }
+                    if prompt.display_content.is_none() && body != message.as_str() {
+                        prompt.display_content = Some(body.to_owned());
+                    }
+                }
             }
         }
         DriverEvent::TurnStarted => {
+            if session.pending_provider_context.is_some()
+                && super::prompt_delivery::has_provider_switch_handoff(session)
+            {
+                session.pending_provider_context = None;
+            }
             if session.active_turn_id().is_none() {
                 session.begin_provider_turn();
             }
@@ -134,20 +188,47 @@ pub(super) fn record_boss_event(
         }
         DriverEvent::TextDelta(text) => {
             let turn = session.active_turn_id();
+            if let Some(item) = session
+                .transcript_blocks
+                .last_mut()
+                .and_then(|block| block.activities.last_mut())
+                && item.reasoning.is_some()
+                && !item.complete
+            {
+                item.complete = true;
+                if let Some(reasoning) = &mut item.reasoning {
+                    reasoning.finished_at_ms = crate::model::unix_time_millis();
+                }
+            }
             let boundary = session.transcript_blocks.last().is_some_and(|block| {
                 block.turn_id == turn && block.after_message == session.messages.len()
             });
-            if !boundary
-                && session.messages.last().is_some_and(|message| {
-                    message.role == MessageRole::Assistant && message.turn_id == turn
-                })
-            {
-                session.messages.last_mut().unwrap().content.push_str(text);
+            if session.messages.last().is_some_and(|message| {
+                message.role == MessageRole::Assistant
+                    && message.turn_id == turn
+                    && (!boundary
+                        || waku_protocol::streaming::text_delta_rejoins(&message.content, text))
+            }) {
+                let message = session
+                    .messages
+                    .last_mut()
+                    .expect("checked last assistant message");
+                message.content.push_str(text);
+                message.streaming = true;
             } else {
                 session.push_message(MessageRole::Assistant, text);
+                if let Some(message) = session.messages.last_mut() {
+                    message.streaming = true;
+                }
             }
         }
         DriverEvent::ReasoningDelta(text) => {
+            if text.is_empty() {
+                return Ok(());
+            }
+            if let Some(message) = session.messages.last_mut() {
+                message.streaming = false;
+            }
             let turn = session.active_turn_id();
             let reasoning = session
                 .transcript_blocks
@@ -159,6 +240,7 @@ pub(super) fn record_boss_event(
                 .and_then(|item| item.reasoning.as_mut());
             if let Some(reasoning) = reasoning {
                 reasoning.content.push_str(text);
+                reasoning.finished_at_ms = crate::model::unix_time_millis();
             } else {
                 activity = Some(ActivityItem::from_reasoning(
                     ReasoningBlock {
@@ -177,6 +259,9 @@ pub(super) fn record_boss_event(
             detail,
             complete,
         } => {
+            if let Some(message) = session.messages.last_mut() {
+                message.streaming = false;
+            }
             activity = Some(ActivityItem::new(
                 id.clone(),
                 *kind,
@@ -185,7 +270,21 @@ pub(super) fn record_boss_event(
                 *complete,
             ));
         }
-        DriverEvent::RichActivity(item) => activity = Some(item.clone()),
+        DriverEvent::RichActivity(item) => {
+            if let Some(message) = session.messages.last_mut() {
+                message.streaming = false;
+            }
+            activity = Some(item.clone());
+        }
+        DriverEvent::GoalUpdated(goal) => {
+            if !session
+                .thread_goal
+                .as_ref()
+                .is_some_and(|goal| goal.managed_id.is_some())
+            {
+                session.thread_goal = goal.clone();
+            }
+        }
         DriverEvent::UsageUpdated {
             context_tokens,
             context_window,
@@ -204,6 +303,10 @@ pub(super) fn record_boss_event(
         DriverEvent::TurnFinished {
             success, summary, ..
         } => {
+            for message in &mut session.messages {
+                message.streaming = false;
+            }
+            session.last_reply_at = Some(crate::model::unix_time());
             session.finish_active_turn(if *success {
                 TurnStatus::Completed
             } else {
@@ -273,20 +376,30 @@ pub(super) fn record_boss_event(
     }
     session.updated_at = crate::model::unix_time();
     state.mark_session_dirty(session_id);
-    if !matches!(
-        event,
-        DriverEvent::TextDelta(_) | DriverEvent::ReasoningDelta(_)
-    ) {
+    if !stream_projection_event(event) {
         task_store.save(&mut state)?;
     }
     Ok(())
 }
 
-/// Settle a durable Boss steer into the active turn under the same message id
+fn stream_projection_event(event: &DriverEvent) -> bool {
+    matches!(
+        event,
+        DriverEvent::TextDelta(_)
+            | DriverEvent::ReasoningDelta(_)
+            | DriverEvent::UsageUpdated { .. }
+            | DriverEvent::Activity {
+                complete: false,
+                ..
+            }
+    ) || matches!(event, DriverEvent::RichActivity(item) if !item.complete)
+}
+
+/// Settle a durable user steer into the active turn under the same message id
 /// that identified its queued submission. A rotation that happens before the
 /// provider acknowledgement therefore carries the queue row; one that happens
 /// after acceptance carries the transcript message instead.
-fn record_accepted_boss_steer(
+fn record_accepted_user_steer(
     task_state: &Mutex<PersistedState>,
     task_store: &StateStore,
     session_id: Uuid,
@@ -360,9 +473,51 @@ fn record_accepted_boss_steer(
         }
     }
     session.updated_at = crate::model::unix_time();
+    session.last_reply_at = Some(session.updated_at);
     state.mark_session_dirty(session_id);
     task_store.save(&mut state)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod recency_tests {
+    use super::*;
+
+    #[test]
+    fn accepted_steer_refreshes_persisted_recency_with_or_without_a_preview() {
+        for preview in [false, true] {
+            let root = std::env::temp_dir().join(format!("steer-recency-{}", Uuid::new_v4()));
+            let store = StateStore::daemon(root.join("app.db"));
+            let mut state = PersistedState::fresh(root.join("repo"));
+            let session = &mut state.sessions[0];
+            let turn_id = session.begin_turn("first");
+            session.last_reply_at = Some(1);
+            let queued = crate::model::QueuedMessage::new("follow-up");
+            let submission_id = queued.id;
+            session.queued_messages.push(queued);
+            if preview {
+                let mut message =
+                    crate::model::Message::new(crate::model::MessageRole::User, "follow-up");
+                message.id = submission_id;
+                session.messages.push(message);
+            }
+            let session_id = session.id;
+            store.save(&mut state).unwrap();
+            let state = Mutex::new(state);
+
+            record_accepted_user_steer(&state, &store, session_id, submission_id, "follow-up")
+                .unwrap();
+
+            let restored = store.load_session_detail(session_id).unwrap().unwrap();
+            assert!(restored.last_reply_at.unwrap() > 1);
+            assert_eq!(restored.active_turn_id(), Some(turn_id));
+            assert!(restored.queued_messages.is_empty());
+            assert_eq!(restored.messages.len(), 2);
+            assert_eq!(restored.messages[1].id, submission_id);
+            assert_eq!(restored.messages[1].turn_id, Some(turn_id));
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
 }
 
 /// The generation the rotation journal currently assigns a session, for
@@ -599,6 +754,7 @@ pub(super) fn forward_driver_events(
 ) {
     let lifecycle = lifecycles.session(session_id);
     let mut page_owner = None;
+    let mut pending_reasoning_newlines = 0;
     let mut pending = std::collections::VecDeque::new();
     let mut checkpoint: Option<(
         crate::stable_runtime::StableLink,
@@ -660,6 +816,26 @@ pub(super) fn forward_driver_events(
             continue;
         }
         owner.set(Some(runtime_id));
+        // The socket can signal this exact driver while its mailbox is busy.
+        // Record that intent before the provider's resulting event, under the
+        // same ownership gate as ordinary Stop. A retired driver's latch never
+        // reaches this point, so it cannot stop a replacement's turn.
+        if driver.take_user_cancel() {
+            if boss.is_boss_principal(session_id) {
+                agent.note_user_stop(session_id);
+            }
+            let cancelled = DriverEvent::TurnCancelled;
+            if let Err(error) = record_boss_event(&task_state, &task_store, session_id, &cancelled)
+            {
+                eprintln!("could not record user Stop {session_id}: {error:#}");
+            }
+            match event_to_wire(cancelled) {
+                Ok(event) => {
+                    let _ = events.send(event);
+                }
+                Err(error) => eprintln!("could not publish user Stop {session_id}: {error:#}"),
+            }
+        }
         let stable = sessions
             .lock()
             .get(&session_id)
@@ -701,6 +877,30 @@ pub(super) fn forward_driver_events(
             continue;
         }
 
+        let event = match event {
+            DriverEvent::ReasoningDelta(delta) => {
+                let mut text = String::new();
+                waku_protocol::streaming::push_reasoning_delta(
+                    &mut text,
+                    &mut pending_reasoning_newlines,
+                    &delta,
+                );
+                DriverEvent::ReasoningDelta(text)
+            }
+            event => {
+                if matches!(
+                    &event,
+                    DriverEvent::TextDelta(_)
+                        | DriverEvent::TurnStarted
+                        | DriverEvent::TurnFinished { .. }
+                        | DriverEvent::Activity { .. }
+                        | DriverEvent::RichActivity(_)
+                ) {
+                    pending_reasoning_newlines = 0;
+                }
+                event
+            }
+        };
         #[cfg(test)]
         if let Some(applying) = lifecycles.event_applying.lock().clone() {
             applying(session_id, runtime_id);
@@ -804,7 +1004,7 @@ pub(super) fn forward_driver_events(
         } else {
             None
         };
-        if (managed && !stale) || automation_settle || stable.is_some() {
+        if !stale || automation_settle || stable.is_some() {
             // A genuinely-completed turn keeps its verdict; only a
             // cancel-issued settle writes the intentional interruption.
             let interrupted =
@@ -821,13 +1021,32 @@ pub(super) fn forward_driver_events(
                     break;
                 }
             } else if !stale {
+                if stable.is_none() && stream_projection_event(&event) {
+                    let mut last = lifecycles.stream_checkpoint.lock();
+                    if last.is_none_or(|last| last.elapsed() >= std::time::Duration::from_secs(1)) {
+                        *last = Some(std::time::Instant::now());
+                        if let Err(error) = task_store.save(&mut task_state.lock()) {
+                            eprintln!("could not checkpoint task streams: {error:#}");
+                        }
+                    }
+                }
                 let _ = super::instruction_pins::capture_boss_instruction_event(
+                    &lifecycles.admission,
                     &boss,
                     &task_state,
                     &task_store,
                     session_id,
                     &event,
                 );
+                // A settled Counsel answer is what wakes the separate
+                // recommendation turn — Jev judges `answered` inside the
+                // hook, off the event pump.
+                if matches!(&event, DriverEvent::TurnFinished { success: true, .. })
+                    && boss.is_counsel(session_id)
+                    && let Some(backend) = auto_prompts.backend()
+                {
+                    backend.capture_counsel_answer_settled(session_id, events.clone());
+                }
             }
         }
         // A chain attempt whose session stopped for input — a permission
@@ -850,6 +1069,20 @@ pub(super) fn forward_driver_events(
             gate.interrupt_delivery();
         }
         let gate_consumed = plan_gate.as_ref().is_some_and(|gate| gate.observe(&event));
+        let rejected_counsel_handoff = match &event {
+            DriverEvent::SteerRejected { message, .. } if !stale && boss.is_boss(session_id) => {
+                boss.document().counsel.session_id.filter(|counsel| {
+                    agent.has_pending_steer_matching(session_id, |entry| {
+                        entry.sender == Some(*counsel)
+                            && entry
+                                .prompt
+                                .starts_with(super::counsel::DIRECT_HANDOFF_PREFIX)
+                            && entry.transport.as_deref() == Some(message.as_str())
+                    })
+                })
+            }
+            _ => None,
+        };
         let rejected_steer = if stale {
             None
         } else {
@@ -888,13 +1121,9 @@ pub(super) fn forward_driver_events(
                 model,
                 reasoning_effort,
             } => {
-                // The runtime's confirmed configuration is daemon-owned
-                // truth: write it inside this event's application so the
-                // applied marker that follows proves it durable. The
-                // activation mark rejects a stale or foreign-generation
-                // redelivery before its fields can resurrect a superseded
-                // selection.
-                record_effective_config(
+                // Preserve the effective event verbatim, and persist only
+                // its replay mark. User metadata owns the selected settings.
+                record_config_activation(
                     &task_state,
                     &task_store,
                     session_id,
@@ -902,9 +1131,6 @@ pub(super) fn forward_driver_events(
                         generation,
                         revision,
                     },
-                    provider.as_deref(),
-                    model.as_deref(),
-                    reasoning_effort.as_deref(),
                 );
                 DriverEvent::ConfigActivated {
                     generation,
@@ -940,6 +1166,7 @@ pub(super) fn forward_driver_events(
                         sender,
                         hidden,
                         report_trigger.clone(),
+                        steer.as_ref().and_then(|steer| steer.queued_id),
                     );
                 }
                 // The agent-surface instruction composes into every context
@@ -952,8 +1179,17 @@ pub(super) fn forward_driver_events(
                     agent.mark_parent_index_delivered(session_id);
                     agent.mark_memory_delivered(session_id);
                 }
-                if let Some(submission_id) = steer.as_ref().and_then(|steer| steer.submission_id)
-                    && let Err(error) = record_accepted_boss_steer(
+                let submission_id = steer.as_ref().and_then(|steer| {
+                    steer.submission_id.or_else(|| {
+                        // A human composer prompt drained into a parked turn
+                        // carries its identity on the daemon-owned queue entry.
+                        steer.queued_id.filter(|_| {
+                            !hidden && steer.sender.is_none() && steer.report_trigger.is_none()
+                        })
+                    })
+                });
+                if let Some(submission_id) = submission_id
+                    && let Err(error) = record_accepted_user_steer(
                         &task_state,
                         &task_store,
                         session_id,
@@ -989,6 +1225,7 @@ pub(super) fn forward_driver_events(
                     }
                 }
                 DriverEvent::SteerAccepted {
+                    submission_id,
                     message,
                     sent_by_task,
                     hidden,
@@ -1010,6 +1247,33 @@ pub(super) fn forward_driver_events(
                 {
                     continue;
                 }
+                if let Some(counsel) = rejected_counsel_handoff {
+                    let notice = format!(
+                        "Boss's provider rejected the live handoff: {reason}. The instruction remains queued for delivery."
+                    );
+                    let saved = (|| -> anyhow::Result<()> {
+                        let mut state = task_state.lock();
+                        let session = state
+                            .session_mut(counsel)
+                            .ok_or_else(|| anyhow!("Counsel chat is unavailable"))?;
+                        task_store.hydrate(session)?;
+                        session.push_message(crate::model::MessageRole::System, notice);
+                        task_store.save(&mut state)?;
+                        Ok(())
+                    })();
+                    if let Err(error) = saved {
+                        eprintln!("could not record the rejected Counsel handoff: {error:#}");
+                    } else if let Some(backend) = auto_prompts.backend() {
+                        backend.notify_task_state();
+                    }
+                }
+                if rejected_steer
+                    .as_ref()
+                    .is_some_and(|steer| steer.queued_id.is_some())
+                {
+                    send_agent_queue_changed(&task_state, &events, session_id);
+                    continue;
+                }
                 // An enveloped steer echoes the envelope; a surfaced
                 // rejection names the sender's own words.
                 let message = rejected_steer
@@ -1018,6 +1282,9 @@ pub(super) fn forward_driver_events(
                     .map(|steer| steer.prompt.clone())
                     .unwrap_or(message);
                 DriverEvent::SteerRejected {
+                    submission_id: rejected_steer
+                        .as_ref()
+                        .and_then(|steer| steer.submission_id),
                     message,
                     reason,
                     reason_i18n,
@@ -1067,12 +1334,37 @@ pub(super) fn forward_driver_events(
         } else {
             None
         };
-        let wire = event_to_wire(event).unwrap_or_else(|error| {
+        let mut wire = event_to_wire(event).unwrap_or_else(|error| {
             WireDriverEvent::new(
                 "error",
                 Value::String(format!("could not encode daemon event: {error}")),
             )
         });
+        if wire.kind == "turnStarted" {
+            let state = task_state.lock();
+            if let Some(turn) = state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .and_then(|session| session.turns.last())
+            {
+                wire.payload = serde_json::json!({ "turn": turn });
+            }
+        }
+        if settled && events.needs_settlement_snapshot() {
+            let state = task_state.lock();
+            if let Some(session) = state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+            {
+                if !wire.payload.is_object() {
+                    wire.payload = serde_json::json!({});
+                }
+                wire.payload["taskSnapshot"] =
+                    serde_json::to_value(session).expect("task snapshots are serializable");
+            }
+        }
         let delivered = if ephemeral {
             events.send_ephemeral(wire)
         } else {
@@ -1168,6 +1460,13 @@ pub(super) fn forward_driver_events(
                         &task_store,
                         &automations,
                     )
+                    || automatic_counsel_waiting(
+                        session_id,
+                        &entry,
+                        &boss,
+                        &task_state,
+                        &task_store,
+                    )
                     || (entry.is_plan_finalization()
                         && agent.has_open_turn(session_id)
                         && !driver.supports_steer())
@@ -1256,5 +1555,106 @@ fn report_stable_checkpoint_failure(
     eprintln!("goddard-daemon: {session_id}: {message}");
     if let Ok(wire) = event_to_wire(DriverEvent::Error(message)) {
         let _ = events.for_session(session_id, runtime_id).send(wire);
+    }
+}
+
+#[cfg(test)]
+mod attachment_tests {
+    use super::*;
+
+    #[test]
+    fn submitted_attachments_survive_reload_without_a_composer_save() {
+        use crate::model::MessageAttachment;
+        let root = std::env::temp_dir().join(format!("attachment reload {}", Uuid::new_v4()));
+        let (backend, session_id) = super::super::tests::surface_test_backend(&root);
+        let stored = backend
+            .attachments
+            .import(
+                "Screenshot 2026-11-06 at 11.49.19.png",
+                waku_protocol::attachments::AttachmentUpload::File {
+                    data_base64: "aW1hZ2UgYnl0ZXM=".to_owned(),
+                },
+            )
+            .unwrap();
+        let attachment = MessageAttachment {
+            mention: stored.path.to_string_lossy().into_owned(),
+            path: stored.path,
+            name: stored.name,
+            is_dir: false,
+            is_image: true,
+            blob_reference: Some(stored.reference),
+            pasted_text_preview: None,
+            session_id: None,
+        };
+        let message_id = Uuid::new_v4();
+        let prompt = format!("what changes do you propose? @{}", attachment.mention);
+        let submitted = DriverEvent::PromptSubmitted {
+            message: prompt.clone(),
+            turn_id: Uuid::new_v4(),
+            message_id,
+            sent_by_task: None,
+            hidden: false,
+            report_trigger: None,
+            reference_context: None,
+        };
+        record_event_with_prompt(
+            &backend.task_state,
+            &backend.task_store,
+            session_id,
+            &submitted,
+            std::slice::from_ref(&attachment),
+            None,
+        )
+        .unwrap();
+        // A later text-only echo must keep the durable attachment record.
+        record_boss_event(
+            &backend.task_state,
+            &backend.task_store,
+            session_id,
+            &submitted,
+        )
+        .unwrap();
+        let reopened = StateStore::daemon(root.join("app.db"));
+        let restored = reopened.load_session_detail(session_id).unwrap().unwrap();
+        let message = restored
+            .messages
+            .iter()
+            .find(|m| m.id == message_id)
+            .unwrap();
+        assert_eq!(message.content, prompt);
+        assert_eq!(message.visible_content(), "what changes do you propose?");
+        assert_eq!(message.attachments, vec![attachment.clone()]);
+        assert_eq!(
+            backend
+                .attachments
+                .read_file(
+                    attachment.blob_reference.as_deref().unwrap(),
+                    &message.attachments[0].path,
+                )
+                .unwrap(),
+            b"image bytes"
+        );
+
+        // A follower may have only text, with or without a display override.
+        for display_content in [None, Some("what changes do you propose?".to_owned())] {
+            let mut follower = restored.clone();
+            let message = follower
+                .messages
+                .iter_mut()
+                .find(|m| m.id == message_id)
+                .unwrap();
+            message.display_content = display_content;
+            message.attachments.clear();
+            preserve_task_view_projection(&restored, &mut follower);
+            assert_eq!(
+                follower.messages.last().unwrap().attachments,
+                vec![attachment.clone()]
+            );
+            assert_eq!(
+                follower.messages.last().unwrap().visible_content(),
+                "what changes do you propose?"
+            );
+        }
+        let _ = std::fs::remove_dir_all(root);
     }
 }

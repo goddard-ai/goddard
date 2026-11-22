@@ -11371,7 +11371,7 @@ checksum = "317211a0dc0ceedd78fb2ca9a44aed3d7b9b26f81870d485c07122b4350673b7"
 
 [[package]]
 name = "waku"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
@@ -11425,6 +11425,7 @@ dependencies = [
  "unicode-segmentation",
  "url",
  "uuid",
+ "waku-base",
  "waku-client",
  "waku-localization",
  "waku-protocol",
@@ -11467,6 +11468,7 @@ dependencies = [
  "mdns-sd",
  "objc2-foundation 0.3.2",
  "parking_lot",
+ "reflink-copy",
  "serde",
  "serde-saphyr",
  "serde_json",
@@ -11487,12 +11489,14 @@ dependencies = [
  "anyhow",
  "parking_lot",
  "rhai",
+ "rusqlite",
  "serde",
  "serde_json",
  "serde_path_to_error",
  "sha2 0.10.9",
  "url",
  "uuid",
+ "waku-base",
  "waku-memory-engine",
  "waku-protocol",
 ]
@@ -11838,6 +11842,7 @@ dependencies = [
 name = "waku-store"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "base64 0.22.1",
  "dirs 6.0.0",
  "dunce",
@@ -11867,6 +11872,7 @@ dependencies = [
  "ratex-svg",
  "ratex-types",
  "regex",
+ "serde",
  "serde-saphyr",
  "serde_json",
  "unicode-linebreak",

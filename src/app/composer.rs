@@ -152,6 +152,56 @@ impl ComposerInlineAtom {
         }
     }
 
+    fn clipboard_atom(&self) -> waku_ui::clipboard::ClipboardAtom {
+        use waku_ui::clipboard::ClipboardAtom;
+        match &self.kind {
+            ComposerAtomKind::PastedText(text) => ClipboardAtom::PastedText {
+                text: text.clone(),
+                category: self.paste_category.clone(),
+            },
+            ComposerAtomKind::SessionRef { session_id, title } => ClipboardAtom::SessionRef {
+                session_id: *session_id,
+                title: title.to_string(),
+            },
+            ComposerAtomKind::Ref(reference) => ClipboardAtom::Reference {
+                kind: reference.kind,
+                name: reference.name.to_string(),
+                target: reference.target.to_string(),
+            },
+        }
+    }
+
+    fn from_clipboard(marker: usize, atom: &waku_ui::clipboard::ClipboardAtom) -> Self {
+        use waku_ui::clipboard::ClipboardAtom;
+        let (kind, paste_category) = match atom {
+            ClipboardAtom::PastedText { text, category } => {
+                (ComposerAtomKind::PastedText(text.clone()), category.clone())
+            }
+            ClipboardAtom::SessionRef { session_id, title } => (
+                ComposerAtomKind::SessionRef {
+                    session_id: *session_id,
+                    title: title.clone().into(),
+                },
+                None,
+            ),
+            ClipboardAtom::Reference { kind, name, target } => (
+                ComposerAtomKind::Ref(ComposerRef {
+                    kind: *kind,
+                    name: name.clone().into(),
+                    target: target.clone().into(),
+                    detail: SharedString::default(),
+                }),
+                None,
+            ),
+        };
+        Self {
+            marker,
+            kind,
+            paste_category,
+            revision: Uuid::new_v4(),
+        }
+    }
+
     /// The wire form the sent message carries: the chip label, the payload
     /// an edit splices back, and the task a session chip opens.
     pub(super) fn message_atom(&self) -> waku_protocol::model::MessageAtom {
@@ -458,6 +508,7 @@ pub(super) fn undelivered_turn_resend(
         turn.id,
         message.id,
         ComposerSubmission {
+            configuration: None,
             prompt: message.content.clone(),
             display_content: message.display_content.clone(),
             human_content: None,
@@ -473,11 +524,12 @@ pub(super) fn undelivered_turn_resend(
     ))
 }
 
-/// The parked "continue" nudge `hidden_continue` enqueues — the only hidden
-/// queue entry the client writes. Naming it lets repeat presses dedupe and
-/// lets the queue card label the row instead of dropping it.
+/// Hidden continuation requests the queue card can label for the user.
 pub(super) fn queued_message_is_continue(message: &QueuedMessage) -> bool {
-    message.hidden && message.content.trim() == CONTINUE_PROMPT
+    message.hidden
+        && (message.content.trim() == CONTINUE_PROMPT
+            || (!message.is_agent_owned()
+                && message.content == waku_protocol::counsel::COUNSEL_REVIEW_PROMPT))
 }
 
 /// What the no-draft submit affordance can do for a stopped turn: send the
@@ -530,13 +582,78 @@ impl Waku {
     // ── Permission ─────────────────────────────────────────────────────────
 
     pub(super) fn render_permission(&self, cx: &mut Context<Self>) -> Option<Div> {
-        if let Some(input) = self.selected_runtime()?.pending_user_input.clone() {
-            return Some(self.render_user_input(input, cx));
+        let session_id = self.attention_session_id()?;
+        let runtime = self.attention_runtime()?;
+        if let Some(input) = runtime.pending_user_input.clone() {
+            return Some(div().px(px(20.0)).pb(px(8.0)).child(self.render_user_input(
+                session_id,
+                input,
+                self.user_input_answer.clone(),
+                None,
+                cx,
+            )));
         }
-        if let Some(permission) = self.selected_runtime()?.pending_computer_approval.as_ref() {
-            return Some(self.render_computer_permission(permission, cx));
+        if let Some(permission) = runtime.pending_computer_approval.as_ref() {
+            return Some(
+                div()
+                    .px(px(20.0))
+                    .pb(px(8.0))
+                    .child(self.render_computer_permission(session_id, permission, None, cx)),
+            );
         }
-        let permission = self.selected_runtime()?.pending_permission.as_ref()?;
+        let permission = runtime.pending_permission.as_ref()?;
+        Some(
+            div()
+                .px(px(20.0))
+                .pb(px(8.0))
+                .child(self.permission_request_card(session_id, permission, None, cx)),
+        )
+    }
+
+    /// Who a supervisor-surfaced request belongs to — the employee's name
+    /// and job — rendered as a line above the card's own title so the
+    /// supervisor can tell which of its employees is asking.
+    pub(super) fn employee_attribution(
+        &self,
+        name: &str,
+        job_title: &str,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let theme = Theme::current(cx);
+        div()
+            .flex()
+            .items_center()
+            .gap(px(7.0))
+            .mb(px(8.0))
+            .child(icon("icons/bot.svg", 12.0, theme.text_tertiary))
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(sp(12.5))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(theme.text)
+                    .child(SharedString::from(name.to_owned())),
+            )
+            .children((!job_title.is_empty()).then(|| {
+                div()
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_tertiary)
+                    .truncate()
+                    .child(SharedString::from(job_title.to_owned()))
+            }))
+    }
+
+    /// The permission option buttons and title/detail block shared by the
+    /// selected session's composer-lane card and a supervisor's inline
+    /// employee card. Every action carries the owning session and request
+    /// id so an answer always lands on the original request.
+    pub(super) fn permission_request_card(
+        &self,
+        session_id: Uuid,
+        permission: &PendingPermission,
+        attribution: Option<Div>,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let theme = Theme::current(cx);
         let request_id = permission.request_id.clone();
         // Escape answers the request with the first deny option — a real
@@ -553,15 +670,24 @@ impl Waku {
             let option_id = option.id.clone();
             let allow = option.allow;
             let focus = self.transcript_control_focus(
-                format!("permission-{}-{}", permission.request_id, option.id),
+                format!(
+                    "permission-{session_id}-{}-{}",
+                    permission.request_id, option.id
+                ),
                 cx,
             );
             buttons = buttons.child(
                 div()
                     .id(SharedString::from(format!(
-                        "permission-{}-{}",
+                        "permission-{session_id}-{}-{}",
                         permission.request_id, option.id
                     )))
+                    .debug_selector(|| {
+                        format!(
+                            "permission-option-{session_id}-{}-{}",
+                            permission.request_id, option.id
+                        )
+                    })
                     .track_focus(&focus)
                     .tab_index(0)
                     .h(px(28.0))
@@ -599,82 +725,94 @@ impl Waku {
                             .unwrap_or_else(|| option.label.clone()),
                     ))
                     .on_activation(cx, move |this, _, cx| {
-                        this.respond_permission(request_id.clone(), option_id.clone(), cx);
+                        this.respond_permission(
+                            session_id,
+                            request_id.clone(),
+                            option_id.clone(),
+                            cx,
+                        );
                     }),
             );
         }
         let deny_request_id = request_id.clone();
-        Some(
-            div().px(px(20.0)).pb(px(8.0)).child(
+        div()
+            .w_full()
+            .max_w(px(CONTENT_MAX_WIDTH))
+            .mx_auto()
+            .p(px(12.0))
+            .rounded(px(15.0))
+            .border(hairline())
+            .border_color(theme.border_subtle)
+            .bg(theme.raised)
+            .shadow_md()
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key == "escape"
+                    && let Some(option_id) = deny_option.clone()
+                {
+                    this.respond_permission(session_id, deny_request_id.clone(), option_id, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .children(attribution)
+            .child(
                 div()
-                    .w_full()
-                    .max_w(px(CONTENT_MAX_WIDTH))
-                    .mx_auto()
-                    .p(px(12.0))
-                    .rounded(px(15.0))
-                    .border(hairline())
-                    .border_color(theme.border_subtle)
-                    .bg(theme.raised)
-                    .shadow_md()
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                        if event.keystroke.key == "escape"
-                            && let Some(option_id) = deny_option.clone()
-                        {
-                            this.respond_permission(deny_request_id.clone(), option_id, cx);
-                            cx.stop_propagation();
-                        }
-                    }))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(icon("icons/alert.svg", 13.0, theme.warning))
                     .child(
                         div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(icon("icons/alert.svg", 13.0, theme.warning))
-                            .child(
-                                div()
-                                    .text_size(sp(12.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(SharedString::from(
-                                        permission
-                                            .title_i18n
-                                            .as_ref()
-                                            .map(waku_client::WireTranslation::render)
-                                            .unwrap_or_else(|| permission.title.clone()),
-                                    )),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .id("permission-detail")
-                            .mt(px(8.0))
-                            .max_h(px(92.0))
-                            .overflow_y_scroll()
-                            .p(px(8.0))
-                            .rounded(px(9.0))
-                            .bg(theme.inset)
-                            .font_family(crate::fonts::current(cx).code)
                             .text_size(sp(12.5))
-                            .line_height(sp(16.0))
-                            .text_color(theme.text_secondary)
-                            .whitespace_normal()
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
                             .child(SharedString::from(
                                 permission
-                                    .detail_i18n
+                                    .title_i18n
                                     .as_ref()
                                     .map(waku_client::WireTranslation::render)
-                                    .unwrap_or_else(|| permission.detail.clone()),
+                                    .unwrap_or_else(|| permission.title.clone()),
                             )),
-                    )
-                    .child(buttons),
-            ),
-        )
+                    ),
+            )
+            .child(
+                div()
+                    .id(SharedString::from(format!(
+                        "permission-detail-{session_id}-{}",
+                        permission.request_id
+                    )))
+                    .mt(px(8.0))
+                    .max_h(px(92.0))
+                    .overflow_y_scroll()
+                    .p(px(8.0))
+                    .rounded(px(9.0))
+                    .bg(theme.inset)
+                    .font_family(crate::fonts::current(cx).code)
+                    .text_size(sp(12.5))
+                    .line_height(sp(16.0))
+                    .text_color(theme.text_secondary)
+                    .whitespace_normal()
+                    .child(SharedString::from(
+                        permission
+                            .detail_i18n
+                            .as_ref()
+                            .map(waku_client::WireTranslation::render)
+                            .unwrap_or_else(|| permission.detail.clone()),
+                    )),
+            )
+            .child(buttons)
     }
 
-    fn render_user_input(&self, pending: PendingUserInput, cx: &mut Context<Self>) -> Div {
+    pub(super) fn render_user_input(
+        &self,
+        session_id: Uuid,
+        pending: PendingUserInput,
+        answer_input: Entity<TextInput>,
+        attribution: Option<Div>,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
         let theme = Theme::current(cx);
         let Some(question) = pending.current_question().cloned() else {
-            return div();
+            return div().id("user-input-empty");
         };
         let selected = pending
             .selections
@@ -694,15 +832,22 @@ impl Waku {
             let is_selected = selected.iter().any(|answer| answer == &option.label);
             let click_label = option.label.clone();
             let key_label = option.label.clone();
+            let key_request_id = request_id.clone();
+            let click_request_id = request_id.clone();
             let focus = self.transcript_control_focus(
-                format!("user-input-{request_id}-{question_index}-option-{index}"),
+                format!("user-input-{session_id}-{request_id}-{question_index}-option-{index}"),
                 cx,
             );
             options = options.child(
                 div()
                     .id(SharedString::from(format!(
-                        "user-input-{request_id}-{question_index}-option-{index}"
+                        "user-input-{session_id}-{request_id}-{question_index}-option-{index}"
                     )))
+                    .debug_selector(|| {
+                        format!(
+                            "user-input-option-{session_id}-{request_id}-{question_index}-{index}"
+                        )
+                    })
                     .track_focus(&focus)
                     .tab_index(0)
                     .tab_stop(true)
@@ -755,11 +900,21 @@ impl Waku {
                         row.child(icon("icons/check.svg", 12.0, theme.accent))
                     })
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.select_user_input_option(click_label.clone(), cx);
+                        this.select_user_input_option(
+                            session_id,
+                            click_request_id.clone(),
+                            click_label.clone(),
+                            cx,
+                        );
                     }))
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                         if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            this.select_user_input_option(key_label.clone(), cx);
+                            this.select_user_input_option(
+                                session_id,
+                                key_request_id.clone(),
+                                key_label.clone(),
+                                cx,
+                            );
                             cx.stop_propagation();
                         }
                     })),
@@ -767,7 +922,7 @@ impl Waku {
         }
 
         let next_focus = self.transcript_control_focus(
-            format!("user-input-{request_id}-{question_index}-continue"),
+            format!("user-input-{session_id}-{request_id}-{question_index}-continue"),
             cx,
         );
         // Daemon-owned `agent ask` requests always take the actions — the
@@ -775,16 +930,19 @@ impl Waku {
         // irrelevant. Provider-owned requests need the transport's support.
         let supports_actions = request_id.starts_with(waku_protocol::AGENT_ASK_REQUEST_PREFIX)
             || self
-                .selected_runtime()
+                .runtimes
+                .get(&session_id)
                 .is_some_and(|runtime| runtime.driver.supports_user_input_actions());
         let dismiss = supports_actions.then(|| {
             let focus = self.transcript_control_focus(
-                format!("user-input-{request_id}-{question_index}-dismiss"),
+                format!("user-input-{session_id}-{request_id}-{question_index}-dismiss"),
                 cx,
             );
+            let click_request_id = request_id.clone();
+            let key_request_id = request_id.clone();
             div()
                 .id(SharedString::from(format!(
-                    "user-input-{request_id}-{question_index}-dismiss"
+                    "user-input-{session_id}-{request_id}-{question_index}-dismiss"
                 )))
                 .track_focus(&focus)
                 .tab_index(0)
@@ -802,22 +960,24 @@ impl Waku {
                 .hover(|style| style.bg(theme.overlay).text_color(theme.text_secondary))
                 .active(|style| style.opacity(0.8))
                 .child(tr!("user_input.dismiss"))
-                .on_click(cx.listener(|this, _, _, cx| this.dismiss_user_input(cx)))
-                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.dismiss_user_input(session_id, click_request_id.clone(), cx)
+                }))
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                     if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                        this.dismiss_user_input(cx);
+                        this.dismiss_user_input(session_id, key_request_id.clone(), cx);
                         cx.stop_propagation();
                     }
                 }))
         });
         let clarify = supports_actions.then(|| {
             let focus = self.transcript_control_focus(
-                format!("user-input-{request_id}-{question_index}-clarify"),
+                format!("user-input-{session_id}-{request_id}-{question_index}-clarify"),
                 cx,
             );
             div()
                 .id(SharedString::from(format!(
-                    "user-input-{request_id}-{question_index}-clarify"
+                    "user-input-{session_id}-{request_id}-{question_index}-clarify"
                 )))
                 .track_focus(&focus)
                 .tab_index(0)
@@ -842,14 +1002,18 @@ impl Waku {
                     theme.text_ghost
                 })
                 .when(has_custom, |button| {
+                    let click_request_id = request_id.clone();
+                    let key_request_id = request_id.clone();
                     button
                         .focus_visible(|style| style.bg(theme.focus_highlight()))
                         .hover(|style| style.bg(theme.overlay))
                         .active(|style| style.opacity(0.8))
-                        .on_click(cx.listener(|this, _, _, cx| this.clarify_user_input(cx)))
-                        .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.clarify_user_input(session_id, click_request_id.clone(), cx)
+                        }))
+                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                             if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                this.clarify_user_input(cx);
+                                this.clarify_user_input(session_id, key_request_id.clone(), cx);
                                 cx.stop_propagation();
                             }
                         }))
@@ -858,12 +1022,14 @@ impl Waku {
         });
         let back = (question_index > 0).then(|| {
             let focus = self.transcript_control_focus(
-                format!("user-input-{request_id}-{question_index}-back"),
+                format!("user-input-{session_id}-{request_id}-{question_index}-back"),
                 cx,
             );
+            let click_request_id = request_id.clone();
+            let key_request_id = request_id.clone();
             div()
                 .id(SharedString::from(format!(
-                    "user-input-{request_id}-{question_index}-back"
+                    "user-input-{session_id}-{request_id}-{question_index}-back"
                 )))
                 .track_focus(&focus)
                 .tab_index(0)
@@ -881,18 +1047,23 @@ impl Waku {
                 .hover(|style| style.bg(theme.overlay).text_color(theme.text_secondary))
                 .active(|style| style.opacity(0.8))
                 .child(tr!("user_input.back"))
-                .on_click(cx.listener(|this, _, _, cx| this.previous_user_input(cx)))
-                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.previous_user_input(session_id, click_request_id.clone(), cx)
+                }))
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                     if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                        this.previous_user_input(cx);
+                        this.previous_user_input(session_id, key_request_id.clone(), cx);
                         cx.stop_propagation();
                     }
                 }))
         });
         let continue_button = div()
             .id(SharedString::from(format!(
-                "user-input-{request_id}-{question_index}-continue"
+                "user-input-{session_id}-{request_id}-{question_index}-continue"
             )))
+            .debug_selector(|| {
+                format!("user-input-continue-{session_id}-{request_id}-{question_index}")
+            })
             .track_focus(&next_focus)
             .tab_index(0)
             .tab_stop(can_continue)
@@ -915,14 +1086,18 @@ impl Waku {
                 theme.text_ghost
             })
             .when(can_continue, |button| {
+                let click_request_id = request_id.clone();
+                let key_request_id = request_id.clone();
                 button
                     .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .hover(|style| style.opacity(0.9))
                     .active(|style| style.opacity(0.8))
-                    .on_click(cx.listener(|this, _, _, cx| this.advance_user_input(cx)))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.advance_user_input(session_id, click_request_id.clone(), cx)
+                    }))
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                         if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            this.advance_user_input(cx);
+                            this.advance_user_input(session_id, key_request_id.clone(), cx);
                             cx.stop_propagation();
                         }
                     }))
@@ -951,102 +1126,105 @@ impl Waku {
                 ))
         });
 
-        div().flex_none().px(px(20.0)).pb(px(8.0)).child(
-            div()
-                .id(SharedString::from(format!("user-input-{request_id}")))
-                .w_full()
-                .max_w(px(CONTENT_MAX_WIDTH))
-                .mx_auto()
-                .px(px(14.0))
-                .pt(px(12.0))
-                .pb(px(10.0))
-                .rounded(px(16.0))
-                .border(hairline())
-                .border_color(theme.border_subtle)
-                .bg(theme.composer)
-                .tab_index(0)
-                .tab_group()
-                .tab_stop(false)
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .child(
-                            div()
-                                .text_size(sp(12.5))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(theme.text_tertiary)
-                                .child(SharedString::from(question.header.clone())),
-                        )
-                        .children(progress),
-                )
-                .child(
-                    div()
-                        .mt(px(5.0))
-                        .text_size(sp(13.0))
-                        .line_height(sp(18.0))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.text)
-                        .whitespace_normal()
-                        .child(SharedString::from(question.question.clone())),
-                )
-                .children((!question.options.is_empty()).then_some(options))
-                .child(
-                    div()
-                        .mt(px(if question.options.is_empty() {
-                            9.0
+        div()
+            .id(SharedString::from(format!(
+                "user-input-{session_id}-{request_id}"
+            )))
+            .w_full()
+            .max_w(px(CONTENT_MAX_WIDTH))
+            .mx_auto()
+            .px(px(14.0))
+            .pt(px(12.0))
+            .pb(px(10.0))
+            .rounded(px(16.0))
+            .border(hairline())
+            .border_color(theme.border_subtle)
+            .bg(theme.composer)
+            .tab_index(0)
+            .tab_group()
+            .tab_stop(false)
+            .children(attribution)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .text_size(sp(12.5))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme.text_tertiary)
+                            .child(SharedString::from(question.header.clone())),
+                    )
+                    .children(progress),
+            )
+            .child(
+                div()
+                    .mt(px(5.0))
+                    .text_size(sp(13.0))
+                    .line_height(sp(18.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .whitespace_normal()
+                    .child(SharedString::from(question.question.clone())),
+            )
+            .children((!question.options.is_empty()).then_some(options))
+            .child(
+                div()
+                    .mt(px(if question.options.is_empty() {
+                        9.0
+                    } else {
+                        4.0
+                    }))
+                    .h(px(34.0))
+                    .px(px(10.0))
+                    .rounded(px(10.0))
+                    .border(hairline())
+                    .border_color(if has_custom {
+                        theme.accent.opacity(0.34)
+                    } else {
+                        theme.border.opacity(0.0)
+                    })
+                    .bg(if has_custom {
+                        theme.accent.opacity(0.06)
+                    } else {
+                        theme.overlay
+                    })
+                    .flex()
+                    .items_center()
+                    .gap(px(7.0))
+                    .text_size(sp(12.5))
+                    .line_height(sp(16.0))
+                    .child(icon(
+                        "icons/pencil.svg",
+                        11.0,
+                        if has_custom {
+                            theme.accent
                         } else {
-                            4.0
-                        }))
-                        .h(px(34.0))
-                        .px(px(10.0))
-                        .rounded(px(10.0))
-                        .border(hairline())
-                        .border_color(if has_custom {
-                            theme.accent.opacity(0.34)
-                        } else {
-                            theme.border.opacity(0.0)
-                        })
-                        .bg(if has_custom {
-                            theme.accent.opacity(0.06)
-                        } else {
-                            theme.overlay
-                        })
-                        .flex()
-                        .items_center()
-                        .gap(px(7.0))
-                        .text_size(sp(12.5))
-                        .line_height(sp(16.0))
-                        .child(icon(
-                            "icons/pencil.svg",
-                            11.0,
-                            if has_custom {
-                                theme.accent
-                            } else {
-                                theme.text_ghost
-                            },
-                        ))
-                        .child(self.user_input_answer.clone()),
-                )
-                .child(
-                    div()
-                        .mt(px(8.0))
-                        .flex()
-                        .items_center()
-                        .gap(px(6.0))
-                        .children(back)
-                        .children(dismiss)
-                        .child(div().flex_1())
-                        .children(clarify)
-                        .child(continue_button),
-                ),
-        )
+                            theme.text_ghost
+                        },
+                    ))
+                    .child(answer_input),
+            )
+            .child(
+                div()
+                    .mt(px(8.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .children(back)
+                    .children(dismiss)
+                    .child(div().flex_1())
+                    .children(clarify)
+                    .child(continue_button),
+            )
     }
 
-    fn render_computer_permission(
+    pub(super) fn render_computer_permission(
         &self,
+        session_id: Uuid,
         permission: &PendingComputerApproval,
+        attribution: Option<Div>,
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = Theme::current(cx);
@@ -1062,7 +1240,7 @@ impl Waku {
         for (decision, label, primary) in options {
             let focus = self.transcript_control_focus(
                 format!(
-                    "computer-permission-{}-{decision}",
+                    "computer-permission-{session_id}-{}-{decision}",
                     permission.request.call_id
                 ),
                 cx,
@@ -1070,9 +1248,15 @@ impl Waku {
             buttons = buttons.child(
                 div()
                     .id(SharedString::from(format!(
-                        "computer-permission-{}-{decision}",
+                        "computer-permission-{session_id}-{}-{decision}",
                         permission.request.call_id
                     )))
+                    .debug_selector(|| {
+                        format!(
+                            "computer-option-{session_id}-{}-{decision}",
+                            permission.request.call_id
+                        )
+                    })
                     .track_focus(&focus)
                     .tab_index(0)
                     .h(px(29.0))
@@ -1104,96 +1288,95 @@ impl Waku {
                     .focus_visible(|style| style.bg(theme.focus_highlight()))
                     .child(label)
                     .on_activation(cx, move |this, _, cx| {
-                        this.respond_computer_permission(decision, cx);
+                        this.respond_computer_permission(session_id, decision, cx);
                     }),
             );
         }
 
-        div().px(px(20.0)).pb(px(8.0)).child(
-            div()
-                .w_full()
-                .max_w(px(CONTENT_MAX_WIDTH))
-                .mx_auto()
-                .p(px(13.0))
-                .rounded(px(15.0))
-                .border(hairline())
-                .border_color(theme.warning.opacity(0.5))
-                .bg(theme.raised)
-                .shadow_md()
-                // Escape answers "deny" — a real rejection, not a hide, so
-                // the waiting tool call settles instead of hanging.
-                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                    if event.keystroke.key == "escape" {
-                        this.respond_computer_permission("deny", cx);
-                        cx.stop_propagation();
-                    }
-                }))
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(9.0))
-                        .child(icon("icons/globe.svg", 14.0, theme.warning))
-                        .child(
+        div()
+            .w_full()
+            .max_w(px(CONTENT_MAX_WIDTH))
+            .mx_auto()
+            .p(px(13.0))
+            .rounded(px(15.0))
+            .border(hairline())
+            .border_color(theme.warning.opacity(0.5))
+            .bg(theme.raised)
+            .shadow_md()
+            // Escape answers "deny" — a real rejection, not a hide, so
+            // the waiting tool call settles instead of hanging.
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key == "escape" {
+                    this.respond_computer_permission(session_id, "deny", cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .children(attribution)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(9.0))
+                    .child(icon("icons/globe.svg", 14.0, theme.warning))
+                    .child(
+                        div()
+                            .text_size(sp(12.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(tr!("computer_use.allow_control", app = &target.app_name)),
+                    ),
+            )
+            .child(
+                div()
+                    .mt(px(7.0))
+                    .text_size(sp(12.5))
+                    .line_height(sp(14.0))
+                    .text_color(theme.text_secondary)
+                    .child(tr!("computer_use.screenshot_shared")),
+            )
+            .child(
+                div()
+                    .mt(px(8.0))
+                    .p(px(9.0))
+                    .rounded(px(10.0))
+                    .bg(theme.inset)
+                    .child(
+                        div()
+                            .text_size(sp(12.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .truncate()
+                            .child(SharedString::from(target.window_title.clone())),
+                    )
+                    .child(
+                        div()
+                            .mt(px(4.0))
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_secondary)
+                            .child(SharedString::from(permission.request.summary())),
+                    )
+                    .when(permission.sensitive, |element| {
+                        element.child(
                             div()
+                                .mt(px(5.0))
                                 .text_size(sp(12.5))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text)
-                                .child(tr!("computer_use.allow_control", app = &target.app_name)),
-                        ),
-                )
-                .child(
-                    div()
-                        .mt(px(7.0))
-                        .text_size(sp(12.5))
-                        .line_height(sp(14.0))
-                        .text_color(theme.text_secondary)
-                        .child(tr!("computer_use.screenshot_shared")),
-                )
-                .child(
-                    div()
-                        .mt(px(8.0))
-                        .p(px(9.0))
-                        .rounded(px(10.0))
-                        .bg(theme.inset)
-                        .child(
-                            div()
-                                .text_size(sp(12.5))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text)
-                                .truncate()
-                                .child(SharedString::from(target.window_title.clone())),
+                                .text_color(theme.warning)
+                                .child(tr!("computer_use.sensitive_action")),
                         )
-                        .child(
-                            div()
-                                .mt(px(4.0))
-                                .text_size(sp(12.5))
-                                .text_color(theme.text_secondary)
-                                .child(SharedString::from(permission.request.summary())),
-                        )
-                        .when(permission.sensitive, |element| {
-                            element.child(
-                                div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .text_color(theme.warning)
-                                    .child(tr!("computer_use.sensitive_action")),
-                            )
-                        }),
-                )
-                .child(
-                    div()
-                        .mt(px(7.0))
-                        .text_size(sp(12.5))
-                        .text_color(theme.text_tertiary)
-                        .child(if target.persistable() {
-                            tr!("computer_use.bundle_id", id = &target.bundle_id)
-                        } else {
-                            tr!("computer_use.no_bundle_id")
-                        }),
-                )
-                .child(buttons),
-        )
+                    }),
+            )
+            .child(
+                div()
+                    .mt(px(7.0))
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_tertiary)
+                    .child(if target.persistable() {
+                        tr!("computer_use.bundle_id", id = &target.bundle_id)
+                    } else {
+                        tr!("computer_use.no_bundle_id")
+                    }),
+            )
+            .child(buttons)
     }
 
     pub(super) fn render_computer_use_overlay(
@@ -1485,21 +1668,23 @@ impl Waku {
         let theme = Theme::current(cx);
         let session = controls.session;
         let provider = session.map(|session| session.provider).unwrap_or_default();
-        let auto_route = session.is_some_and(|session| session.auto_route);
-        let routed = session.is_some_and(|session| session.route_decision.is_some());
+        let auto_route = session.is_some_and(routing::pending_auto_route);
+        let decision = session.and_then(|session| session.route_decision.as_ref());
         let selected_model = session.and_then(|session| self.catalog_model_id_for_session(session));
         let session_key = session
             .map(|session| self.daemons.session_owner(session.id))
             .unwrap_or(waku_client::DaemonKey::Local);
         let selected_model_name = if auto_route {
             tr!("models.auto")
-        } else if routed {
-            tr!(
-                "models.auto_routed",
-                model = self.model_display_name_on(session_key, provider, selected_model)
-            )
         } else {
-            self.model_display_name_on(session_key, provider, selected_model)
+            let model = self.model_display_name_on(session_key, provider, selected_model);
+            match decision {
+                Some(decision) if routing::is_start_fallback(decision) => {
+                    tr!("models.auto_fallback", model = model)
+                }
+                Some(_) => tr!("models.auto_routed", model = model),
+                None => model,
+            }
         };
         let picker_enabled = controls.model_pickers
             && session.is_some_and(|session| session.can_choose_model(provider));
@@ -1524,7 +1709,8 @@ impl Waku {
         let search = self.model_picker.search.clone();
         let search_focus = search.read(cx).focus_handle(cx);
         let empty_focus = self.model_picker.empty_focus.clone();
-        let no_providers = self.model_picker_has_no_providers();
+        let no_providers =
+            self.model_picker_has_no_providers() && !self.model_picker_offers_auto_route();
 
         let menu_id = controls.model_menu_id(MODEL_PICKER_MENU_ID);
         let pick_target = controls.model_pick_target();
@@ -1546,7 +1732,8 @@ impl Waku {
                             this.dismiss_keyboard_options(false, window, cx);
                         }
                         this.model_picker_target = pick_target;
-                        empty = this.model_picker_has_no_providers();
+                        empty = this.model_picker_has_no_providers()
+                            && !this.model_picker_offers_auto_route();
                         let locked_provider = this.model_picker_locked_provider();
                         let picker_key = this.model_picker_daemon_key();
                         // Opening re-runs catalog discovery for every provider
@@ -1557,7 +1744,6 @@ impl Waku {
                                 Self::probes_on(&this.probes, picker_key),
                                 this.disabled_providers_on(picker_key),
                                 locked_provider,
-                                this.daemon_key_is_remote(picker_key),
                                 kind,
                             ) {
                                 this.refresh_provider_model_discovery_on(picker_key, kind);
@@ -1649,7 +1835,7 @@ impl Waku {
         let theme = Theme::current(cx);
         let weak = weak.clone();
         let popover = popover.clone();
-        if self.model_picker_has_no_providers() {
+        if self.model_picker_has_no_providers() && !self.model_picker_offers_auto_route() {
             let empty_focus = self.model_picker.empty_focus.clone();
             return model_picker_empty_state(&theme, &empty_focus, popover, weak);
         }
@@ -1659,7 +1845,6 @@ impl Waku {
         let picker_key = self.model_picker_daemon_key();
         let probes = Self::probes_on(&self.probes, picker_key).to_vec();
         let disabled_providers = self.disabled_providers_on(picker_key).to_vec();
-        let remote = self.daemon_key_is_remote(picker_key);
         let pending_discoveries = self.provider_model_discoveries_pending.clone();
         let search = self.model_picker.search.clone();
         let locked_provider = self.model_picker_locked_provider();
@@ -1724,7 +1909,7 @@ impl Waku {
         let rail_providers = ProviderKind::ALL
             .into_iter()
             .filter(|kind| {
-                picker_lists_provider(&probes, &disabled_providers, locked_provider, remote, *kind)
+                picker_lists_provider(&probes, &disabled_providers, locked_provider, *kind)
                     && section_rows
                         .iter()
                         .any(|row| picker_row_section(row) == PickerSection::Provider(*kind))
@@ -1752,7 +1937,6 @@ impl Waku {
                     &probes,
                     &disabled_providers,
                     locked_provider,
-                    remote,
                     kind,
                 )
         }) {
@@ -1764,7 +1948,9 @@ impl Waku {
         let render_row = Rc::new({
             let weak = weak.clone();
             let session_selection = session_selection.clone();
-            let jev_credential_missing = self.jev_credential_missing();
+            let auto_available = self.auto_route_available() && !self.jev_credential_missing();
+            let jev_credential_missing = !auto_available;
+            let auto_favorite_position = self.state.auto_favorite_position;
             let render = move |_row_index: usize,
                                row: &PickerRow,
                                is_highlighted: bool,
@@ -1774,18 +1960,16 @@ impl Waku {
                   -> AnyElement {
                 let theme = Theme::current(cx);
                 if let PickerRow::Policy(policy) = row {
-                    // The router row: same hit target and highlight
-                    // treatment as a model row, but where a model
-                    // row carries its star this one carries a
-                    // shortcut to the Jev settings page — there is
-                    // no concrete model to favorite.
+                    // Auto keeps its Jev settings gear alongside its favorite controls.
                     let select_weak = weak.clone();
                     let select_popover = popover.clone();
                     let settings_weak = weak.clone();
                     let settings_popover = popover.clone();
-                    let auto = matches!(policy, PolicyRowId::Auto);
+                    let auto = matches!(policy, PolicyRowId::Auto | PolicyRowId::AutoFavorite(_));
                     let (mark, title, subtitle) = policy_row_parts(*policy, &theme);
-                    let element = model_picker_row_shell(
+                    let favorite_weak = weak.clone();
+                    let drop_weak = weak.clone();
+                    let mut element = model_picker_row_shell(
                         SharedString::from(format!("model-row-policy-{policy:?}")),
                         auto && auto_route,
                         is_highlighted,
@@ -1818,7 +2002,7 @@ impl Waku {
                                 .items_center()
                                 .justify_center()
                                 .focus_visible(|style| style.bg(theme.focus_highlight()))
-                                .tooltip(Tooltip::text(tr!("models.auto_missing_credential")))
+                                .tooltip(Tooltip::text(tr!("models.auto_unavailable")))
                                 .child(icon("icons/alert.svg", 13.0, theme.warning)),
                         )
                     })
@@ -1848,10 +2032,64 @@ impl Waku {
                     )
                     .on_click(move |_, window, cx| {
                         let _ = select_weak.update(cx, |this, cx| {
-                            this.choose_auto_route(cx);
+                            if auto_available {
+                                this.choose_auto_route(cx);
+                            }
                         });
-                        select_popover.close(window, cx);
+                        if auto_available {
+                            select_popover.close(window, cx);
+                        }
                     });
+                    if auto_available {
+                        element = element.child(model_picker::auto_favorite_star(
+                            auto_favorite_position.is_some(),
+                            favorite_weak,
+                            theme,
+                        ));
+                    }
+                    if let PolicyRowId::AutoFavorite(index) = policy {
+                        if let Some(chord) = favorite_chord_index(*index) {
+                            let hint =
+                                crate::ui::shortcut::ShortcutHint::action(&SelectFavoriteModel {
+                                    index: chord,
+                                })
+                                .resolve(window, cx)
+                                .unwrap_or_else(|| {
+                                    crate::ui::shortcut::sequence_label(&format!(
+                                        "secondary-alt-{}",
+                                        chord + 1
+                                    ))
+                                });
+                            element = element.child(
+                                div()
+                                    .flex_none()
+                                    .text_size(sp(11.0))
+                                    .text_color(theme.text_ghost)
+                                    .child(SharedString::from(hint)),
+                            );
+                        }
+                        let target = *index;
+                        element = element
+                            .on_drag(
+                                FavoriteModelDrag {
+                                    index: target,
+                                    label: tr!("models.auto").into(),
+                                },
+                                |drag, _, _, cx| {
+                                    cx.new(|_| FavoriteModelDragView {
+                                        label: drag.label.clone(),
+                                    })
+                                },
+                            )
+                            .drag_over::<FavoriteModelDrag>(move |style, _, _, _| {
+                                style.bg(theme.overlay_strong)
+                            })
+                            .on_drop(move |drag: &FavoriteModelDrag, _, cx| {
+                                let _ = drop_weak.update(cx, |this, cx| {
+                                    this.move_favorite_model(drag.index, target, cx)
+                                });
+                            });
+                    }
                     return element.into_any_element();
                 }
                 if let PickerRow::ProviderDefault(provider) = row {
@@ -1920,8 +2158,7 @@ impl Waku {
                     .map(str::trim)
                     .filter(|name| !name.is_empty());
                 let detail = model_picker_subtitle(kind, sub_provider);
-                // ⌘⌥1 is reserved for Auto; ⌘⌥2–⌘⌥9 ride on the first
-                // eight starred rows.
+                // Shortcuts follow the first nine favorites in order.
                 // Resolve against the live keymap so a remapped chord
                 // still advertises itself; fall back to the default's
                 // label when the picker's own context path cannot see the
@@ -2056,7 +2293,7 @@ impl Waku {
                 )
                 .on_click(move |_, window, cx| {
                     let _ = select_weak.update(cx, |this, cx| {
-                        this.choose_model(kind, model_id.clone(), effort.clone(), fast, cx);
+                        this.choose_model(kind, model_id.clone(), effort.clone(), fast, window, cx);
                     });
                     select_popover.close(window, cx);
                 });
@@ -2104,8 +2341,8 @@ impl Waku {
                 on_move: Rc::new(|this, key, rows, cx| {
                     this.move_model_picker_highlight(key, rows, cx);
                 }),
-                on_confirm: Rc::new(|this, rows, cx| {
-                    this.choose_highlighted_model(rows, cx);
+                on_confirm: Rc::new(|this, rows, window, cx| {
+                    this.choose_highlighted_model(rows, window, cx);
                 }),
                 on_cycle_section: Some(Rc::new(|this, key, cx| {
                     this.cycle_model_picker_section(key, cx);
@@ -2126,9 +2363,11 @@ impl Waku {
         match self.model_picker_target {
             ModelPickerTarget::Composer | ModelPickerTarget::SideChat(_) => self
                 .model_picker_session()
-                .filter(|session| session.provider_locked() && !session.detail_loaded)
+                .filter(|session| {
+                    session.provider_locked() && !self.session_detail_is_ready(session)
+                })
                 .map(|session| session.provider),
-            ModelPickerTarget::AutomationEditor => None,
+            ModelPickerTarget::AutomationEditor | ModelPickerTarget::QaSetup => None,
         }
     }
 
@@ -2145,6 +2384,13 @@ impl Waku {
                         .map(|(model, effort, fast)| (session.provider, model, effort, fast))
                 })
             }
+            ModelPickerTarget::QaSetup => {
+                let setup = self.qa_setup.as_ref()?;
+                setup
+                    .model
+                    .clone()
+                    .map(|model| (setup.provider, model, None, false))
+            }
             ModelPickerTarget::AutomationEditor => {
                 let editor = self.automations_editor.as_ref()?;
                 let model = editor.model.read(cx).content().trim().to_owned();
@@ -2159,7 +2405,7 @@ impl Waku {
         matches!(
             self.model_picker_target,
             ModelPickerTarget::Composer | ModelPickerTarget::SideChat(_)
-        ) && self.auto_route_available()
+        )
     }
 
     /// Composer picks carry effort and tier; the editor's bare pair cannot.
@@ -2168,17 +2414,19 @@ impl Waku {
             ModelPickerTarget::Composer | ModelPickerTarget::SideChat(_) => {
                 PickerGranularity::Combos
             }
-            ModelPickerTarget::AutomationEditor => PickerGranularity::Models,
+            ModelPickerTarget::AutomationEditor | ModelPickerTarget::QaSetup => {
+                PickerGranularity::Models
+            }
         }
     }
 
-    /// The composer's row list: the Auto stance while the draft may route,
-    /// then favorites, recents, and provider blocks — combos for the
+    /// The composer's row list: Auto, favorites, recents, and provider blocks.
+    /// A starred Auto joins the favorites in their saved order — combos for the
     /// composer, bare models for the automation editor's provider/model
     /// pair.
     pub(super) fn composer_picker_rows(&self, normalized_query: &str) -> Vec<PickerRow> {
         let picker_key = self.model_picker_daemon_key();
-        picker_rows(
+        let mut rows = picker_rows(
             Self::probes_on(&self.probes, picker_key),
             &PickerRowSpec {
                 leading: if self.model_picker_offers_auto_route() {
@@ -2195,7 +2443,15 @@ impl Waku {
                 locked_provider: self.model_picker_locked_provider(),
                 normalized_query,
             },
-        )
+        );
+        if self.model_picker_offers_auto_route() {
+            model_picker::place_auto_favorite(
+                &mut rows,
+                self.state.auto_favorite_position,
+                &self.pinned_unfavorites,
+            );
+        }
+        rows
     }
 
     /// Whether the composer session is routed — the picker's selection and
@@ -2206,7 +2462,7 @@ impl Waku {
             ModelPickerTarget::Composer | ModelPickerTarget::SideChat(_)
         ) && self
             .model_picker_session()
-            .is_some_and(|session| session.auto_route)
+            .is_some_and(routing::pending_auto_route)
     }
 
     /// Move the picker's drawn selection. Nothing is focused: the filter field
@@ -2268,12 +2524,19 @@ impl Waku {
 
     /// Take the row the selection is on, defaulting to the first so `enter`
     /// works the moment the panel opens.
-    fn choose_highlighted_model(&mut self, rows: &[PickerRow], cx: &mut Context<Self>) {
+    fn choose_highlighted_model(
+        &mut self,
+        rows: &[PickerRow],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(row) = rows.get(self.model_picker.highlight.unwrap_or(0)) else {
             return;
         };
         match row {
-            PickerRow::Policy(PolicyRowId::Auto) => self.choose_auto_route(cx),
+            PickerRow::Policy(PolicyRowId::Auto | PolicyRowId::AutoFavorite(_)) => {
+                self.choose_auto_route(cx)
+            }
             PickerRow::Combo(row) => {
                 let (kind, model_id, effort, fast) = (
                     row.provider,
@@ -2281,7 +2544,7 @@ impl Waku {
                     row.effort.clone(),
                     row.fast,
                 );
-                self.choose_model(kind, model_id, effort, fast, cx);
+                self.choose_model(kind, model_id, effort, fast, window, cx);
             }
             // The composer spec lists neither stance.
             PickerRow::Policy(PolicyRowId::NoOverride) | PickerRow::ProviderDefault(_) => {}
@@ -2298,7 +2561,7 @@ impl Waku {
         let model = self.model_metadata_for_session(session)?;
         // Auto (Jev) chooses the effort for each turn, so don't offer a
         // manual effort control while that route is active.
-        let show_reasoning_effort = !session.auto_route;
+        let show_reasoning_effort = !routing::pending_auto_route(session);
         if (!show_reasoning_effort || model.reasoning_efforts.is_empty())
             && model.service_tiers.is_empty()
             && model.context_windows.is_empty()
@@ -2596,15 +2859,15 @@ impl Waku {
         &self,
         controls: &ComposerControls,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> Option<AnyElement> {
+        let session = controls
+            .session
+            .filter(|session| self.session_detail_is_ready(session))?;
+        let selected_mode = session.runtime_mode;
         let theme = Theme::current(cx);
-        let session = controls.session;
-        let selected_mode = session
-            .map(|session| session.runtime_mode)
-            .unwrap_or_default();
-        let environment = session.map(AgentSession::environment).unwrap_or_default();
+        let environment = session.environment();
         let sandbox_enabled = self.state.sandbox_experiment_enabled;
-        let provider = session.map(|session| session.provider).unwrap_or_default();
+        let provider = session.provider;
         let provider_sandboxable = provider.supports_sandbox();
         let provider_cloud = provider.supports_cloud();
         let trigger = MenuChip::new(controls.chip_id("runtime-mode"))
@@ -2624,14 +2887,14 @@ impl Waku {
             .label(selected_mode.label())
             .caret(false);
         if !controls.interactive {
-            return trigger.disabled(true).into_any_element();
+            return Some(trigger.disabled(true).into_any_element());
         }
         // The environment is provisioned when the session boots — a started
         // task's section still shows where it runs, but no longer changes it.
-        let started = session.is_some_and(AgentSession::has_started);
+        let started = session.has_started();
         // Switching access posture restarts the driver, so the mode rows read
         // but don't pick while a turn is live — same gate as the model picker.
-        let busy = session.is_some_and(AgentSession::is_busy);
+        let busy = session.is_busy();
         let weak = cx.entity().downgrade();
         let handle = self.menu_handle(RUNTIME_MODE_MENU_ID, cx);
         // One row shape for both sections: leading icon, label over a
@@ -2688,7 +2951,7 @@ impl Waku {
                     .into_any_element()
             },
         );
-        dropdown_menu(
+        Some(dropdown_menu(
             trigger
                 .selected(handle.is_open())
                 .tooltip(tr!("mode.choose"))
@@ -2790,7 +3053,7 @@ impl Waku {
                 }
                 items
             },
-        )
+        ))
     }
 
     pub(super) fn render_agent_preset_control(
@@ -3185,7 +3448,7 @@ impl Waku {
         let Some(chat) = self.side_chat_composers.get_mut(&session_id) else {
             return;
         };
-        if chat.atoms.is_empty() {
+        if chat.atoms.is_empty() && splice.0.pasted_atoms.is_none() {
             return;
         }
         let composer = chat.composer.clone();
@@ -3666,7 +3929,7 @@ impl Waku {
     /// [`remap_marker_seats`] for the seating rules — then keep the painted
     /// labels in step with the survivors.
     pub(super) fn remap_inline_atoms(&mut self, splice: &ComposerSplice, cx: &mut Context<Self>) {
-        if self.composer_inline_atoms.is_empty() {
+        if self.composer_inline_atoms.is_empty() && splice.0.pasted_atoms.is_none() {
             return;
         }
         // Capture the open paste editor's pre-filter seat — a splice that
@@ -3854,6 +4117,7 @@ impl Waku {
         // outside-Enter aim at — the last place a message actually went out.
         self.last_sent_composer = None;
         Some(ComposerSubmission {
+            configuration: None,
             prompt: submission,
             display_content,
             human_content,
@@ -3876,6 +4140,7 @@ impl Waku {
             || self.execute_land_composer_command(prompt, cx)
             || self.execute_compact_composer_command(prompt, cx)
             || self.execute_clear_boss_command(prompt, cx)
+            || self.execute_counsel_composer_command(prompt, cx)
             || self.execute_side_composer_command(prompt, cx)
             || self.execute_incognito_composer_command(prompt, cx)
             || self.execute_fast_mode_toggle(prompt, cx)
@@ -4020,11 +4285,21 @@ impl Waku {
         {
             return;
         }
-        let Some(runtime) = self.runtimes.get(&session_id) else {
-            self.show_toast(tr!("errors.daemon_disconnected"));
-            return;
-        };
-        runtime.driver.compact();
+        if let Some(runtime) = self.runtimes.get(&session_id) {
+            runtime.driver.compact();
+        } else {
+            let operations = self
+                .pending_runtime_operations
+                .entry(session_id)
+                .or_default();
+            if !operations
+                .iter()
+                .any(|operation| matches!(operation, runtime::PendingRuntimeOperation::Compact))
+            {
+                operations.push(runtime::PendingRuntimeOperation::Compact);
+            }
+            self.start_control_runtime(session_id, cx);
+        }
         cx.notify();
     }
 
@@ -4185,6 +4460,7 @@ impl Waku {
         // at — the last place a message actually went out.
         self.last_sent_composer = Some(session_id);
         Some(ComposerSubmission {
+            configuration: None,
             prompt: submission,
             display_content,
             human_content,
@@ -5335,11 +5611,13 @@ impl Waku {
         // The queue never shares the lane with a deliverable's page or a
         // visible VoicePad — the pad's card underlaps the lane the queue
         // would paint into.
-        if self.live_deliverable_page().is_some() || self.voice_scratchpad_visible() {
+        if self.big_picture.rush_session_id().is_none()
+            && (self.live_deliverable_page().is_some() || self.voice_scratchpad_visible())
+        {
             queue_bounds.set(None);
             return None;
         }
-        let Some(session) = self.selected_session() else {
+        let Some(session) = self.transcript_session() else {
             queue_bounds.set(None);
             return None;
         };
@@ -5367,10 +5645,12 @@ impl Waku {
     }
 
     pub(super) fn queued_messages_visible(&self) -> bool {
-        if self.live_deliverable_page().is_some() || self.voice_scratchpad_visible() {
+        if self.big_picture.rush_session_id().is_none()
+            && (self.live_deliverable_page().is_some() || self.voice_scratchpad_visible())
+        {
             return false;
         }
-        self.selected_session()
+        self.transcript_session()
             .is_some_and(|session| self.has_visible_queued_messages(session))
     }
 
@@ -5743,9 +6023,9 @@ impl Waku {
             && !self.drafts_page
             && !self.automations_page
             && self.boss_ui.page.is_none()
-            && !self.selected_session().is_some_and(|session| {
-                session.provider == ProviderKind::Antigravity && session.has_started()
-            })
+            && !self
+                .selected_session()
+                .is_some_and(|session| session.uses_antigravity_terminal())
             && self.selected_friend_watch().is_none()
     }
 
@@ -5785,7 +6065,7 @@ impl Waku {
                 .sessions
                 .iter()
                 .find(|session| session.id == session_id),
-            ModelPickerTarget::AutomationEditor => None,
+            ModelPickerTarget::AutomationEditor | ModelPickerTarget::QaSetup => None,
         }
     }
 
@@ -5794,7 +6074,7 @@ impl Waku {
         let session_id = match self.model_picker_target {
             ModelPickerTarget::Composer => return self.composer_session_mut(),
             ModelPickerTarget::SideChat(session_id) => session_id,
-            ModelPickerTarget::AutomationEditor => return None,
+            ModelPickerTarget::AutomationEditor | ModelPickerTarget::QaSetup => return None,
         };
         self.state.session_mut(session_id)
     }
@@ -5951,12 +6231,20 @@ impl Waku {
         preparing: bool,
         has_draft: bool,
     ) -> ComposerSubmitAction {
-        if preparing || session.is_some_and(|session| !session.detail_loaded) {
-            return composer_submit_action(session, preparing, has_draft);
+        if !has_draft
+            && session
+                .is_some_and(|session| self.runtime_submission_checks.contains_key(&session.id))
+        {
+            return ComposerSubmitAction::Stop;
+        }
+        let refreshing = session.is_some_and(|session| !self.session_detail_is_ready(session));
+        if preparing || refreshing {
+            return composer_submit_action(session, preparing || refreshing, has_draft);
         }
         if !has_draft
             && session.is_some_and(|session| {
                 self.session_awaits_continue(session)
+                    || self.counsel_can_continue(session)
                     || self.quarantine_handoff_transfer(session).is_some()
             })
         {
@@ -6095,11 +6383,12 @@ impl Waku {
         // Accessory chips borrow the transcript's airspace without changing
         // its viewport. Anchor their bottom above the parked queue so wrapped
         // rows grow upward; only the queue reserves height in the lane.
-        let queue_height = if self.big_picture.is_open() {
-            0.0
-        } else {
-            self.composer_autocomplete.queue_card_height()
-        };
+        let queue_height =
+            if self.big_picture.is_open() && self.big_picture.rush_session_id().is_none() {
+                0.0
+            } else {
+                self.composer_autocomplete.queue_card_height()
+            };
         div()
             .w_full()
             .flex_none()
@@ -6263,13 +6552,20 @@ impl Waku {
             // A scratchpad holding speech counts as draft — its send is
             // the same one Enter performs while the panel is up.
             || (interactive && self.voice_scratchpad_sendable());
+        let employee_control = interactive
+            .then(|| self.direct_employee_prompt_control())
+            .flatten();
+        let prompt_blocked = employee_control
+            .as_ref()
+            .is_some_and(|control| control.reason.is_some());
         // A typed draft always means Send — the continue affordance exists
         // only while the composer is completely empty.
-        let submit_action = if interactive && self.live_deliverable_page().is_some() {
-            ComposerSubmitAction::Send
-        } else {
-            self.composer_submit_action_for(session, preparing, has_draft)
-        };
+        let submit_action =
+            if prompt_blocked || (interactive && self.live_deliverable_page().is_some()) {
+                ComposerSubmitAction::Send
+            } else {
+                self.composer_submit_action_for(session, preparing, has_draft)
+            };
         let escape_stop_armed = session.is_some_and(|session| {
             self.escape_stop_confirmation
                 .is_armed_for(EscapeStopTarget::for_session(session), Instant::now())
@@ -6278,16 +6574,19 @@ impl Waku {
         // reads as unavailable and the submission path refuses too, so
         // `enter` cannot slip past a disabled control.
         let no_providers = self.model_picker_has_no_providers();
-        let detail_ready = session.is_none_or(|session| session.detail_loaded);
-        let can_send = has_draft && !no_providers && detail_ready;
+        let detail_ready = session.is_none_or(|session| self.session_detail_is_ready(session));
+        let can_send = has_draft && !no_providers && detail_ready && !prompt_blocked;
         // Continue needs no draft — an interrupted session is exactly what
         // makes it available — but it still needs a provider to run.
-        let can_continue = !no_providers && detail_ready;
-        let (autocomplete, autocomplete_actionable) =
+        let can_continue = !no_providers && detail_ready && !prompt_blocked;
+        let (autocomplete, autocomplete_actionable) = if prompt_blocked {
+            (None, false)
+        } else {
             match self.render_composer_autocomplete_for(surface, window, cx) {
                 Some((element, actionable)) => (Some(element), actionable),
                 None => (None, false),
-            };
+            }
+        };
         let autocomplete_loading = autocomplete.is_some() && !autocomplete_actionable;
         // Files dragged in from the OS light the card up as a drop target and
         // stage as attachment chips. The wash arrives pre-blended because a
@@ -6438,7 +6737,57 @@ impl Waku {
             .when(interactive, |card| {
                 card.children(self.render_composer_float_chips(window, &theme, cx))
             })
-            .child(div().pt(px(2.0)).child(composer))
+            .child(
+                div()
+                    .pt(px(2.0))
+                    .when(prompt_blocked, |field| field.opacity(0.55))
+                    .child(composer),
+            )
+            .when_some(employee_control, |card, control| {
+                let message = control.reason;
+                card.when_some(message, |card, message| {
+                    card.child(
+                        div()
+                            .px(px(14.0))
+                            .pt(px(6.0))
+                            .text_size(sp(12.0))
+                            .text_color(theme.text_secondary)
+                            .child(message),
+                    )
+                })
+                .when_some(control.successor_id, |card, successor| {
+                    let key = self
+                        .composer_boss_command()
+                        .and_then(|command| self.composer_command_daemon(&command));
+                    card.child(
+                        div().px(px(14.0)).pt(px(4.0)).child(
+                            div()
+                                .id("message-current-employee")
+                                .track_focus(
+                                    &self.transcript_control_focus("message-current-employee", cx),
+                                )
+                                .tab_index(0)
+                                .rounded(px(8.0))
+                                .focus_visible(|style| style.bg(theme.focus_highlight()))
+                                .child(
+                                    MenuChip::new("message-current-employee-label")
+                                        .label(tr!("boss.message_current_employee"))
+                                        .caret(false),
+                                )
+                                .on_activation(cx, move |this, _, cx| {
+                                    this.request_session_activation(
+                                        successor,
+                                        SessionActivationTransition::Inspect,
+                                        cx,
+                                    );
+                                    if let Some(key) = key {
+                                        this.set_composer_target(key, Some(successor), cx);
+                                    }
+                                }),
+                        ),
+                    )
+                })
+            })
             // The paste chip's floating editor, anchored below the
             // atom's painted label.
             .when(interactive, |card| {
@@ -6470,7 +6819,7 @@ impl Waku {
                     .child(self.render_provider_model_control(&controls, cx))
                     .children(self.render_model_traits_control(&controls, cx))
                     .children(self.render_agent_preset_control(&controls, cx))
-                    .child(self.render_access_control(&controls, cx))
+                    .children(self.render_access_control(&controls, cx))
                     .children(self.render_composer_incognito_chip(&controls, cx))
                     .children(self.render_drafts_count_button(&controls, has_draft, cx))
                     .children(self.render_goal_control(&controls, cx))
@@ -6828,7 +7177,7 @@ impl Waku {
             self.state
                 .sessions
                 .iter()
-                .any(|session| session.id == *id && !session.detail_loaded)
+                .any(|session| session.id == *id && !self.session_detail_is_ready(session))
         }) {
             self.ensure_session_loaded(session_id, cx);
             cx.notify();
@@ -8876,6 +9225,13 @@ fn inline_atom_paints(
             };
             crate::input::InlineAtom {
                 label: SharedString::from(atom.label()),
+                clipboard_atom: Some(atom.clipboard_atom()),
+                copy_text: match &atom.kind {
+                    ComposerAtomKind::PastedText(text) => {
+                        Some(waku_protocol::model::pasted_text_blockquote(text).into())
+                    }
+                    _ => None,
+                },
                 icon: Some(icon),
                 avatar,
                 tooltip: match &atom.kind {
@@ -8911,7 +9267,24 @@ fn remap_atoms_for_splice(
         .map(|(index, _)| index)
         .collect();
     let markers = atoms.iter().map(|atom| atom.marker).collect::<Vec<_>>();
-    let seats = remap_marker_seats(&markers, &positions, &splice.0.removed, splice.0.inserted);
+    let seats = if splice.0.pasted_atoms.is_none() {
+        remap_marker_seats(&markers, &positions, &splice.0.removed, splice.0.inserted)
+    } else {
+        // Replacement chips own the inserted markers. Never rebind deleted
+        // atoms to them, even when the old and new offsets happen to match.
+        markers
+            .iter()
+            .map(|marker| {
+                if *marker < splice.0.removed.start {
+                    Some(*marker)
+                } else if *marker >= splice.0.removed.end {
+                    Some(*marker - splice.0.removed.len() + splice.0.inserted)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    };
     let mut live: Vec<ComposerInlineAtom> = std::mem::take(atoms)
         .into_iter()
         .zip(seats.iter())
@@ -8922,6 +9295,17 @@ fn remap_atoms_for_splice(
             })
         })
         .collect();
+    live.extend(
+        splice
+            .0
+            .pasted_atoms
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .map(|(offset, atom)| {
+                ComposerInlineAtom::from_clipboard(splice.0.removed.start + offset, atom)
+            }),
+    );
     live.sort_by_key(|atom| atom.marker);
     *atoms = live;
     let painted = inline_atom_paints(atoms, planning, avatars);
@@ -9594,6 +9978,24 @@ pub(super) fn atom_marker_content(
     }
     content.push_str(rest);
     (content, seated)
+}
+
+/// Preserve sent chips when copying a whole message, with ordinary text for
+/// applications that do not understand Goddard's clipboard metadata.
+pub(super) fn message_clipboard_item(
+    display: &str,
+    atoms: &[waku_protocol::model::MessageAtom],
+) -> gpui::ClipboardItem {
+    let fallback = waku_protocol::model::message_copy_text(display, atoms);
+    let (text, atoms) = atom_marker_content(display, atoms);
+    waku_ui::clipboard::ChipContent {
+        text,
+        atoms: atoms
+            .iter()
+            .map(|atom| (atom.marker, atom.clipboard_atom()))
+            .collect(),
+    }
+    .clipboard_item(fallback)
 }
 
 /// The composer atom a queued message's span restores: the span's own

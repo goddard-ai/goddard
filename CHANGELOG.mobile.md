@@ -3,6 +3,12 @@
 Release notes for the Goddard mobile app. Changes shared with Desktop are in
 [the main changelog](CHANGELOG.md).
 
+## [0.19.0]
+
+### Fixed
+
+- Fix mobile app startup when built with the iOS 27 SDK.
+
 ## [0.16.0]
 
 ### Features

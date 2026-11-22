@@ -9,7 +9,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
@@ -55,7 +55,7 @@ enum CommandMessage {
         request_id: String,
         answers: Vec<UserInputAnswer>,
     },
-    Options(SessionOptions),
+    Options(SessionOptions, crossbeam_channel::Sender<bool>),
     /// Headless teardown: remove the provider-side session record, then end
     /// the actor. The sender acknowledges the request resolved one way or
     /// the other so the caller is not racing the process's exit.
@@ -78,7 +78,7 @@ struct AcpLaunch {
 
 fn launch_for(provider: ProviderKind, reasoning_effort: Option<&str>) -> anyhow::Result<AcpLaunch> {
     match provider {
-        ProviderKind::Cursor => Ok(AcpLaunch {
+        ProviderKind::Antigravity | ProviderKind::Cursor => Ok(AcpLaunch {
             args: vec!["acp".into()],
             env: Vec::new(),
         }),
@@ -233,7 +233,13 @@ impl AcpDriver {
                 ));
                 if let Err(error) = result {
                     let stderr = super::support::provider_stderr_error(stderr_lines.lock().clone());
-                    let detail = stderr.unwrap_or_else(|| error.to_string());
+                    let detail = if error.code
+                        == agent_client_protocol::Error::new(DEVIN_TIMEOUT_CODE, "").code
+                    {
+                        error.to_string()
+                    } else {
+                        stderr.unwrap_or_else(|| error.to_string())
+                    };
                     let _ = thread_events
                         .send(DriverEvent::Error(format!("{provider_name}: {detail}")));
                 }
@@ -576,6 +582,7 @@ struct PendingPrompt {
     request_id: RequestId,
     extension_id: Option<String>,
     session_id: String,
+    dispatched_at: Instant,
 }
 
 /// What the last settle of a prompt batch learned about how it ended.
@@ -599,7 +606,16 @@ impl PendingPrompts {
             request_id,
             extension_id,
             session_id,
+            dispatched_at: Instant::now(),
         });
+    }
+
+    fn awaiting_start_timed_out(&self, now: Instant) -> bool {
+        !self.turn_started
+            && !self.cancel_requested
+            && self.requests.first().is_some_and(|prompt| {
+                now.saturating_duration_since(prompt.dispatched_at) >= DEVIN_RESPONSE_TIMEOUT
+            })
     }
 
     fn is_empty(&self) -> bool {
@@ -734,6 +750,48 @@ fn permission_disposition(
     }
 }
 
+// Startup is separate from the first-response budget: resuming a large
+// native session must not spend the time allowed after dispatch.
+const DEVIN_TIMEOUT_CODE: i32 = -32098;
+const DEVIN_STARTUP_PHASE_TIMEOUT: Duration = Duration::from_secs(120);
+const DEVIN_RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
+const OPTIONS_TIMEOUT: Duration = Duration::from_secs(30);
+
+async fn acp_phase<T>(
+    provider: ProviderKind,
+    phase: &'static str,
+    timeout: Duration,
+    events: &DriverEventSender,
+    operation: impl std::future::Future<Output = agent_client_protocol::Result<T>>,
+) -> agent_client_protocol::Result<T> {
+    if provider != ProviderKind::Devin {
+        return operation.await;
+    }
+    let started = Instant::now();
+    events.trace(super::timeline::Event::PhaseStarted { phase });
+    let result = smol::future::or(operation, async {
+        smol::Timer::after(timeout).await;
+        Err(agent_client_protocol::Error::new(
+            DEVIN_TIMEOUT_CODE,
+            format!("Devin timed out during {phase} after {} seconds; the queued prompt was not dispatched", timeout.as_secs()),
+        ))
+    }).await;
+    events.trace(super::timeline::Event::PhaseFinished {
+        phase,
+        elapsed_ms: started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
+        outcome: match &result {
+            Ok(_) => super::timeline::Outcome::Succeeded,
+            Err(error)
+                if error.code == agent_client_protocol::Error::new(DEVIN_TIMEOUT_CODE, "").code =>
+            {
+                super::timeline::Outcome::TimedOut
+            }
+            Err(_) => super::timeline::Outcome::Failed,
+        },
+    });
+    result
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_sdk_connection(
     agent: AgentTransport,
@@ -773,6 +831,9 @@ async fn run_sdk_connection(
                 let first_prompt = first_prompt.clone();
                 let prompt_requests = prompt_requests.clone();
                 async move |notification: SessionNotification, _connection| {
+                    if provider == ProviderKind::Devin {
+                        events.trace_first_update(suppress_session_updates.load(Ordering::Acquire));
+                    }
                     handle_session_update(
                         provider,
                         notification,
@@ -802,6 +863,16 @@ async fn run_sdk_connection(
                         && let Some(cause) =
                             notification.params().get("cause").and_then(Value::as_str)
                     {
+                        if provider == ProviderKind::Devin {
+                            use super::timeline::{Event, StopCause};
+                            let cause = match cause {
+                                "complete" => StopCause::Complete,
+                                "cancelled" => StopCause::Cancelled,
+                                "interrupted_by_new_prompt" => StopCause::Preempted,
+                                _ => StopCause::External,
+                            };
+                            events.trace(Event::ProviderStopped { cause });
+                        }
                         prompt_requests.lock().note_agent_stop(cause);
                     }
                     if notification.method() == "_x.ai/session/update" {
@@ -925,14 +996,15 @@ async fn run_sdk_connection(
                 meta.insert("parameterizedModelPicker".to_owned(), Value::Bool(true));
                 client_capabilities = client_capabilities.meta(meta);
             }
-            let initialize = connection
+            let initialize = acp_phase(provider, "initialization", DEVIN_STARTUP_PHASE_TIMEOUT, &events, async { connection
                 .send_request(
                     InitializeRequest::new(ProtocolVersion::V1)
                         .client_capabilities(client_capabilities)
                         .client_info(Implementation::new("waku", env!("CARGO_PKG_VERSION"))),
                 )
                 .block_task()
-                .await?;
+                .await
+            }).await?;
             let http_mcp_supported = initialize.agent_capabilities.mcp_capabilities.http;
             if let Some(record_capability) = &http_mcp_capability_recorder {
                 record_capability(http_mcp_supported);
@@ -943,6 +1015,8 @@ async fn run_sdk_connection(
             let (session_id, modes, mut config_options) = establish_session(
                 &connection,
                 &initialize,
+                provider,
+                &events,
                 resume_session_id.as_deref(),
                 &cwd,
                 &suppress_session_updates,
@@ -950,14 +1024,29 @@ async fn run_sdk_connection(
             )
             .await?;
 
-            if let Some(mode_id) = desired_access_mode(provider, modes.as_ref(), mode) {
+            if provider == ProviderKind::Antigravity {
+                // A resumed CLI session may have a different access mode.
+                // Confirm the requested mode before dispatching any prompt.
+                let mode_id = match mode {
+                    RuntimeMode::Ask | RuntimeMode::FullAccess => "default",
+                    RuntimeMode::AutoAcceptEdits => "accept-edits",
+                    RuntimeMode::Auto => "auto",
+                };
+                connection
+                    .send_request(SetSessionModeRequest::new(session_id.clone(), mode_id))
+                    .block_task()
+                    .await?;
+            } else if let Some(mode_id) = desired_access_mode(provider, modes.as_ref(), mode) {
                 // Mode selection is opportunistic: an agent can advertise a
                 // mode but reject a later transition without invalidating the
                 // session itself.
-                let _ = connection
-                    .send_request(SetSessionModeRequest::new(session_id.clone(), mode_id))
-                    .block_task()
-                    .await;
+                acp_phase(provider, "access-mode configuration", DEVIN_STARTUP_PHASE_TIMEOUT, &events, async {
+                    let _ = connection
+                        .send_request(SetSessionModeRequest::new(session_id.clone(), mode_id))
+                        .block_task()
+                        .await;
+                    Ok(())
+                }).await?;
             }
             let native_session_id = session_id.to_string();
             let _ = events.send(DriverEvent::Connected {
@@ -974,21 +1063,56 @@ async fn run_sdk_connection(
             let mut current_effort = reasoning_effort;
             let mut current_tier = service_tier;
             let mut current_window = context_window;
-            apply_model(
-                &connection,
-                provider,
-                &session_id,
-                &mut config_options,
-                current_model.as_deref(),
-                current_effort.as_deref(),
-                current_tier.as_deref(),
-                current_window.as_deref(),
-                allow_model_fallback,
-                &events,
-            )
-            .await;
+            acp_phase(provider, "model configuration", DEVIN_STARTUP_PHASE_TIMEOUT, &events, async {
+                let applied = apply_model(
+                    &connection,
+                    provider,
+                    &session_id,
+                    &mut config_options,
+                    current_model.as_deref(),
+                    current_effort.as_deref(),
+                    current_tier.as_deref(),
+                    current_window.as_deref(),
+                    allow_model_fallback,
+                    &events,
+                )
+                .await;
+                if !applied {
+                    return Err(agent_client_protocol::Error::new(-32099, "the selected model settings were refused before prompt dispatch"));
+                }
+                Ok(())
+            }).await?;
             let mut fork_context = fork_context;
-            while let Ok(command) = commands.recv().await {
+            loop {
+                let command = if provider == ProviderKind::Devin && {
+                    let pending = prompt_requests.lock();
+                    !pending.is_empty() && !pending.turn_started && !pending.cancel_requested
+                } {
+                    smol::future::race(
+                        async { commands.recv().await.map(Some) },
+                        async {
+                            smol::Timer::after(Duration::from_secs(1)).await;
+                            Ok(None)
+                        },
+                    ).await
+                } else {
+                    commands.recv().await.map(Some)
+                };
+                // Check even under a busy command queue. Closing this connection
+                // fences late output; never resend a delivery with unknown acceptance.
+                if provider == ProviderKind::Devin
+                    && prompt_requests.lock().awaiting_start_timed_out(Instant::now())
+                {
+                    events.trace(super::timeline::Event::CancellationRequested { source: super::timeline::CancelSource::ResponseTimeout });
+                    let _ = connection.send_notification(CancelNotification::new(session_id.clone()));
+                    return Err(agent_client_protocol::Error::new(DEVIN_TIMEOUT_CODE,
+                        "Devin did not confirm starting within 60 seconds after prompt dispatch; delivery may have succeeded; the connection was closed without retrying"));
+                }
+                let command = match command {
+                    Ok(Some(command)) => command,
+                    Ok(None) => continue,
+                    Err(_) => break,
+                };
                 match command {
                     CommandMessage::Prompt(text) => {
                         let text = fork_context
@@ -1042,6 +1166,7 @@ async fn run_sdk_connection(
                     CommandMessage::Steer(text) => {
                         if prompt_requests.lock().is_empty() {
                             let _ = events.send(DriverEvent::SteerRejected {
+                                submission_id: None,
                                 message: text,
                                 reason: format!(
                                     "{} has no active turn to steer.",
@@ -1066,6 +1191,7 @@ async fn run_sdk_connection(
                         ) {
                             Ok(()) => {
                                 let _ = events.send(DriverEvent::SteerAccepted {
+                                    submission_id: None,
                                     message: text,
                                     sent_by_task: None,
                                     hidden: false,
@@ -1074,6 +1200,7 @@ async fn run_sdk_connection(
                             }
                             Err(error) => {
                                 let _ = events.send(DriverEvent::SteerRejected {
+                                    submission_id: None,
                                     message: text,
                                     reason: error.to_string(),
                                     reason_i18n: None,
@@ -1117,30 +1244,41 @@ async fn run_sdk_connection(
                             let _ = pending.responder.respond(response);
                         }
                     }
-                    CommandMessage::Options(options) => {
-                        if options.model != current_model
+                    CommandMessage::Options(options, reply) => {
+                        let changed = options.model != current_model
                             || options.reasoning_effort != current_effort
                             || options.service_tier != current_tier
-                            || options.context_window != current_window
-                        {
-                            current_model = options.model;
-                            current_effort = options.reasoning_effort;
-                            current_tier = options.service_tier;
-                            current_window = options.context_window;
-                            apply_model(
+                            || options.context_window != current_window;
+                        let applied = if changed {
+                            smol::future::or(apply_model(
                                 &connection,
                                 provider,
                                 &session_id,
                                 &mut config_options,
-                                current_model.as_deref(),
-                                current_effort.as_deref(),
-                                current_tier.as_deref(),
-                                current_window.as_deref(),
+                                options.model.as_deref(),
+                                options.reasoning_effort.as_deref(),
+                                options.service_tier.as_deref(),
+                                options.context_window.as_deref(),
                                 allow_model_fallback,
                                 &events,
-                            )
-                            .await;
+                            ), async {
+                                smol::Timer::after(OPTIONS_TIMEOUT).await;
+                                false
+                            }).await
+                        } else {
+                            true
+                        };
+                        let _ = reply.send(applied);
+                        if !applied {
+                            // Partial or unconfirmed writes cannot be
+                            // followed by a prompt on this transport.
+                            return Err(agent_client_protocol::Error::new(-32099,
+                                "the selected model settings were not confirmed; prompt dispatch stopped"));
                         }
+                        current_model = options.model;
+                        current_effort = options.reasoning_effort;
+                        current_tier = options.service_tier;
+                        current_window = options.context_window;
                     }
                     CommandMessage::DeleteSession(done) => {
                         match connection
@@ -1175,6 +1313,8 @@ async fn run_sdk_connection(
 async fn establish_session(
     connection: &ConnectionTo<Agent>,
     initialize: &InitializeResponse,
+    provider: ProviderKind,
+    events: &DriverEventSender,
     resume_session_id: Option<&str>,
     cwd: &Path,
     suppress_session_updates: &AtomicBool,
@@ -1192,13 +1332,22 @@ async fn establish_session(
             .resume
             .is_some()
         {
-            match connection
-                .send_request(
-                    ResumeSessionRequest::new(existing.to_owned(), cwd)
-                        .mcp_servers(mcp_servers.to_vec()),
-                )
-                .block_task()
-                .await
+            match acp_phase(
+                provider,
+                "session resume",
+                DEVIN_STARTUP_PHASE_TIMEOUT,
+                events,
+                async {
+                    connection
+                        .send_request(
+                            ResumeSessionRequest::new(existing.to_owned(), cwd)
+                                .mcp_servers(mcp_servers.to_vec()),
+                        )
+                        .block_task()
+                        .await
+                },
+            )
+            .await
             {
                 Ok(response) => {
                     return Ok((
@@ -1217,30 +1366,40 @@ async fn establish_session(
             // it — may still hold the provider-side session lock while its
             // process shuts down, so retry failures the agent flags as
             // retryable before giving up.
-            let mut response = connection
-                .send_request(
-                    LoadSessionRequest::new(existing.to_owned(), cwd)
-                        .mcp_servers(mcp_servers.to_vec()),
-                )
-                .block_task()
-                .await;
-            for _ in 0..ACP_SESSION_LOAD_RETRIES {
-                if response
-                    .as_ref()
-                    .err()
-                    .is_none_or(|e| !session_error_retryable(e))
-                {
-                    break;
-                }
-                smol::Timer::after(ACP_SESSION_LOAD_RETRY_DELAY).await;
-                response = connection
-                    .send_request(
-                        LoadSessionRequest::new(existing.to_owned(), cwd)
-                            .mcp_servers(mcp_servers.to_vec()),
-                    )
-                    .block_task()
-                    .await;
-            }
+            let response = acp_phase(
+                provider,
+                "session load",
+                DEVIN_STARTUP_PHASE_TIMEOUT,
+                events,
+                async {
+                    let mut response = connection
+                        .send_request(
+                            LoadSessionRequest::new(existing.to_owned(), cwd)
+                                .mcp_servers(mcp_servers.to_vec()),
+                        )
+                        .block_task()
+                        .await;
+                    for _ in 0..ACP_SESSION_LOAD_RETRIES {
+                        if response
+                            .as_ref()
+                            .err()
+                            .is_none_or(|e| !session_error_retryable(e))
+                        {
+                            break;
+                        }
+                        smol::Timer::after(ACP_SESSION_LOAD_RETRY_DELAY).await;
+                        response = connection
+                            .send_request(
+                                LoadSessionRequest::new(existing.to_owned(), cwd)
+                                    .mcp_servers(mcp_servers.to_vec()),
+                            )
+                            .block_task()
+                            .await;
+                    }
+                    response
+                },
+            )
+            .await;
             suppress_session_updates.store(false, Ordering::Release);
             return match response {
                 Ok(response) => Ok((
@@ -1260,10 +1419,19 @@ async fn establish_session(
         }
     }
 
-    let response = connection
-        .send_request(NewSessionRequest::new(cwd).mcp_servers(mcp_servers.to_vec()))
-        .block_task()
-        .await?;
+    let response = acp_phase(
+        provider,
+        "session creation",
+        DEVIN_STARTUP_PHASE_TIMEOUT,
+        events,
+        async {
+            connection
+                .send_request(NewSessionRequest::new(cwd).mcp_servers(mcp_servers.to_vec()))
+                .block_task()
+                .await
+        },
+    )
+    .await?;
     Ok((response.session_id, response.modes, response.config_options))
 }
 
@@ -2024,6 +2192,68 @@ fn set_model_params(
     params
 }
 
+async fn apply_antigravity_model(
+    connection: &ConnectionTo<Agent>,
+    session_id: &SessionId,
+    session_config: &mut Option<Vec<SessionConfigOption>>,
+    model: Option<&str>,
+    effort: Option<&str>,
+    allow_model_fallback: bool,
+) -> anyhow::Result<()> {
+    let mut effort = effort;
+    if let Some(model) = model {
+        let option = advertised_model_option(session_config.as_deref().unwrap_or_default())
+            .ok_or_else(|| anyhow!("Antigravity did not advertise its model configuration"))?;
+        let values = session_config_select_values(option);
+        // The CLI picker folds IDs like gpt-oss-120b-medium into a model and
+        // effort. ACP still advertises packed IDs for some models.
+        let packed = format!("{model}-{}", effort.unwrap_or("medium"));
+        let value = if values.contains(&model) {
+            model
+        } else if values.contains(&packed.as_str()) {
+            effort = None;
+            packed.as_str()
+        } else if let Some((base, level)) = model.rsplit_once('-')
+            && matches!(level, "low" | "medium" | "high")
+            && values.contains(&base)
+        {
+            effort = effort.or(Some(level));
+            base
+        } else if allow_model_fallback {
+            return Ok(());
+        } else {
+            anyhow::bail!("Antigravity did not advertise model {model}");
+        };
+        if session_config_current_value(option) != Some(value) {
+            let response = connection
+                .send_request(SetSessionConfigOptionRequest::new(
+                    session_id.clone(),
+                    option.id.clone(),
+                    value,
+                ))
+                .block_task()
+                .await?;
+            *session_config = Some(response.config_options);
+        }
+    }
+    if let Some(effort) = effort
+        && let Some(option) =
+            session_effort_config_option(session_config.as_deref().unwrap_or_default())
+        && session_config_current_value(option) != Some(effort)
+    {
+        let response = connection
+            .send_request(SetSessionConfigOptionRequest::new(
+                session_id.clone(),
+                option.id.clone(),
+                effort,
+            ))
+            .block_task()
+            .await?;
+        *session_config = Some(response.config_options);
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn apply_model(
     connection: &ConnectionTo<Agent>,
@@ -2036,9 +2266,30 @@ async fn apply_model(
     context_window: Option<&str>,
     allow_model_fallback: bool,
     events: &DriverEventSender,
-) {
+) -> bool {
+    if provider == ProviderKind::Antigravity {
+        return match apply_antigravity_model(
+            connection,
+            session_id,
+            session_config,
+            model,
+            reasoning_effort,
+            allow_model_fallback,
+        )
+        .await
+        {
+            Ok(()) => true,
+            Err(error) => {
+                let _ = events.send(DriverEvent::localized_error(localized!(
+                    "errors.select_model",
+                    error = error
+                )));
+                false
+            }
+        };
+    }
     let Some(model) = model else {
-        return;
+        return true;
     };
     let config_options = session_config.as_deref();
     let cursor_model_option = (provider == ProviderKind::Cursor)
@@ -2073,6 +2324,7 @@ async fn apply_model(
                         "errors.select_model",
                         error = error
                     )));
+                    return false;
                 }
             }
             Err(error) => {
@@ -2080,9 +2332,10 @@ async fn apply_model(
                     "errors.select_model",
                     error = error
                 )));
+                return false;
             }
         }
-        return;
+        return true;
     }
 
     if provider == ProviderKind::Fx {
@@ -2104,7 +2357,7 @@ async fn apply_model(
                         "errors.select_model",
                         error = error
                     )));
-                    return;
+                    return false;
                 }
             }
         }
@@ -2113,14 +2366,14 @@ async fn apply_model(
                 "errors.select_model",
                 error = "Fx did not advertise its model configuration"
             )));
-            return;
+            return false;
         };
         if !session_config_select_values(option).contains(&model) {
             let _ = events.send(DriverEvent::localized_error(localized!(
                 "errors.select_model",
                 error = format!("Fx did not advertise model {model}")
             )));
-            return;
+            return false;
         }
         if let Err(error) = connection
             .send_request(SetSessionConfigOptionRequest::new(
@@ -2135,8 +2388,9 @@ async fn apply_model(
                 "errors.select_model",
                 error = error
             )));
+            return false;
         }
-        return;
+        return true;
     }
 
     if provider == ProviderKind::Devin {
@@ -2172,21 +2426,18 @@ async fn apply_model(
                             "errors.select_model",
                             error = error
                         )));
-                        return;
+                        return false;
                     }
                 }
             }
             if applied {
-                // Effort is a session-level `thought_level` select when the
-                // agent advertises one — applied after the model set against
-                // the refreshed option list, and deliberately non-fatal like
-                // every other provider's effort write.
+                // Every requested write must succeed before the next prompt.
                 if let Some(effort_option) = session_effort_config_option(&options)
                     && let Some(effort) =
                         devin_thought_level_value(effort_option, model, reasoning_effort)
                     && session_config_current_value(effort_option) != Some(effort.as_str())
                 {
-                    if let Ok(response) = connection
+                    match connection
                         .send_request(SetSessionConfigOptionRequest::new(
                             session_id.clone(),
                             effort_option.id.clone(),
@@ -2195,7 +2446,14 @@ async fn apply_model(
                         .block_task()
                         .await
                     {
-                        options = response.config_options;
+                        Ok(response) => options = response.config_options,
+                        Err(error) => {
+                            let _ = events.send(DriverEvent::localized_error(localized!(
+                                "errors.select_model",
+                                error = error
+                            )));
+                            return false;
+                        }
                     }
                 }
                 let speed = if service_tier == Some("fast") {
@@ -2209,6 +2467,7 @@ async fn apply_model(
                             "errors.select_model",
                             error = format!("Devin did not advertise speed {speed}")
                         )));
+                        return false;
                     } else if session_config_current_value(option) != Some(speed) {
                         match connection
                             .send_request(SetSessionConfigOptionRequest::new(
@@ -2225,6 +2484,7 @@ async fn apply_model(
                                     "errors.select_model",
                                     error = error
                                 )));
+                                return false;
                             }
                         }
                     }
@@ -2232,7 +2492,7 @@ async fn apply_model(
                 // Keep provider-confirmed values for subsequent changes, including
                 // switching Fast back off or returning to the original pairing.
                 *session_config = Some(options);
-                return;
+                return true;
             }
         } else {
             if option.is_some() && !is_devin_auto_model(model) && !allow_model_fallback {
@@ -2241,7 +2501,7 @@ async fn apply_model(
                     error = format!("Devin did not advertise model {model}")
                 )));
             }
-            return;
+            return allow_model_fallback;
         }
     }
 
@@ -2260,7 +2520,7 @@ async fn apply_model(
                 "errors.select_model",
                 error = error
             )));
-            return;
+            return false;
         }
     };
     if let Err(error) = connection.send_request(request).block_task().await {
@@ -2270,23 +2530,29 @@ async fn apply_model(
                 error = error
             )));
         }
-        return;
+        return false;
     }
     if provider != ProviderKind::Grok
         && provider != ProviderKind::Devin
         && let Some(effort) = reasoning_effort
     {
-        // Reasoning effort is an optional config extension and is deliberately
-        // non-fatal when an agent does not expose it.
-        let _ = connection
+        if let Err(error) = connection
             .send_request(SetSessionConfigOptionRequest::new(
                 session_id.clone(),
                 reasoning_effort_config_id(provider),
                 effort,
             ))
             .block_task()
-            .await;
+            .await
+        {
+            let _ = events.send(DriverEvent::localized_error(localized!(
+                "errors.select_model",
+                error = error
+            )));
+            return false;
+        }
     }
+    true
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2367,6 +2633,11 @@ fn dispatch_prompt(
     }
     let sent = dispatch.connection.send_request(request);
     let request_id = sent.id().clone();
+    if dispatch.provider == ProviderKind::Devin {
+        dispatch
+            .events
+            .trace(super::timeline::Event::PromptDispatched);
+    }
     {
         let mut pending = dispatch.prompt_requests.lock();
         match supersedes {
@@ -3172,6 +3443,22 @@ fn handle_permission_request(
         })
         .collect::<Vec<_>>();
 
+    if params.pointer("/toolCall/kind").and_then(Value::as_str) == Some("execute")
+        && params
+            .pointer("/toolCall/rawInput")
+            .is_some_and(crate::agent_readonly::readonly_agent_input)
+        && let Some(choice) = request
+            .options
+            .iter()
+            .find(|option| option.kind == PermissionOptionKind::AllowOnce)
+    {
+        return responder.respond(RequestPermissionResponse::new(
+            RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+                choice.option_id.clone(),
+            )),
+        ));
+    }
+
     if let PermissionDisposition::AutoApprove = disposition {
         let choice = request
             .options
@@ -3777,9 +4064,21 @@ impl DriverControl for AcpDriver {
         if options.mode != self.mode {
             return false;
         }
-        self.commands
-            .try_send(CommandMessage::Options(options))
-            .is_ok()
+        let (reply, response) = crossbeam_channel::bounded(1);
+        if self
+            .commands
+            .try_send(CommandMessage::Options(options, reply))
+            .is_err()
+        {
+            return false;
+        }
+        match response.recv_timeout(OPTIONS_TIMEOUT.saturating_add(Duration::from_secs(5))) {
+            Ok(applied) => applied,
+            Err(_) => {
+                self.begin_shutdown();
+                false
+            }
+        }
     }
 
     fn delete_provider_session(&self) {
@@ -3815,6 +4114,59 @@ mod tests {
         SessionConfigSelectOption, SessionMode, SessionModeState, ToolCallUpdate,
         ToolCallUpdateFields,
     };
+
+    #[test]
+    fn devin_startup_deadline_names_the_stalled_phase() {
+        let error = smol::block_on(acp_phase(
+            ProviderKind::Devin,
+            "session resume",
+            Duration::ZERO,
+            &crate::driver::test_event_channel().0,
+            std::future::pending::<agent_client_protocol::Result<()>>(),
+        ))
+        .unwrap_err();
+        assert!(error.to_string().contains("session resume"));
+        assert!(error.to_string().contains("not dispatched"));
+        // Other providers keep their existing behavior, and a ready phase wins.
+        for provider in [ProviderKind::Devin, ProviderKind::Cursor] {
+            assert_eq!(
+                smol::block_on(acp_phase(
+                    provider,
+                    "initialization",
+                    Duration::ZERO,
+                    &crate::driver::test_event_channel().0,
+                    async { Ok(42) }
+                ))
+                .unwrap(),
+                42
+            );
+        }
+    }
+
+    #[test]
+    fn devin_response_budget_begins_at_dispatch_and_requires_no_acceptance() {
+        let before_resume = Instant::now();
+        let mut pending = PendingPrompts::default();
+        // Startup can exceed the response budget without timing out a prompt
+        // that has not been dispatched.
+        assert!(!pending.awaiting_start_timed_out(before_resume + Duration::from_secs(180)));
+        let id = RequestId::from("response-budget".to_owned());
+        pending.insert(id.clone(), None, "session".into());
+        let dispatched = pending.requests[0].dispatched_at;
+        assert!(!pending.awaiting_start_timed_out(dispatched + Duration::from_secs(59)));
+        assert!(pending.awaiting_start_timed_out(dispatched + DEVIN_RESPONSE_TIMEOUT));
+        assert!(pending.mark_turn_started());
+        assert!(!pending.awaiting_start_timed_out(dispatched + Duration::from_secs(180)));
+        pending.settle_request(&id, true);
+        pending.insert(
+            RequestId::from("next-turn".to_owned()),
+            None,
+            "session".into(),
+        );
+        assert!(!pending.awaiting_start_timed_out(Instant::now()));
+        pending.note_cancel_requested();
+        assert!(!pending.awaiting_start_timed_out(Instant::now() + Duration::from_secs(180)));
+    }
 
     fn select_config_option(
         id: &str,
@@ -4477,19 +4829,21 @@ mod tests {
                     (pair, Some("medium"), Some("default")),
                     ("swe-2-high", Some("high"), None),
                 ] {
-                    apply_model(
-                        &connection,
-                        ProviderKind::Devin,
-                        &SessionId::new("session"),
-                        &mut config,
-                        Some(model),
-                        effort,
-                        tier,
-                        None,
-                        false,
-                        &events,
-                    )
-                    .await;
+                    assert!(
+                        apply_model(
+                            &connection,
+                            ProviderKind::Devin,
+                            &SessionId::new("session"),
+                            &mut config,
+                            Some(model),
+                            effort,
+                            tier,
+                            None,
+                            false,
+                            &events,
+                        )
+                        .await
+                    );
                 }
                 Ok(())
             });
@@ -4508,6 +4862,104 @@ mod tests {
                 ("thought_level".to_owned(), "high".to_owned()),
             ]
         );
+    }
+
+    #[test]
+    fn refused_acp_configuration_reports_failure_after_partial_updates() {
+        use futures::{SinkExt, StreamExt};
+        for refused in ["model", "thought_level", "speed"] {
+            let initial = vec![
+                select_config_option(
+                    "model",
+                    SessionConfigOptionCategory::Model,
+                    "old",
+                    &["old", "new"],
+                ),
+                select_config_option(
+                    "thought_level",
+                    SessionConfigOptionCategory::ThoughtLevel,
+                    "low",
+                    &["low", "high"],
+                ),
+                select_config_option(
+                    "speed",
+                    SessionConfigOptionCategory::Model,
+                    "standard",
+                    &["standard", "fast"],
+                ),
+            ];
+            let (request_tx, mut request_rx) = futures::channel::mpsc::channel::<String>(16);
+            let (mut response_tx, response_rx) = futures::channel::mpsc::channel::<String>(16);
+            let outgoing: std::pin::Pin<
+                Box<dyn futures::Sink<String, Error = std::io::Error> + Send>,
+            > = Box::pin(request_tx.sink_map_err(std::io::Error::other));
+            let incoming: std::pin::Pin<
+                Box<dyn futures::Stream<Item = std::io::Result<String>> + Send>,
+            > = Box::pin(response_rx.map(Ok::<String, std::io::Error>));
+            let transport = agent_client_protocol::Lines::new(outgoing, incoming);
+            let writes = Arc::new(Mutex::new(Vec::new()));
+            let seen = writes.clone();
+            let mut advertised = serde_json::to_value(&initial).unwrap();
+            let peer = thread::spawn(move || {
+                smol::block_on(async move {
+                    while let Some(line) = request_rx.next().await {
+                        let message: Value = serde_json::from_str(&line).unwrap();
+                        assert_eq!(message["method"], "session/set_config_option");
+                        let key = message["params"]["configId"].as_str().unwrap();
+                        seen.lock().push(key.to_owned());
+                        let mut reply = json!({"jsonrpc":"2.0", "id":message["id"]});
+                        if key == refused {
+                            reply["error"] =
+                                json!({"code":-32602, "message":"fixture refused the setting"});
+                        } else {
+                            let option = advertised
+                                .as_array_mut()
+                                .unwrap()
+                                .iter_mut()
+                                .find(|option| option["id"] == key)
+                                .unwrap();
+                            option["currentValue"] = message["params"]["value"].clone();
+                            reply["result"] = json!({"configOptions":advertised});
+                        }
+                        if response_tx.send(reply.to_string()).await.is_err() {
+                            break;
+                        }
+                    }
+                })
+            });
+            let (events, received) = crate::driver::test_event_channel();
+            let applied =
+                smol::block_on(Client.builder().name("waku-refused-config").connect_with(
+                    transport,
+                    async move |connection: ConnectionTo<Agent>| {
+                        let mut config = Some(initial);
+                        Ok(apply_model(
+                            &connection,
+                            ProviderKind::Devin,
+                            &SessionId::new("session"),
+                            &mut config,
+                            Some("new"),
+                            Some("high"),
+                            Some("fast"),
+                            None,
+                            false,
+                            &events,
+                        )
+                        .await)
+                    },
+                ))
+                .unwrap();
+            peer.join().unwrap();
+            assert!(
+                !applied,
+                "refusal of {refused} was mistaken for confirmation"
+            );
+            assert_eq!(writes.lock().last().map(String::as_str), Some(refused));
+            assert!(received.try_iter().any(|event| matches!(
+                event,
+                DriverEvent::Error(_) | DriverEvent::LocalizedError { .. }
+            )));
+        }
     }
 
     #[test]

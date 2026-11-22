@@ -896,7 +896,7 @@ impl Waku {
                     .and_then(|state| state.session_id)
             });
             if let Some(session_id) = session_id {
-                self.select_session(session_id, cx);
+                self.request_session_activation(session_id, SessionActivationTransition::Visit, cx);
             }
         }
         crate::platform::end_consent_recognition();
@@ -1264,6 +1264,9 @@ pub(super) mod tests {
                         daemon_version: "test".into(),
                         daemon_commit: None,
                         agent_cli_available: false,
+                        task_views_available: false,
+                        transcript_windows_available: false,
+                        landing_queue_available: false,
                     },
                     ClientMessage::Request(request) => {
                         let waku_client::Command::Transcribe { pcm, .. } = request.command else {

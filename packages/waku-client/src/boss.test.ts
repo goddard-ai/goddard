@@ -79,6 +79,14 @@ const PERSONA_DEFAULTS: PersonaDefaultsState = {
 
 function bossState(overrides: Partial<BossState> = {}): BossState {
   return {
+    counsel: {
+      sessionId: null,
+      recommendations: [],
+      reviewedActivity: null,
+      recommendationTurns: [],
+      identity: null,
+      revision: 0,
+    },
     identity: IDENTITY,
     personaId: "persona-1",
     personaDefaults: PERSONA_DEFAULTS,

@@ -41,6 +41,15 @@ pub enum ChainObservation {
     },
 }
 
+/// Host-verified descendant retry source, bound to the sealed attempt and old base.
+/// This is deliberately absent from employee-supplied wire evidence.
+pub struct RetryVerification {
+    pub attempt_id: Uuid,
+    pub previous_revision: String,
+    pub source_revision: String,
+    pub workspace_lineage: Option<RetryWorkspaceLineage>,
+}
+
 /// Facts the host checked under the successor's existing grants. Missing facts
 /// pause; these fields are not employee assertions and never widen access.
 #[derive(Default)]
@@ -127,6 +136,7 @@ fn pause(chain: &mut EmployeeChain, reason: impl Into<String>) {
         chain.attention = Some(ChainAttention {
             id: Uuid::new_v4(),
             reason,
+            raised_at: Some(waku_protocol::model::unix_time()),
             handled_at: None,
         });
     }
@@ -147,8 +157,76 @@ fn new_attempt(version: u64) -> ChainAttempt {
         sealed: None,
         handoff_accepted: false,
         reconciled_retry_revision: None,
+        retry_workspace_lineage: None,
         created_at: waku_protocol::model::unix_time(),
     }
+}
+
+/// Re-admit the latest employee without rewriting its sealed evidence. Called
+/// in the same transaction as the employee ticket; stale successor admissions
+/// subsequently fail their attempt/revision checks.
+pub(crate) fn requeue_employee_attempt(state: &mut BossState, session: Uuid) -> Result<()> {
+    for chain in &mut state.chains {
+        let Some((step_index, attempt_index)) =
+            chain
+                .steps
+                .iter()
+                .enumerate()
+                .rev()
+                .find_map(|(step_index, step)| {
+                    step.attempts
+                        .iter()
+                        .rposition(|attempt| attempt.employee_id == Some(session))
+                        .map(|attempt_index| (step_index, attempt_index))
+                })
+        else {
+            continue;
+        };
+        let previous = &chain.steps[step_index].attempts[attempt_index];
+        ensure!(
+            previous.execution_released && previous.workspace_released,
+            "employee must release execution and workspace before resuming"
+        );
+        // No successor was admitted. Fence any still-unbound admission before
+        // reopening this step; an in-flight host enqueue will fail its identity check.
+        for (index, step) in chain.steps.iter_mut().enumerate().skip(step_index) {
+            for pending in step.attempts.iter_mut().skip(if index == step_index {
+                attempt_index + 1
+            } else {
+                0
+            }) {
+                ensure!(
+                    pending.employee_id.is_none(),
+                    "a successor already owns this chain"
+                );
+                pending.status = StepStatus::Cancelled;
+                pending.execution_released = true;
+                pending.workspace_released = true;
+            }
+            if index > step_index {
+                step.status = StepStatus::NotStarted;
+            }
+        }
+        chain.current_step = step_index;
+        let step = &mut chain.steps[step_index];
+        let mut attempt = new_attempt(chain.definition_version);
+        attempt.employee_id = Some(session);
+        attempt.status = StepStatus::Queued;
+        step.attempts.push(attempt);
+        step.status = StepStatus::Queued;
+        chain.status = ChainStatus::Queued;
+        chain.reason = Some("employee resumed by direct prompt".into());
+        if let Some(attention) = &mut chain.attention {
+            attention.handled_at = Some(waku_protocol::model::unix_time());
+        }
+        audit(
+            chain,
+            ChainActor::Human,
+            Uuid::new_v4(),
+            "employee re-admitted by direct prompt",
+        )?;
+    }
+    Ok(())
 }
 fn unique_names(names: &[String], kind: &str) -> Result<()> {
     let mut seen = std::collections::HashSet::new();
@@ -434,6 +512,17 @@ impl BossService {
         bindings: Option<&[Uuid]>,
         resume: Option<(Uuid, u64, HandoffVerification)>,
     ) -> Result<EmployeeChain> {
+        self.chain_operation_with_retry_preflight(caller, action, bindings, resume, None)
+    }
+
+    pub fn chain_operation_with_retry_preflight(
+        &self,
+        caller: Option<Uuid>,
+        action: ChainOperation,
+        bindings: Option<&[Uuid]>,
+        resume: Option<(Uuid, u64, HandoffVerification)>,
+        retry: Option<RetryVerification>,
+    ) -> Result<EmployeeChain> {
         let owner = caller.is_none_or(|caller| self.has_boss_authority(caller));
         if !owner {
             ensure!(
@@ -716,7 +805,8 @@ impl BossService {
                                 substantive <= step.definition.max_retries as usize,
                                 "retry limit reached"
                             );
-                            // The old workspace is retained, never adopted or reset implicitly.
+                            // Workspace recovery is verified by the daemon at admission;
+                            // the reducer never resets the prior checkout.
                             // Symbolic sources resolve at the daemon before
                             // the reducer — the durable attempt base is
                             // always a commit id. An omitted source falls
@@ -747,6 +837,17 @@ impl BossService {
                                 && previous.starting_revision.is_none();
                             ensure!(
                                 effect_free
+                                    || retry.as_ref().is_some_and(|verified| {
+                                        verified.attempt_id == previous.id
+                                            && previous.reconciled_retry_revision.as_ref()
+                                                == Some(&verified.previous_revision)
+                                            && verified.source_revision == revision
+                                            && ((step.definition.boundary == HandoffBoundary::CommittedWorkspace
+                                                && step.definition.workspace == AgentWorkspace::Worktree)
+                                                || (step.definition.boundary == HandoffBoundary::ArtifactsReady
+                                                    && step.definition.workspace == AgentWorkspace::Local
+                                                    && verified.workspace_lineage.is_none()))
+                                    })
                                     || previous.reconciled_retry_revision.as_ref()
                                         == Some(&revision),
                                 "uncertain prior effects must be reconciled before retry; recorded retry base is {}",
@@ -755,8 +856,14 @@ impl BossService {
                                     .as_deref()
                                     .unwrap_or("none")
                             );
+                            if retry.is_some() {
+                                step.attempts.last_mut().unwrap().reconciled_retry_revision =
+                                    Some(revision.clone());
+                            }
                             let mut attempt = new_attempt(chain.definition_version);
                             attempt.starting_revision = Some(revision);
+                            attempt.retry_workspace_lineage =
+                                retry.and_then(|proof| proof.workspace_lineage);
                             step.attempts.push(attempt);
                             step.status = StepStatus::Waiting;
                             chain.status = ChainStatus::Waiting;
@@ -1351,11 +1458,18 @@ impl BossService {
     /// own completion is already recorded, and the outcome closes only when
     /// its ordinary completion conditions are satisfied — otherwise it stays
     /// open and is rechecked the next time those conditions can change.
-    /// Rechecking never reruns the chain's verification.
+    /// Rechecking never reruns the chain's verification. The reservation
+    /// buys exactly one closure: once the outcome is terminal — by this
+    /// finisher or by any other path — it is spent, so a later explicit
+    /// reopen is never re-asserted as completed by this chain.
     pub fn settle_chain_finisher(&self, chain_id: Uuid) -> Result<Option<BossOutcome>> {
         let mut settled = None;
         self.update(|state| {
-            let Some(chain) = state.chains.iter().find(|chain| chain.id == chain_id) else {
+            let Some(chain) = state
+                .chains
+                .iter_mut()
+                .find(|chain| chain.id == chain_id)
+            else {
                 return Ok(());
             };
             if chain.status != ChainStatus::Completed || !chain.finisher_reserved {
@@ -1366,6 +1480,7 @@ impl BossService {
                 return Ok(());
             };
             if outcome.terminal() {
+                chain.finisher_reserved = false;
                 settled = Some(outcome.clone());
                 return Ok(());
             }
@@ -1407,6 +1522,7 @@ impl BossService {
                 actor: PlanActor::Boss,
             });
             settled = Some(outcome.clone());
+            chain.finisher_reserved = false;
             Ok(())
         })?;
         Ok(settled)
@@ -1623,7 +1739,10 @@ mod tests {
     use super::*;
     use std::{fs, path::PathBuf};
     use waku_protocol::{
-        boss::{BossOperation, BossResult, EmployeeGoal, PersonaPermissions},
+        boss::{
+            AssignmentFinish, BossOperation, BossResult, EmployeeGoal, ExpiryCause,
+            HandoffDecision, PersonaPermissions,
+        },
         model::ProviderKind,
     };
 
@@ -1884,6 +2003,37 @@ mod tests {
             successor_access: true,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn direct_resume_fences_an_unadmitted_successor_without_rewriting_evidence() {
+        let fixture = Fixture::new();
+        let chain = fixture.create();
+        fixture.admit(&chain);
+        fixture.packet(&chain, ResultDisposition::Success);
+        fixture.terminal(&chain, ResultDisposition::Success);
+        fixture.release(&chain);
+        fixture.seal(&chain, &verified()).unwrap();
+        let mut state = fixture.service.document();
+        let before = state.chains[0].steps[0].attempts[0].clone();
+        let pending = state.chains[0].steps[1].attempts[0].id;
+        assert_eq!(state.chains[0].current_step, 1);
+        let employee = before.employee_id.unwrap();
+        requeue_employee_attempt(&mut state, employee).unwrap();
+        let chain = &state.chains[0];
+        assert_eq!(chain.current_step, 0);
+        assert_eq!(chain.status, ChainStatus::Queued);
+        assert_eq!(chain.steps[1].attempts[0].status, StepStatus::Cancelled);
+        assert_eq!(chain.steps[0].attempts.len(), 2);
+        assert_eq!(
+            serde_json::to_value(&chain.steps[0].attempts[0]).unwrap(),
+            serde_json::to_value(before).unwrap()
+        );
+        // A host already preparing the successor cannot bind its stale admission.
+        let mut state = state.clone();
+        let chain = &mut state.chains[0];
+        let version = chain.definition_version;
+        assert!(current_attempt(chain, pending, version).is_err());
     }
 
     #[test]
@@ -2207,6 +2357,7 @@ mod tests {
             .seal(&chain, &HandoffVerification::default())
             .unwrap();
         let paused = fixture.read(chain.id);
+        assert!(paused.attention.as_ref().unwrap().raised_at.is_some());
         let attention = paused.attention.unwrap().id;
         assert_eq!(paused.status, ChainStatus::Paused);
         fixture.seal(&chain, &verified()).unwrap();
@@ -2886,5 +3037,455 @@ mod tests {
         // A reported branch contradicting the resolved one still rejects.
         result.code.as_mut().unwrap().qa_branch = Some("release".into());
         assert!(gate_reason(&step, &result, &verification, 1).is_some());
+    }
+
+    /// An owned chain counts as outcome work for the unattended-reminder
+    /// scan — a long-running step stays covered between lifecycle events —
+    /// while paused or terminal chains leave genuinely stalled work
+    /// eligible. Regression: the scan only saw employee assignment
+    /// records, which chain attempts never carry, so it reminded "no work
+    /// assigned" one grace period after the last chain event even though
+    /// an employee was actively executing the step.
+    #[test]
+    fn owned_chains_shield_outcomes_from_unattended_reminders() {
+        let fixture = Fixture::new();
+        let outcome = fixture.definition.outcome_id;
+        let unattended_since = |service: &BossService| {
+            service
+                .document()
+                .outcomes
+                .iter()
+                .find(|entry| entry.id == outcome)
+                .and_then(|entry| entry.unattended_since)
+        };
+        let now = waku_protocol::model::unix_time();
+        let grace = waku_protocol::boss::OUTCOME_UNATTENDED_GRACE;
+
+        // An unworked outcome enters eligibility on the first scan — the
+        // shape the false alert fired from.
+        assert!(
+            fixture
+                .service
+                .scan_outcome_reminders(now)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(unattended_since(&fixture.service), Some(now));
+
+        // Chain create already clears the stamp: waiting for admission is
+        // owned work, not a missing assignment.
+        let chain = fixture.create();
+        assert_eq!(chain.status, ChainStatus::Waiting);
+        assert!(
+            fixture
+                .service
+                .scan_outcome_reminders(now + 1)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(unattended_since(&fixture.service), None);
+
+        // The reported failure: an executing step emits no chain events
+        // for its whole run, so activity alone cannot keep it covered.
+        fixture.admit(&chain);
+        fixture.observe(&chain, ChainObservation::Starting);
+        fixture.observe(
+            &chain,
+            ChainObservation::Working {
+                starting_revision: "rev".into(),
+                workspace: "/tmp/chain-workspace".into(),
+            },
+        );
+        assert_eq!(fixture.read(chain.id).status, ChainStatus::Working);
+        for offset in [grace + 1, 12 * grace, 24 * 60 * 60] {
+            assert!(
+                fixture
+                    .service
+                    .scan_outcome_reminders(now + offset)
+                    .unwrap()
+                    .is_empty(),
+                "an executing chain must never read as unattended"
+            );
+            assert_eq!(unattended_since(&fixture.service), None);
+        }
+
+        // Sealing success evidence — CheckingHandoff — stays covered, and
+        // so does the Waiting state between steps.
+        fixture.packet(&chain, ResultDisposition::Success);
+        fixture.terminal(&chain, ResultDisposition::Success);
+        assert_eq!(fixture.read(chain.id).status, ChainStatus::CheckingHandoff);
+        assert!(
+            fixture
+                .service
+                .scan_outcome_reminders(now + 25 * 60 * 60)
+                .unwrap()
+                .is_empty()
+        );
+        fixture.release(&chain);
+        fixture.seal(&chain, &verified()).unwrap();
+        let chain = fixture.read(chain.id);
+        assert_eq!(chain.status, ChainStatus::Waiting);
+        assert!(
+            fixture
+                .service
+                .scan_outcome_reminders(now + 26 * 60 * 60)
+                .unwrap()
+                .is_empty(),
+            "a chain between steps still owns the outcome"
+        );
+
+        // A pause in flight holds the outcome while the attempt settles…
+        fixture.admit(&chain);
+        fixture.observe(&chain, ChainObservation::Starting);
+        fixture.observe(
+            &chain,
+            ChainObservation::Working {
+                starting_revision: "rev".into(),
+                workspace: "/tmp/chain-workspace".into(),
+            },
+        );
+        let pausing = fixture.control(chain.id, ChainControl::Pause).unwrap();
+        assert_eq!(pausing.status, ChainStatus::Pausing);
+        assert!(
+            fixture
+                .service
+                .scan_outcome_reminders(now + 27 * 60 * 60)
+                .unwrap()
+                .is_empty(),
+            "a stopping chain still owns its outcome"
+        );
+
+        // …and a settled owner hold stays covered too: the pause itself
+        // was the decision, so the outcome never re-enters eligibility.
+        // Regression: a deliberate hold used to remind "no active
+        // assignment" one grace period after it settled.
+        let chain = fixture.read(chain.id);
+        fixture.release(&chain);
+        assert_eq!(fixture.read(chain.id).status, ChainStatus::Paused);
+        let paused_at = now + 28 * 60 * 60;
+        for offset in [0, grace + 1, 24 * 60 * 60] {
+            assert!(
+                fixture
+                    .service
+                    .scan_outcome_reminders(paused_at + offset)
+                    .unwrap()
+                    .is_empty(),
+                "an owner-held pause must never read as unattended"
+            );
+            assert_eq!(unattended_since(&fixture.service), None);
+        }
+
+        // Cancel releases ownership entirely — the outcome becomes
+        // eligible with a fresh grace period.
+        let cancelled = fixture.control(chain.id, ChainControl::Cancel).unwrap();
+        assert_eq!(cancelled.status, ChainStatus::Cancelled);
+        let cancelled_at = paused_at + 120;
+        assert!(
+            fixture
+                .service
+                .scan_outcome_reminders(cancelled_at)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(unattended_since(&fixture.service), Some(cancelled_at));
+        assert_eq!(
+            fixture
+                .service
+                .scan_outcome_reminders(cancelled_at + grace + 1)
+                .unwrap(),
+            vec![outcome],
+            "a cancelled chain leaves the outcome unowned"
+        );
+    }
+
+    /// An exception pause still reads as stalled work: a chain the daemon
+    /// held on a failed gate keeps its unread `ChainAttention`, so the
+    /// outcome stays reminder-eligible until an owner handles it — an
+    /// owner pause laid over the exception changes nothing, while
+    /// accepting the handoff retires the exception and the deliberate
+    /// hold then shields like any other.
+    #[test]
+    fn exception_pauses_still_surface_unattended_work() {
+        let fixture = Fixture::new();
+        let outcome = fixture.definition.outcome_id;
+        let unattended_since = |service: &BossService| {
+            service
+                .document()
+                .outcomes
+                .iter()
+                .find(|entry| entry.id == outcome)
+                .and_then(|entry| entry.unattended_since)
+        };
+        let now = waku_protocol::model::unix_time();
+        let grace = waku_protocol::boss::OUTCOME_UNATTENDED_GRACE;
+
+        let chain = fixture.create();
+        fixture.admit(&chain);
+        fixture.observe(&chain, ChainObservation::Starting);
+        fixture.observe(
+            &chain,
+            ChainObservation::Working {
+                starting_revision: "rev".into(),
+                workspace: "/tmp/chain-workspace".into(),
+            },
+        );
+        fixture.packet(&chain, ResultDisposition::Success);
+        fixture.terminal(&chain, ResultDisposition::Success);
+        fixture.release(&chain);
+
+        // A failed gate pauses the chain with an unread exception —
+        // genuine stalled work awaiting a decision.
+        let mut failing = verified();
+        failing.successor_access = false;
+        fixture.seal(&chain, &failing).unwrap();
+        let chain = fixture.read(chain.id);
+        assert_eq!(chain.status, ChainStatus::Paused);
+        assert!(
+            chain
+                .attention
+                .as_ref()
+                .is_some_and(|attention| attention.handled_at.is_none())
+        );
+
+        let paused_at = now + 3600;
+        assert!(
+            fixture
+                .service
+                .scan_outcome_reminders(paused_at)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(unattended_since(&fixture.service), Some(paused_at));
+        assert_eq!(
+            fixture
+                .service
+                .scan_outcome_reminders(paused_at + grace + 1)
+                .unwrap(),
+            vec![outcome],
+            "an unhandled exception pause still reminds"
+        );
+
+        // Pausing over the exception is not a decision about it — the
+        // outcome keeps its reminder.
+        let held = fixture.control(chain.id, ChainControl::Pause).unwrap();
+        assert_eq!(held.status, ChainStatus::Paused);
+        assert_eq!(
+            fixture
+                .service
+                .scan_outcome_reminders(paused_at + grace + 2)
+                .unwrap(),
+            vec![outcome],
+            "an owner pause cannot hide an unhandled exception"
+        );
+
+        // Handling the exception retires it — the deliberate hold that
+        // remains shields like a recorded wait.
+        let accepted = fixture.control(chain.id, ChainControl::Accept).unwrap();
+        assert_eq!(accepted.status, ChainStatus::Paused);
+        assert!(
+            fixture
+                .service
+                .scan_outcome_reminders(paused_at + grace + 3)
+                .unwrap()
+                .is_empty(),
+            "a handled exception reads as a deliberate hold"
+        );
+        assert_eq!(unattended_since(&fixture.service), None);
+    }
+
+    #[test]
+    fn finisher_reservation_spends_once_and_reopen_survives_normalization() {
+        let mut fixture = Fixture::new();
+        fixture.definition.finishes_outcome = true;
+        let chain = fixture.create();
+        let outcome_id = chain.request.outcome_id;
+
+        // A live sibling assignment defers the closure — the reservation
+        // survives normalization passes instead of firing early.
+        let boss = Uuid::new_v4();
+        fixture.service.set_session_id(boss).unwrap();
+        let assignment = fixture
+            .service
+            .assignment_admission(Some(outcome_id), None, false, None, Vec::new(), None)
+            .unwrap()
+            .unwrap();
+        let mut sibling = fixture
+            .service
+            .prepare_employee(
+                boss,
+                None,
+                "Sibling qualification".into(),
+                None,
+                false,
+                EmployeeGoal::Errand,
+                None,
+            )
+            .unwrap();
+        sibling.assignment = Some(assignment);
+        let sibling_id = sibling.session_id;
+        fixture
+            .service
+            .update(|state| {
+                state.employees.push(sibling);
+                Ok(())
+            })
+            .unwrap();
+
+        for _ in 0..2 {
+            let chain = fixture.read(chain.id);
+            fixture.admit(&chain);
+            fixture.packet(&chain, ResultDisposition::Success);
+            fixture.terminal(&chain, ResultDisposition::Success);
+            fixture.release(&chain);
+            fixture.seal(&chain, &verified()).unwrap();
+        }
+        let chain = fixture.read(chain.id);
+        assert_eq!(chain.status, ChainStatus::Completed);
+        assert!(chain.finisher_reserved);
+
+        let deferred = fixture
+            .service
+            .settle_chain_finisher(chain.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(deferred.state, OutcomeState::Open);
+        assert!(fixture.read(chain.id).finisher_reserved);
+
+        // The sibling's accepted success raises a handoff — still a
+        // legitimate deferral, not a fire.
+        fixture
+            .service
+            .begin_finishing(sibling_id, false, false, ExpiryCause::Finished)
+            .unwrap();
+        let completion = fixture
+            .service
+            .complete_expiry(sibling_id, None)
+            .unwrap();
+        let AssignmentFinish::Handoff { id: handoff, .. } = completion.assignment else {
+            panic!("an ordinary accepted assignment owes a handoff");
+        };
+        let deferred = fixture
+            .service
+            .settle_chain_finisher(chain.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(deferred.state, OutcomeState::Open);
+        assert!(fixture.read(chain.id).finisher_reserved);
+
+        // Once the last condition resolves, the reservation performs its
+        // one legitimate closure and is spent.
+        fixture
+            .service
+            .resolve_handoff(None, outcome_id, handoff, HandoffDecision::Dismiss)
+            .unwrap();
+        let settled = fixture
+            .service
+            .settle_chain_finisher(chain.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(settled.state, OutcomeState::Completed);
+        assert!(!fixture.read(chain.id).finisher_reserved);
+        assert!(
+            settled
+                .evidence
+                .as_deref()
+                .is_some_and(|evidence| evidence.contains("Employee chain"))
+        );
+
+        // The explicit reopen stays meaningful: every later normalization
+        // pass is a no-op — completion is never re-asserted, the recorded
+        // evidence is not overwritten, and history keeps its single
+        // legitimate transition.
+        let (reopened, _) = fixture
+            .service
+            .set_outcome_state(None, outcome_id, OutcomeState::Open, None)
+            .unwrap();
+        assert_eq!(reopened.state, OutcomeState::Open);
+        for _ in 0..3 {
+            assert!(
+                fixture
+                    .service
+                    .settle_chain_finisher(chain.id)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        let outcome = fixture
+            .service
+            .document()
+            .outcomes
+            .into_iter()
+            .find(|outcome| outcome.id == outcome_id)
+            .unwrap();
+        assert_eq!(outcome.state, OutcomeState::Open);
+        assert!(
+            outcome
+                .evidence
+                .as_deref()
+                .is_some_and(|evidence| evidence.contains("Employee chain"))
+        );
+        assert_eq!(
+            outcome
+                .history
+                .iter()
+                .filter(|transition| transition.state == OutcomeState::Completed)
+                .count(),
+            1
+        );
+
+        // The reopened state and the spent reservation both survive a
+        // reload — normalization still does not re-fire.
+        let reloaded = BossService::open(fixture.root.clone()).unwrap();
+        let document = reloaded.document();
+        let outcome = document
+            .outcomes
+            .iter()
+            .find(|outcome| outcome.id == outcome_id)
+            .unwrap();
+        assert_eq!(outcome.state, OutcomeState::Open);
+        assert_eq!(
+            outcome
+                .history
+                .iter()
+                .filter(|transition| transition.state == OutcomeState::Completed)
+                .count(),
+            1
+        );
+        assert!(!document.chains[0].finisher_reserved);
+        assert!(
+            reloaded
+                .settle_chain_finisher(chain.id)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn explicit_reopen_retires_a_live_chain_finisher_reservation() {
+        let mut fixture = Fixture::new();
+        fixture.definition.finishes_outcome = true;
+        let chain = fixture.create();
+        assert!(chain.finisher_reserved);
+        let outcome_id = chain.request.outcome_id;
+        // A terminal write that did not route through set_outcome_state —
+        // a handoff decision's completion, or pre-fix persisted state —
+        // leaves the chain's reservation in place until the reopen.
+        fixture
+            .service
+            .update(|state| {
+                let outcome = state
+                    .outcomes
+                    .iter_mut()
+                    .find(|entry| entry.id == outcome_id)
+                    .unwrap();
+                outcome.state = OutcomeState::Completed;
+                Ok(())
+            })
+            .unwrap();
+        fixture
+            .service
+            .set_outcome_state(None, outcome_id, OutcomeState::Open, None)
+            .unwrap();
+        assert!(!fixture.read(chain.id).finisher_reserved);
     }
 }

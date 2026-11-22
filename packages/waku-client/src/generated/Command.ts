@@ -20,17 +20,27 @@ import type { InferenceProvider } from "./InferenceProvider";
 import type { MessageAttachment } from "./MessageAttachment";
 import type { Project } from "./Project";
 import type { ProjectMapIntent } from "./ProjectMapIntent";
+import type { PromptConfiguration } from "./PromptConfiguration";
+import type { PromptPresentation } from "./PromptPresentation";
 import type { ProviderKind } from "./ProviderKind";
 import type { ProviderResumeCursor } from "./ProviderResumeCursor";
 import type { ProviderSessionForkRequest } from "./ProviderSessionForkRequest";
+import type { ProviderSwitchRequest } from "./ProviderSwitchRequest";
 import type { QueuedMessage } from "./QueuedMessage";
 import type { ResourceOperation } from "./ResourceOperation";
 import type { RouteCandidate } from "./RouteCandidate";
 import type { RouteTarget } from "./RouteTarget";
+import type { RuntimeMode } from "./RuntimeMode";
+import type { ScratchOperation } from "./ScratchOperation";
 import type { SessionDetailTail } from "./SessionDetailTail";
 import type { SessionMessageSearchScope } from "./SessionMessageSearchScope";
+import type { SidebarIntent } from "./SidebarIntent";
 import type { TaskClass } from "./TaskClass";
 import type { TaskMetadataUpdate } from "./TaskMetadataUpdate";
+import type { TaskViewPayloadInterest } from "./TaskViewPayloadInterest";
+import type { TranscriptFindRequest } from "./TranscriptFindRequest";
+import type { TranscriptPayloadRequest } from "./TranscriptPayloadRequest";
+import type { TranscriptWindowRequest } from "./TranscriptWindowRequest";
 import type { UsageWindow } from "./UsageWindow";
 import type { UserInputAnswer } from "./UserInputAnswer";
 import type { UserInputQuestion } from "./UserInputQuestion";
@@ -41,7 +51,19 @@ import type { WireframeCommentOperation } from "./WireframeCommentOperation";
 import type { WorkspaceOperation } from "./WorkspaceOperation";
 import type { JsonValue } from "./serde_json/JsonValue";
 
-export type Command = { "type": "transcribe", pcm: Array<number>, language?: string | null, keywords?: string | null, } | { "type": "getWhistleStatus" } | { "type": "downloadWhistleModel" } | { "type": "boss", operation: BossOperation, } | { "type": "employeeComposerPrompt", viewedEmployeeId: string, submissionId: string, prompt: string, delivery: AgentPromptDelivery, } | { "type": "attachSession" } | { "type": "start", options: WireDriverStartOptions, } | { "type": "prompt", prompt: string,
+export type Command = { "type": "transcribe", pcm: Array<number>, language?: string | null, keywords?: string | null, } | { "type": "getWhistleStatus" } | { "type": "downloadWhistleModel" } | { "type": "boss", operation: BossOperation, } | { "type": "employeeComposerPrompt", viewedEmployeeId: string, submissionId: string, prompt: string, delivery: AgentPromptDelivery, } | { "type": "attachSession" } | { "type": "setTaskView", detail: boolean, generation: number,
+/**
+ * `Compact` strips bulk fields from detail events — the viewer
+ * range-reads expanded payloads instead. Absent (`All`) preserves
+ * full delivery for older clients.
+ */
+payloads: TaskViewPayloadInterest, } | { "type": "start", options: WireDriverStartOptions, } | { "type": "promptWithConfiguration", configuration: PromptConfiguration, prompt: string, turnId?: string | null, messageId?: string | null, hidden?: boolean, attachments?: Array<MessageAttachment>, presentation?: PromptPresentation | null, } | { "type": "prompt", prompt: string,
+/**
+ * Permission mode required by this turn, including hidden Resume
+ * prompts. A stale runtime must be rejected before accepting input.
+ * Older clients omit this field.
+ */
+runtimeMode?: RuntimeMode | null,
 /**
  * The ids the submitting client already gave this turn and its user
  * message. The daemon republishes them with the submission so every
@@ -73,14 +95,14 @@ hidden?: boolean,
  * rotation or acceptance, so a lost provider acknowledgement cannot
  * drop the user's instruction.
  */
-queuedMessage?: QueuedMessage | null, } | { "type": "compact" } | { "type": "cancel" } | { "type": "cancelComputerUse" } | { "type": "refreshBackgroundWork" } | { "type": "stopBackgroundWork", key: JsonValue, controlId: string, } | { "type": "respond", requestId: string, optionId: string, } | { "type": "respondUserInput", requestId: string, answers: Array<UserInputAnswer>, } | { "type": "clarifyUserInput", requestId: string, content: string, } | { "type": "cancelUserInput", requestId: string, } | { "type": "goal", operation: GoalOperation, } | { "type": "claimManagedGoalTurn", goalId: string, turnId: string, } | { "type": "runComputerTool", request: WireComputerToolRequest, } | { "type": "rejectComputerTool", request: WireComputerToolRequest, reason: string, } | { "type": "applyOptions", options: WireSessionOptions, } | { "type": "rollback", turns: number, } | { "type": "fork", turnsToRemove: number, } | { "type": "getSettings" } | { "type": "updateSettings", settings: DaemonSettings, } | { "type": "getDaemonStats" } | { "type": "setDaemonExposure", exposure: DaemonExposure | null, } | { "type": "upsertCustomCommand", command: CustomCommand, } | { "type": "removeCustomCommand", id?: string | null, name?: string | null, } | { "type": "listCustomCommands" } | { "type": "probeProvider", provider: ProviderKind, binaryOverride: string | null, discoverModels: boolean, probeVersion: boolean, } | { "type": "sandboxSignIn", provider: ProviderKind, } | { "type": "sandboxAuthStatus", provider: ProviderKind, } | { "type": "fetchPlanUsage", provider: ProviderKind, binaryOverride: string | null, cliVersion: string | null, } | { "type": "consumeCodexResetCredit", redeemRequestId: string, } | { "type": "probeComputerPermissions", prompt: boolean, } | { "type": "loadUsageHistory", window: UsageWindow, projectRoots: Array<string>, } | { "type": "loadSkills", projects: Array<[string, string]>, } | { "type": "setSkillsEnabled", dirs: Array<string>, enabled: boolean, } | { "type": "trashSkills", dirs: Array<string>, } | { "type": "loadTaskState" } | { "type": "updateTaskMetadata", updates: Array<TaskMetadataUpdate>, } | { "type": "saveTaskState", projects: Array<Project>, liveSessionIds: Array<string>, sessions: Array<AgentSession>,
+queuedMessage?: QueuedMessage | null, } | { "type": "compact" } | { "type": "cancel" } | { "type": "cancelComputerUse" } | { "type": "refreshBackgroundWork" } | { "type": "stopBackgroundWork", key: JsonValue, controlId: string, } | { "type": "respond", requestId: string, optionId: string, } | { "type": "respondUserInput", requestId: string, answers: Array<UserInputAnswer>, } | { "type": "clarifyUserInput", requestId: string, content: string, } | { "type": "cancelUserInput", requestId: string, } | { "type": "goal", operation: GoalOperation, } | { "type": "claimManagedGoalTurn", goalId: string, turnId: string, } | { "type": "runComputerTool", request: WireComputerToolRequest, } | { "type": "rejectComputerTool", request: WireComputerToolRequest, reason: string, } | { "type": "applyOptions", options: WireSessionOptions, } | { "type": "rollback", turns: number, } | { "type": "fork", turnsToRemove: number, } | { "type": "getSettings" } | { "type": "updateSettings", settings: DaemonSettings, } | { "type": "getDaemonStats" } | { "type": "setDaemonExposure", exposure: DaemonExposure | null, } | { "type": "upsertCustomCommand", command: CustomCommand, } | { "type": "removeCustomCommand", id?: string | null, name?: string | null, } | { "type": "listCustomCommands" } | { "type": "probeProvider", provider: ProviderKind, binaryOverride: string | null, discoverModels: boolean, probeVersion: boolean, } | { "type": "sandboxSignIn", provider: ProviderKind, } | { "type": "sandboxAuthStatus", provider: ProviderKind, } | { "type": "fetchPlanUsage", provider: ProviderKind, binaryOverride: string | null, cliVersion: string | null, } | { "type": "consumeCodexResetCredit", redeemRequestId: string, } | { "type": "probeComputerPermissions", prompt: boolean, } | { "type": "loadUsageHistory", window: UsageWindow, projectRoots: Array<string>, } | { "type": "loadSkills", projects: Array<[string, string]>, } | { "type": "setSkillsEnabled", dirs: Array<string>, enabled: boolean, } | { "type": "trashSkills", dirs: Array<string>, } | { "type": "loadTaskState" } | { "type": "applySidebarIntent", intent: SidebarIntent, } | { "type": "updateTaskMetadata", updates: Array<TaskMetadataUpdate>, } | { "type": "switchSessionProvider", request: ProviderSwitchRequest, } | { "type": "saveTaskState", projects: Array<Project>, liveSessionIds: Array<string>, sessions: Array<AgentSession>,
 /**
  * Sessions whose `messages`/`transcript_blocks` carry only the tail
  * appended since the client's last save — spliced onto the daemon's
  * stored prefix rather than replacing it. Entries not listed here
  * are complete sessions as before.
  */
-sessionTails: Array<SessionDetailTail>, } | { "type": "removeSession" } | { "type": "removeProject", projectId: string, } | { "type": "hydrateSession", sessionId: string, } | { "type": "indexSession" } | { "type": "searchSessionMessages", query: string, limit: number,
+sessionTails: Array<SessionDetailTail>, } | { "type": "removeSession" } | { "type": "removeProject", projectId: string, } | { "type": "refreshSessionHistory" } | { "type": "hydrateSession", sessionId: string, } | { "type": "readTranscriptWindow", request: TranscriptWindowRequest, } | { "type": "readTranscriptPayload", request: TranscriptPayloadRequest, } | { "type": "findTranscript", request: TranscriptFindRequest, } | { "type": "indexSession" } | { "type": "searchSessionMessages", query: string, limit: number,
 /**
  * Which sessions the search scans; absent means active tasks, so
  * pre-scope clients keep their palette behavior.
@@ -173,7 +195,7 @@ taskId?: string | null,
  * daemon-known tasks. `provider` disambiguates when more than one
  * task carries the id.
  */
-threadId?: string | null, provider?: ProviderKind | null, prompt: string, delivery: AgentPromptDelivery, } | { "type": "agentWireframe", path: string, } | { "type": "wireframeComments", path: string, document: string | null, revision: string | null, operation: WireframeCommentOperation, } | { "type": "agentRenameSelf", title: string, } | { "type": "agentProposeArchive",
+threadId?: string | null, provider?: ProviderKind | null, prompt: string, delivery: AgentPromptDelivery, } | { "type": "agentWireframe", path: string, } | { "type": "wireframeComments", path: string, document: string | null, revision: string | null, operation: WireframeCommentOperation, } | { "type": "agentRenameSelf", title: string, } | { "type": "agentScratch", operation: ScratchOperation, } | { "type": "agentProposeArchive",
 /**
  * Waku task ids to archive. Each must name a started, unarchived
  * task in the caller's own project; side chats leave with their
@@ -200,4 +222,4 @@ threadId?: string | null, provider?: ProviderKind | null,
  * number — `items` each carry it, so a full read names the turn to
  * revisit.
  */
-turn?: number | null, } | { "type": "agentSearchSessions", query: string, lastTurns?: number | null, } | { "type": "agentHistorySearch", query: string, project?: string | null, person?: string | null, after?: string | null, before?: string | null, kind?: HistorySourceKind | null, limit?: number | null, offset: number, } | { "type": "agentProjectMap", query: string, path?: string | null, maxTokens?: number | null, intent: ProjectMapIntent, anchors: Array<string>, knownPaths: string[], } | { "type": "agentAsk", questions: Array<UserInputQuestion>, } | { "type": "agentListModels" } | { "type": "agentComputerUse", code: string, timeoutMs: number | null, title: string | null, } | { "type": "agentComputerUseRun", request: ComputerUseRunRequest, } | { "type": "agentComputerUseReset" } | { "type": "agentResources", operation: ResourceOperation, } | { "type": "shareProjectWithFriend", nodeId: string, projectPath: string, } | { "type": "unshareProjectWithFriend", nodeId: string, originUrl: string, } | { "type": "enableFriendSync", nodeId: string, originUrl: string, } | { "type": "disableFriendSync", linkId: string, } | { "type": "setFriendSyncConfig", linkId: string, autoPush: boolean, enabledBranches: Array<string>, } | { "type": "friendSyncNow", linkId: string, branch: string, } | { "type": "friendSyncAlertAction", alertId: string, action: FriendSyncAlertAction, } | { "type": "getFriendSyncBranches", linkId: string, } | { "type": "setFriendSessionSharing", nodeId: string, originUrl: string, enabled: boolean, } | { "type": "getFriendSessions", nodeId: string, originUrl: string, } | { "type": "watchFriendSession", nodeId: string, originUrl: string, sessionId: string, } | { "type": "unwatchFriendSession", sessionId: string, } | { "type": "getPairing" } | { "type": "respondPairRequest", requestId: string, accept: boolean, } | { "type": "revokePairedClient", clientId: string, };
+turn?: number | null, } | { "type": "agentSearchSessions", query: string, lastTurns?: number | null, } | { "type": "agentHistorySearch", query: string, project?: string | null, person?: string | null, after?: string | null, before?: string | null, kind?: HistorySourceKind | null, limit?: number | null, offset: number, } | { "type": "agentProjectMap", query: string, path?: string | null, maxTokens?: number | null, intent: ProjectMapIntent, anchors: Array<string>, knownPaths: string[], } | { "type": "agentAsk", questions: Array<UserInputQuestion>, } | { "type": "agentListModels" } | { "type": "agentComputerUse", code: string, timeoutMs: number | null, title: string | null, } | { "type": "agentComputerUseRun", request: ComputerUseRunRequest, } | { "type": "agentComputerUseReset" } | { "type": "agentResources", operation: ResourceOperation, } | { "type": "getProjectSyncInfo", projectPath: string, } | { "type": "pushProjectSync", projectPath: string, originUrl: string, branch: string, } | { "type": "pullProjectSync", originUrl: string, branch: string, checkOnly: boolean, } | { "type": "syncProjectWithFriend", nodeId: string, projectPath: string, } | { "type": "shareProjectWithFriend", nodeId: string, projectPath: string, } | { "type": "unshareProjectWithFriend", nodeId: string, originUrl: string, } | { "type": "enableFriendSync", nodeId: string, originUrl: string, } | { "type": "disableFriendSync", linkId: string, } | { "type": "setFriendSyncConfig", linkId: string, autoPush: boolean, enabledBranches: Array<string>, } | { "type": "friendSyncNow", linkId: string, branch: string, } | { "type": "friendSyncAlertAction", alertId: string, action: FriendSyncAlertAction, } | { "type": "getFriendSyncBranches", linkId: string, } | { "type": "setFriendSessionSharing", nodeId: string, originUrl: string, enabled: boolean, } | { "type": "getFriendSessions", nodeId: string, originUrl: string, } | { "type": "watchFriendSession", nodeId: string, originUrl: string, sessionId: string, } | { "type": "unwatchFriendSession", sessionId: string, } | { "type": "getPairing" } | { "type": "respondPairRequest", requestId: string, accept: boolean, } | { "type": "revokePairedClient", clientId: string, };

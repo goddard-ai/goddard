@@ -39,9 +39,10 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 use waku_protocol::eval::{EvalAnswer, EvalQuestion, Evaluation};
 use waku_protocol::model::{
-    ActivityItem, AgentSession, Message, MessageRole, ProviderKind, SuspendedProviderSession,
-    TranscriptBoundary, TranscriptNotice, truncate_chars,
+    ActivityItem, AgentSession, MessageRole, ProviderKind, SessionOptions, TranscriptBoundary,
+    truncate_chars,
 };
+use waku_protocol::{Command, PromptConfiguration, ProviderSwitchRequest, ResponsePayload};
 
 use super::*;
 
@@ -358,25 +359,6 @@ fn compaction_eval(items: &[ContextItem]) -> (Value, BTreeMap<String, EvalQuesti
     }
 }
 
-/// What the switch produces once the daemon work finishes: the envelope to
-/// prepend to the next prompt, and how the target's provider-side state was
-/// reached.
-struct SwitchOutcome {
-    envelope: String,
-    /// The target had a suspended session whose cursor still resolved — it
-    /// resumes and receives the delta. `false` means a fresh session gets
-    /// the full extract; with `was_suspended` set, that is a restart.
-    resumed: bool,
-    was_suspended: bool,
-}
-
-impl SwitchOutcome {
-    /// A suspended session that could not resume: the marker says so.
-    fn restarted(&self) -> bool {
-        !self.resumed && self.was_suspended
-    }
-}
-
 /// A `Noul` response that answered so few questions its selections cannot be
 /// trusted — the handoff degrades rather than shipping an arbitrary subset.
 fn answers_too_thin(asked: usize, evaluation: &Evaluation) -> bool {
@@ -605,46 +587,90 @@ impl Waku {
         let eval_available = daemon.settings().eval_ready();
         let client = daemon.client();
         let cli_available = client.agent_cli_available();
-        let suspended = session
-            .suspended_provider_sessions
-            .iter()
-            .find(|entry| entry.provider == target)
-            .cloned();
-        // A suspended session is resumed only when its provider-side record
-        // still loads; the probe is the resumability check.
-        let key = self.daemons.session_owner(session_id);
+        let from = session.provider;
+        let outgoing_runtime = self
+            .runtimes
+            .get(&session_id)
+            .and_then(|runtime| runtime.driver.daemon_runtime_id());
         let cwd = self
             .workspace_path_for_session(session)
             .map(Path::to_path_buf)
             .unwrap_or_default();
-        let history_probe = suspended.clone().map(|entry| {
-            self.store
-                .provider_session_history(key, entry.cursor, cwd, None)
-        });
-        let items = context_items(session);
-        let from = session.provider;
-        let was_suspended = suspended.is_some();
+        let pick = dialog.pick;
+        let (model, reasoning_effort, service_tier, context_window) = match pick.model {
+            Some(model) => {
+                let (_, _, window) = self.state.model_traits_for(target, &model);
+                (
+                    Some(model),
+                    pick.effort,
+                    pick.fast.then(|| "fast".to_owned()),
+                    window,
+                )
+            }
+            None => match self.mru_model_for(target) {
+                Some(model) => {
+                    let (effort, tier, window) = self.state.model_traits_for(target, &model);
+                    (Some(model), effort, tier, window)
+                }
+                None => (None, None, None, None),
+            },
+        };
+        let configuration = PromptConfiguration {
+            provider: target,
+            options: SessionOptions {
+                mode: session.runtime_mode,
+                model,
+                reasoning_effort,
+                service_tier,
+                context_window,
+            },
+        };
         self.provider_switch_in_flight.insert(session_id);
         self.show_toast(tr!(
             "provider_switch.working",
             provider = target.display_name()
         ));
         cx.notify();
-        let pick = dialog.pick;
         cx.spawn(async move |waku, cx| {
             let outcome = cx
                 .background_executor()
                 .spawn(async move {
-                    let resumed = match history_probe {
-                        Some(probe) => probe().is_ok(),
-                        None => false,
+                    // A visible transcript may be a slice with no resume state.
+                    // Prepare from the daemon's complete, detached snapshot.
+                    let ResponsePayload::Session {
+                        session: Some(source),
+                    } = client.request(
+                        session_id,
+                        Uuid::nil(),
+                        Command::HydrateSession { session_id },
+                    )?
+                    else {
+                        anyhow::bail!("the task is unavailable");
                     };
-                    let boundary = if resumed {
-                        suspended.map(|entry| entry.boundary).unwrap_or_default()
-                    } else {
-                        TranscriptBoundary::default()
-                    };
-                    let segment: Vec<ContextItem> = items
+                    anyhow::ensure!(
+                        source.provider == from && !source.is_busy(),
+                        "the task changed while the provider handoff was prepared"
+                    );
+                    let suspended = source.suspended_provider_sessions.iter().find(|entry| {
+                        entry.provider == target && entry.cursor.provider() == target
+                    });
+                    let resume = suspended.filter(|entry| {
+                        matches!(
+                            client.request(
+                                Uuid::nil(),
+                                Uuid::nil(),
+                                Command::LoadProviderSession {
+                                    cursor: entry.cursor.clone(),
+                                    cwd,
+                                    updated_at: None,
+                                },
+                            ),
+                            Ok(ResponsePayload::ProviderSessionHistory { .. }),
+                        )
+                    });
+                    let resumed = resume.is_some();
+                    let boundary = resume.map(|entry| entry.boundary).unwrap_or_default();
+                    let segment: Vec<ContextItem> = context_items(&source)
                         .into_iter()
                         .filter(|item| item.in_segment(boundary))
                         .collect();
@@ -726,145 +752,110 @@ impl Waku {
                     } else {
                         assemble_index_envelope(&segment, false, from, evaluation.as_ref())
                     };
-                    anyhow::Ok(SwitchOutcome {
-                        envelope,
-                        resumed,
-                        was_suspended,
-                    })
+                    let request = ProviderSwitchRequest {
+                        source: from,
+                        history_generation: source.history_generation,
+                        boundary: source.transcript_boundary(),
+                        configuration,
+                        resume_cursor: resume.map(|entry| entry.cursor.clone()),
+                        handoff: envelope,
+                    };
+                    match client.request(
+                        session_id,
+                        Uuid::nil(),
+                        Command::SwitchSessionProvider { request },
+                    )? {
+                        ResponsePayload::Session {
+                            session: Some(session),
+                        } => Ok(session),
+                        _ => {
+                            anyhow::bail!("the daemon returned an invalid provider switch response")
+                        }
+                    }
                 })
                 .await;
             let _ = waku.update(cx, move |waku, cx| {
-                waku.finish_provider_switch(session_id, pick, outcome, cx);
+                waku.finish_provider_switch(session_id, outgoing_runtime, outcome, cx);
             });
         })
         .detach();
     }
 
-    /// Apply a completed switch: suspend the old provider's conversation,
-    /// point the session at the target, stage the envelope for the next
-    /// prompt, and mark the transcript. On failure nothing has moved.
     fn finish_provider_switch(
         &mut self,
         session_id: Uuid,
-        pick: ProviderSwitchPick,
-        outcome: anyhow::Result<SwitchOutcome>,
+        outgoing_runtime: Option<Uuid>,
+        outcome: anyhow::Result<AgentSession>,
         cx: &mut Context<Self>,
     ) {
         self.provider_switch_in_flight.remove(&session_id);
-        let outcome = match outcome {
-            Ok(outcome) => outcome,
+        let switched = match outcome {
+            Ok(session) => session,
             Err(error) => {
                 self.show_toast(tr!("provider_switch.failed", error = format!("{error:#}")));
                 cx.notify();
                 return;
             }
         };
-        // Resolve the model before borrowing the session mutably: the pick's
-        // model when the row named one, else the target provider's MRU, else
-        // `None` and `session_options` resolves the provider's default.
-        let (model, effort, service_tier, context_window) = match pick.model.clone() {
-            Some(model) => {
-                let (_, _, window) = self.state.model_traits_for(pick.provider, &model);
-                (
-                    Some(model),
-                    pick.effort.clone(),
-                    pick.fast.then(|| "fast".to_owned()),
-                    window,
-                )
-            }
-            None => match self.mru_model_for(pick.provider) {
-                Some(model) => {
-                    let (effort, tier, window) = self.state.model_traits_for(pick.provider, &model);
-                    (Some(model), effort, tier, window)
-                }
-                None => (None, None, None, None),
-            },
-        };
         let Some(session) = self.state.session_mut(session_id) else {
             return;
         };
-        if session.provider == pick.provider {
+        if session.metadata_revision > switched.metadata_revision
+            || session.history_generation != switched.history_generation
+            || session.is_busy()
+        {
+            self.stale_task_details.insert(session_id);
+            self.defer_queue_drain(session_id);
+            self.ensure_session_loaded(session_id, cx);
             return;
         }
-        let from = session.provider;
-        // Suspend the provider being left — only a live provider-side
-        // conversation is worth recording. The boundary precedes the marker
-        // below so the marker lands in the delta a return visit compacts.
-        if let Some(cursor) = session.provider_cursor.take() {
-            let boundary = session.transcript_boundary();
-            match session
-                .suspended_provider_sessions
-                .iter_mut()
-                .find(|entry| entry.provider == from)
-            {
-                Some(entry) => {
-                    entry.cursor = cursor;
-                    entry.boundary = boundary;
-                }
-                None => session
-                    .suspended_provider_sessions
-                    .push(SuspendedProviderSession {
-                        provider: from,
-                        cursor,
-                        boundary,
-                    }),
-            }
-        }
-        // Adopt the target's suspended conversation when it resumed; a
-        // restart drops the stale cursor entirely.
-        let resumed_cursor = if outcome.resumed {
-            let position = session
-                .suspended_provider_sessions
-                .iter()
-                .position(|entry| entry.provider == pick.provider);
-            position.map(|index| session.suspended_provider_sessions.remove(index).cursor)
-        } else {
-            session
-                .suspended_provider_sessions
-                .retain(|entry| entry.provider != pick.provider);
-            None
-        };
-        session.preserve_title_for_provider_switch();
-        session.provider = pick.provider;
-        session.provider_cursor = resumed_cursor;
+        waku_protocol::task_metadata::TaskMetadataEdit::capture(
+            waku_protocol::task_metadata::TaskMetadataField::Configuration,
+            &switched,
+        )
+        .apply(session);
+        session.metadata_revision = switched.metadata_revision;
+        session.title = switched.title;
+        session.auto_title = switched.auto_title;
+        session.auto_title_is_prompt = switched.auto_title_is_prompt;
+        session.provider_cursor = switched.provider_cursor;
+        session.antigravity_acp = switched.antigravity_acp;
+        session.suspended_provider_sessions = switched.suspended_provider_sessions;
+        session.pending_provider_context = switched.pending_provider_context;
         session.provider_session_id = None;
-        session.model = model;
         session.pending_model_switch = None;
-        session.reasoning_effort = effort;
-        session.service_tier = service_tier;
-        session.context_window = context_window;
         session.agent_preset = None;
-        session.auto_route = false;
-        session.route_decision = None;
-        // Clear process-specific state; the goal belongs to the task and survives.
         session.available_commands.clear();
         session.context_usage = None;
-        let restarted = outcome.restarted();
-        session.pending_provider_context = Some(outcome.envelope);
-        let mut marker = Message::new(
-            MessageRole::System,
-            if restarted {
-                tr!(
-                    "transcript.provider_switched_restarted",
-                    from = from.display_name(),
-                    to = pick.provider.display_name()
-                )
-            } else {
-                tr!(
-                    "transcript.provider_switched",
-                    from = from.display_name(),
-                    to = pick.provider.display_name()
-                )
-            },
-        );
-        marker.notice = Some(TranscriptNotice::ProviderSwitched {
-            from,
-            to: pick.provider,
-            restarted,
-        });
-        session.messages.push(marker);
-        session.updated_at = unix_time();
-        self.reset_session_runtime(session_id);
+        session.runtime_event_cursor = None;
+        session.updated_at = session.updated_at.max(switched.updated_at);
+        for message in &mut session.queued_messages {
+            if !message.is_agent_owned() {
+                message.configuration = None;
+            }
+        }
+        for marker in switched.messages {
+            if !session
+                .messages
+                .iter()
+                .any(|message| message.id == marker.id)
+            {
+                session.messages.push(marker);
+            }
+        }
+        let provider = session.provider;
+        // The daemon retired the old runtime before acknowledging the switch.
+        if let Some(outgoing_runtime) = outgoing_runtime
+            && self
+                .runtimes
+                .get(&session_id)
+                .is_some_and(|runtime| runtime.driver.daemon_runtime_id() == Some(outgoing_runtime))
+        {
+            self.runtimes.remove(&session_id);
+            self.mark_background_work_lost(session_id);
+            self.project_switch_reset_pending.remove(&session_id);
+            self.cancel_drains.remove(&session_id);
+        }
         self.refresh_composer_sources(cx);
         // A switch is a model choice too — mirror the resolved combo into
         // the last-used defaults like `choose_model` does.
@@ -875,7 +866,7 @@ impl Waku {
             .find(|session| session.id == session_id)
             && let Some(model) = session.model.clone()
         {
-            self.state.last_provider = pick.provider;
+            self.state.last_provider = provider;
             self.state.last_auto_route = false;
             self.state.last_model = Some(model);
             self.state

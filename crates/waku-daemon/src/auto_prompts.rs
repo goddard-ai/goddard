@@ -72,6 +72,12 @@ impl AutoPromptService {
         *self.events.lock() = Some(events);
     }
 
+    /// The live backend for settle hooks that hold no `WakuBackend` —
+    /// `None` until `start` binds it.
+    pub fn backend(&self) -> Option<Arc<WakuBackend>> {
+        self.backend.lock().upgrade()
+    }
+
     pub fn note_turn_finished(&self, session_id: Uuid, success: bool) {
         if success {
             self.eligible.lock().insert(session_id);
@@ -125,6 +131,9 @@ impl AutoPromptService {
             let Some(backend) = self.backend.lock().upgrade() else {
                 continue;
             };
+            let Ok(admission) = backend.idle_shutdown.enter() else {
+                continue;
+            };
             let settings = backend.auto_prompt_settings();
             let rules: Vec<_> = settings
                 .auto_prompts
@@ -140,6 +149,7 @@ impl AutoPromptService {
             let _ = std::thread::Builder::new()
                 .name(format!("goddard-auto-prompt-{}", session.id))
                 .spawn(move || {
+                    let _admission = admission;
                     if let Err(error) = service.claim(session.id, turn_id) {
                         eprintln!("could not claim auto prompt turn {turn_id}: {error:#}");
                         return;

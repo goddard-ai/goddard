@@ -119,32 +119,33 @@ impl Waku {
     }
 
     pub(super) fn open_commit_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.commit_operation.is_some() {
-            return;
-        }
-        let Some((workspace, provider, model, reasoning_effort, session_id)) =
-            self.selected_session().and_then(|session| {
-                Some((
-                    self.workspace_path_for_session(session)?.to_path_buf(),
-                    session.provider,
-                    self.model_for_session(session).map(str::to_owned),
-                    session.reasoning_effort.clone(),
-                    session.id,
-                ))
-            })
-        else {
+        let Some(workspace) = self.selected_workspace_path().map(Path::to_path_buf) else {
             self.show_toast(tr!("commit.no_task"));
             cx.notify();
             return;
         };
+        self.open_commit_dialog_in(workspace, window, cx);
+    }
 
+    pub(super) fn open_commit_dialog_in(
+        &mut self,
+        workspace: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.commit_operation.is_some() || self.git_panel_operation.is_some() {
+            return;
+        }
         let invocation = self
-            .provider_binary_for_session(session_id, provider)
-            .map(|binary| crate::git_commit::AgentInvocation {
-                provider,
-                binary,
-                model,
-                reasoning_effort,
+            .selected_session()
+            .filter(|session| self.workspace_path_for_session(session) == Some(workspace.as_path()))
+            .and_then(|session| {
+                Some(crate::git_commit::AgentInvocation {
+                    provider: session.provider,
+                    binary: self.provider_binary_for_session(session.id, session.provider)?,
+                    model: self.model_for_session(session).map(str::to_owned),
+                    reasoning_effort: session.reasoning_effort.clone(),
+                })
             });
         let cached_branch = self
             .visible_branch_snapshot

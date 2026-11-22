@@ -36,3 +36,27 @@
   pump, the pulse clock (`crates/waku-ui/src/ui/motion.rs`), veils, overlay scrollbars, pane
   caching, or anything else a streaming frame reaches; it also records the
   counter-based measurement playbook that actually finds regressions.
+
+## Daemon request timing
+
+Read `requestPools` in the daemon's `daemon-stats.jsonl` to investigate slow
+requests from normal use. Samples are written about once a minute. Look at
+`workers`, `queued`, and `oldestWaitingMs` to identify a saturated pool. The
+oldest wait includes requests still trying to enter the execution queue.
+
+- `active` lists requests holding workers, with the current phase and elapsed
+  time when a phase is instrumented.
+- `recentSlow` keeps up to 16 records per pool for admission failures, panics,
+  and requests taking at least 250 ms. `admissionMs` measures time to queue
+  entry, `queueMs` measures time to worker pickup, and `workerMs` measures time
+  holding the worker. Correlate records across samples with boot, pool, and
+  sequence. Nested phase times can overlap.
+- Resource operations have their own labels, such as `agentResources:status`.
+  Broker timers cover authority lock wait, device observation, ledger reads,
+  and durable writes. Settings and task-view timers expose their lock waits and
+  persistence or hydration phases.
+
+The timing records contain operation names, times, and outcome codes. They
+carry no request payloads or error text. A `probeDeferred` sample has fresh
+request counters alongside older memory and session data when a daemon lock
+was busy.

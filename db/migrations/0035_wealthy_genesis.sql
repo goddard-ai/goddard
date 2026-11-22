@@ -1,0 +1,1 @@
+ALTER TABLE `sessions` ADD `history_generation` integer DEFAULT 0 NOT NULL;

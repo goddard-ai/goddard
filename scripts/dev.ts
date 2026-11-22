@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { $ } from "bun";
+import { requestIdleShutdown } from "./dev-idle-shutdown";
 import { stripVTControlCharacters } from "node:util";
 import { parseCargoProgress, readBuildLines } from "./dev-build-output";
 import { DevTerminal } from "./dev-terminal";
@@ -49,7 +50,7 @@ const devArgs = Bun.argv.slice(2);
 const serveMode = devArgs.includes("--serve");
 // --wait restores the old block-on-build startup: the app only opens once the
 // initial build finishes. --no-build launches the last completed build and
-// skips the initial build entirely (watchers still rebuild on change).
+// never compiles — it exits when no completed build exists.
 const waitForBuild = devArgs.includes("--wait");
 const noBuild = devArgs.includes("--no-build");
 if (serveMode && !isMacOS) {
@@ -225,7 +226,6 @@ const daemonPortBase = 34_123;
 const daemonPortScanLimit = 20;
 const daemonReadyTimeoutMs = 15_000;
 const daemonShutdownTimeoutMs = 1_000;
-const daemonIdlePollMs = 2_000;
 const liveSessionStatuses = new Set([
   "connecting",
   "working",
@@ -261,14 +261,12 @@ let serve: DevServe | undefined;
 let daemonBind: string | undefined;
 let daemonAddress: string | undefined;
 let daemonRestartPending = false;
-let daemonRestartWhenIdle = false;
 let daemonRestarting = false;
 let protocolDirty = false;
 let forceDaemonRestart = false;
 let relaunchAfterBuild = false;
 let daemonBuildDirty = false;
 let controlClient: WakuClient | undefined;
-let lastDeferredLiveCount: number | undefined;
 let lastDaemonSpawnAt = 0;
 let commandInput: readline.Interface | undefined;
 let stopping = false;
@@ -1098,6 +1096,7 @@ function watchDaemonExit(child: ReturnType<typeof Bun.spawn>): void {
     daemon = undefined;
     runningDaemonLane = undefined;
     clearDaemonConnection();
+    if (idleActivationInFlight || daemonRestarting) return;
     console.error(`[goddard-dev] Daemon exited unexpectedly (${code}).`);
     if (Date.now() - lastDaemonSpawnAt > 30_000) {
       await restartDaemon("unexpected exit");
@@ -1243,12 +1242,13 @@ async function liveSessionCount(): Promise<number | undefined> {
       liveSessionStatuses.has(session.status),
     );
     let live = 0;
-    for (const session of candidates.slice(0, 50)) {
+    for (const session of candidates) {
       const attach = await controlClient.request(
         { type: "attachSession" },
         session.id,
       );
-      if (attach.type === "sessionRuntime" && attach.runtimeId !== null) {
+      if (attach.type !== "sessionRuntime") return undefined;
+      if (attach.runtimeId !== null) {
         live += 1;
       }
     }
@@ -1262,7 +1262,7 @@ async function restartDaemon(
   reason: string,
   preserveProtocolDirty = false,
 ): Promise<boolean> {
-  if (daemonRestarting || stopping) return false;
+  if (daemonRestarting || stopping || idleActivationInFlight) return false;
   if (daemonBind === undefined) {
     if (daemonAddress === undefined) {
       // The daemon never came up — e.g. a serve run whose initial build
@@ -1301,7 +1301,6 @@ async function restartDaemon(
     try {
       await spawnDaemon(daemonBind, preserveProtocolDirty);
       daemonRestartPending = false;
-      daemonRestartWhenIdle = false;
       console.log(`[goddard-dev] Daemon restarted on ${daemonAddress}.`);
       return (
         process.env.GODDARD_DAEMON_PATH === undefined &&
@@ -1317,38 +1316,76 @@ async function restartDaemon(
   }
 }
 
+let idleActivationArmed = false;
+let idleActivationInFlight = false;
+let idlePollRunning = false;
+let idleActivationGeneration = 0;
+
 function armDaemonRestartWhenIdle(): void {
   if (!daemonRestartPending) {
     console.log("[goddard-dev] No pending daemon restart.");
     return;
   }
-  if (daemonRestartWhenIdle) return;
-  daemonRestartWhenIdle = true;
-  lastDeferredLiveCount = undefined;
-  console.log(
-    "[goddard-dev] Daemon restart armed; it fires once no live sessions remain.",
-  );
-  void pollForDaemonIdle();
+  idleActivationGeneration += 1;
+  if (idleActivationArmed) {
+    idleActivationArmed = false;
+    console.log("[goddard-dev] Idle activation cancelled if shutdown has not committed.");
+    return;
+  }
+  idleActivationArmed = true;
+  console.log("[goddard-dev] Idle activation armed; requires daemon-owned admission fencing and all-work quiescence.");
+  if (!idlePollRunning) void pollForDaemonIdle();
 }
 
 async function pollForDaemonIdle(): Promise<void> {
-  while (daemonRestartWhenIdle && daemonRestartPending && !stopping) {
-    if (!building && !daemonRestarting) {
-      const live = await liveSessionCount();
-      if (live === 0) {
-        await restartDaemon("sessions idle");
-        return;
+  idlePollRunning = true;
+  try {
+    while (idleActivationArmed && daemonRestartPending && !stopping) {
+      const revision = daemonChangeRevision;
+      const generation = idleActivationGeneration;
+      const ready = () =>
+        idleActivationArmed && generation === idleActivationGeneration &&
+        !building && queuedBuild === undefined && debouncedBuild === undefined &&
+        !daemonRestarting && !stopping && daemonRestartPending &&
+        daemonChangeRevision === revision;
+      if (ready() && daemonAddress && daemon && daemonBind) {
+        const child = daemon;
+        idleActivationInFlight = true;
+        try {
+          const committed = await requestIdleShutdown(daemonAddress, daemonToken, ready);
+          if (committed || child.exitCode !== null) {
+            daemonRestarting = true;
+            // Conditional shutdown is the only stop authority. Never escalate
+            // to kill if shutdown is slow or its acknowledgement was lost.
+            await child.exited;
+            if (stopping) return;
+            runningDaemonLane = undefined;
+            clearDaemonConnection();
+            await spawnDaemon(daemonBind);
+            daemonRestartPending = false;
+            if (relaunchAfterBuild && !stopping) {
+              relaunchAfterBuild = false;
+              await relaunchApp();
+            }
+            console.log(committed
+              ? "[goddard-dev] Daemon activated after fenced idle shutdown."
+              : "[goddard-dev] Daemon exited during the idle attempt; replacement started after confirmed exit.");
+            return;
+          }
+        } finally {
+          daemonRestarting = false;
+          idleActivationInFlight = false;
+          void drainBuildQueue();
+        }
       }
-      if (live !== undefined && live !== lastDeferredLiveCount) {
-        console.log(
-          `[goddard-dev] ${live} live session${live === 1 ? "" : "s"} still running.`,
-        );
-        lastDeferredLiveCount = live;
-      }
+      await Bun.sleep(2_000);
     }
-    await Bun.sleep(daemonIdlePollMs);
+  } catch (error) {
+    console.error("[goddard-dev] Idle activation failed; no forced shutdown:", error);
+  } finally {
+    idlePollRunning = false;
+    idleActivationArmed = false;
   }
-  daemonRestartWhenIdle = false;
 }
 
 async function commandStdout(command: string[]): Promise<string | undefined> {
@@ -1419,7 +1456,7 @@ function printShortcuts(): void {
       ),
       shortcutLine("b", "restart the daemon, then relaunch the app"),
       shortcutLine("d", "restart the daemon now"),
-      shortcutLine("D", "restart the daemon once sessions go idle"),
+      shortcutLine("D", "activate once the daemon grants an idle shutdown fence"),
       shortcutLine("m", "show mobile daemon address and token"),
       shortcutLine("e", "expand build output (toggle live, replay after)"),
       shortcutLine("q", "quit the watcher, app, and daemon"),
@@ -1762,7 +1799,7 @@ function targetForChange(
 }
 
 function scheduleBuild(target: BuildTarget): void {
-  if (stopping) return;
+  if (noBuild || stopping) return;
   daemonChangeRevision += 1;
   if (target === "app") appChangeRevision += 1;
   debouncedBuild = mergedTarget(debouncedBuild, target);
@@ -1823,7 +1860,7 @@ function startWatchers(): void {
 }
 
 async function drainBuildQueue(): Promise<void> {
-  if (building || stopping) return;
+  if (building || stopping || idleActivationInFlight) return;
   building = true;
   try {
     while (queuedBuild !== undefined && !stopping) {
@@ -1848,7 +1885,6 @@ async function drainBuildQueue(): Promise<void> {
         try {
           await ensureDaemon();
           daemonRestartPending = false;
-          daemonRestartWhenIdle = false;
         } catch (error) {
           console.error("[goddard-dev] Could not start the daemon:", error);
         }
@@ -1865,16 +1901,13 @@ async function drainBuildQueue(): Promise<void> {
                 ? "; no live sessions"
                 : `; ${live} live session${live === 1 ? "" : "s"} would be interrupted`;
           console.log(
-            `[goddard-dev] Daemon rebuilt${detail} — press d + enter to restart, D + enter once sessions go idle.`,
+            `[goddard-dev] Daemon rebuilt${detail} — press d + enter to restart, D + enter for fenced idle activation.`,
           );
-          // Non-interactive runs cannot press 'd'; keep the previous
-          // rebuild-and-swap behavior so the daemon never goes stale.
+          // Automatic replacement requires the same fence as uppercase D.
           if (!interactive) {
-            await restartDaemon("non-interactive rebuild");
+            if (!idleActivationArmed) armDaemonRestartWhenIdle();
           } else if (forceDaemonRestart) {
             await restartDaemon("requested");
-          } else if (daemonRestartWhenIdle && live === 0) {
-            await restartDaemon("sessions idle");
           }
           forceDaemonRestart = false;
           if (relaunchAfterBuild && !stopping) await relaunchApp();
@@ -1892,14 +1925,15 @@ async function drainBuildQueue(): Promise<void> {
         continue;
       }
 
-      // Non-interactive runs have nobody to press 'a'/'b'; keep the previous
-      // rebuild-and-relaunch behavior so neither side goes stale.
       if (!interactive) {
-        if (forceDaemonRestart || protocolDirty) {
-          await restartDaemon(
-            forceDaemonRestart ? "requested" : "protocol changed",
-          );
+        if (forceDaemonRestart) {
+          await restartDaemon("requested");
           forceDaemonRestart = false;
+        } else if (protocolDirty) {
+          daemonRestartPending = true;
+          relaunchAfterBuild = true;
+          if (!idleActivationArmed) armDaemonRestartWhenIdle();
+          continue;
         }
         await relaunchApp();
         continue;
@@ -1964,6 +1998,26 @@ async function cleanup(): Promise<void> {
 process.on("SIGINT", () => void cleanup());
 process.on("SIGTERM", () => void cleanup());
 
+if (laned) {
+  adoptAppLanes();
+}
+// What the last completed build left behind: on macOS the newest surviving
+// complete runtime lanes, elsewhere cargo's outputs at appPath/daemonPath.
+const completedAppAvailable = laned
+  ? latestLane !== undefined
+  : existsSync(appPath);
+const daemonBinaryAvailable =
+  externalDaemonAddress !== undefined ||
+  (laned ? latestLane !== undefined : existsSync(daemonPath));
+// --no-build never compiles, so it can only start when a completed build
+// exists to launch. Fail before the feed and watchers come up.
+const noBuildViable = noBuild && completedAppAvailable && daemonBinaryAvailable;
+if (noBuild && !noBuildViable) {
+  console.error(
+    "[goddard-dev] --no-build requested but there is no completed build to launch.",
+  );
+  process.exit(1);
+}
 startWatchers();
 if (serveMode) {
   try {
@@ -1979,26 +2033,7 @@ if (serveMode) {
     process.exit(1);
   }
 }
-if (laned) {
-  adoptAppLanes();
-}
-// What the last completed build left behind: on macOS the newest surviving
-// complete runtime lanes, elsewhere cargo's outputs at appPath/daemonPath.
-const completedAppAvailable = laned
-  ? latestLane !== undefined
-  : existsSync(appPath);
-const daemonBinaryAvailable =
-  externalDaemonAddress !== undefined ||
-  (laned ? latestLane !== undefined : existsSync(daemonPath));
-// --no-build only holds when there is a build to run — a first-ever checkout
-// has nothing to launch, so fall back to a normal initial build.
-const noBuildViable = noBuild && completedAppAvailable && daemonBinaryAvailable;
-if (noBuild && !noBuildViable) {
-  console.log(
-    "[goddard-dev] --no-build requested but there is no completed build to launch; building the current tree.",
-  );
-}
-const runInitialBuild = !noBuildViable;
+const runInitialBuild = !noBuild;
 building = true;
 // A previous session's completed bundle is usable during the very first
 // rebuild too. Start its daemon and accept commands while the initial build
@@ -2027,7 +2062,7 @@ if (
   console.log(
     runInitialBuild
       ? `[goddard-dev] Launching the last completed build${laneSuffix}; the fresh build continues in the background.`
-      : `[goddard-dev] --no-build: launching the last completed build${laneSuffix} and skipping the initial build.`,
+      : `[goddard-dev] --no-build: launching the last completed build${laneSuffix}; rebuilds are disabled.`,
   );
   await relaunchApp();
 } else if (runInitialBuild && interactive) {

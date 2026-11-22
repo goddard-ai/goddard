@@ -1036,6 +1036,10 @@ experiments.boss_title:
   en: Boss and employees
 experiments.boss_description:
   en: Enable the Boss assistant, employee tasks, personas, and plans. Configure sidebar grouping, avatars, and employee chat search in Settings → Boss.
+experiments.counsel_title:
+  en: Counsel
+experiments.counsel_description:
+  en: A persistent adviser chat that reviews your recent work, proposes recommendations you approve or reject, and relays accepted instructions to Boss. Requires the Boss experiment.
 experiments.employee_search_window:
   en: Employee chat search
 experiments.employee_search_off:
@@ -1438,6 +1442,10 @@ jev.auto_routing_default:
   en: Force as default model
 jev.auto_routing_disabled:
   en: Disabled
+jev.title_rewrites_title:
+  en: Automatic title rewrites
+jev.title_rewrites_description:
+  en: Let Jev review automatic task titles after completed turns and request clearer titles when needed. Custom titles are preserved. Provider title updates work independently of this setting.
 jev.status_markers_title:
   en: Turn status markers
 jev.status_markers_description:
@@ -2070,6 +2078,10 @@ common.retry:
 common.creating:
   en: Creating…
 
+settings.recent_transcript_limit:
+  en: Keep recent task transcripts in memory
+settings.recent_transcript_limit_description:
+  en: "Reopen recent tasks faster and keep their running transcripts updated. Includes the current task; 0 disables recent-task retention. Higher values use more memory."
 settings.local_by_default:
   en: Local by default
 settings.local_by_default_description:
@@ -2324,6 +2336,14 @@ archive.confirm_description_busy:
   en: A turn is still in progress. Archiving stops it; unarchiving restores the task.
 archive.confirm_description_busy_worktree:
   en: A turn is still in progress and its checkout has work in progress. Archiving stops the turn, snapshots the checkout, and removes the worktree; unarchiving restores it.
+archive.clean_and_archive:
+  en: Clean worktree & archive
+archive.agent_clean_and_archive:
+  en: Ask agent to clean up & archive
+archive.clean_warning:
+  en: "Clean worktree & archive discards uncommitted changes. Unarchiving restores only committed work."
+archive.clean_failed:
+  en: Could not clean the archived worktree; its files were left on disk.
 archive.uncommitted:
   en: "%{count} uncommitted files"
 archive.unpushed:
@@ -2343,11 +2363,21 @@ dormant.confirm_description_busy_worktree:
 reclaim.title:
   en: Reclaim disk space
 reclaim.description:
-  en: Idle tasks keep their own copies of dependencies and build outputs. Deleting them frees disk space — they regenerate on the next install or build. Source changes and the tasks themselves stay untouched.
+  en: Idle tasks may keep dependencies, build outputs, and scratch files. Deleting them frees disk space. Source changes and the tasks themselves stay untouched.
 reclaim.scanning:
-  en: Scanning worktrees…
+  en: Scanning tasks…
+reclaim.scan_progress:
+  en: "Scanned %{done} of %{total} tasks"
+reclaim.scan_current:
+  en: "Scanning %{title}…"
+reclaim.scan_failures:
+  en: "%{count} tasks could not be fully scanned. Results may be incomplete."
+reclaim.incomplete:
+  en: No results available from completed scans.
+reclaim.retry:
+  en: Rescan tasks
 reclaim.empty:
-  en: No idle worktrees hold regenerable outputs.
+  en: No idle tasks hold reclaimable outputs or scratch space.
 reclaim.confirm:
   en: "Reclaim %{size}"
 reclaim.confirm_generic:
@@ -2403,6 +2433,8 @@ sidebar.show_dormant:
   en: Show dormant
 sidebar.pinned:
   en: Pinned
+sidebar.rushed:
+  en: Rushed
 sidebar.terminals:
   en: Terminals
 sidebar.dormant:
@@ -2415,6 +2447,8 @@ sidebar.recent_deliverables:
   en: Deliverables
 sidebar.deliverables_view_all:
   en: View all deliverables
+sidebar.group_option_peek:
+  en: Hold Option for this group — hover to arm, click or Enter to pin
 sidebar.yesterday:
   en: Yesterday
 sidebar.last_7_days:
@@ -3371,6 +3405,10 @@ models.auto_hint:
   en: select the best provider
 models.auto_routed:
   en: "Auto (Jev) · %{model}"
+models.auto_fallback:
+  en: "%{model} · Fallback"
+models.auto_unavailable:
+  en: Auto routing is unavailable. Open Jev settings using the gear to configure it.
 models.auto_missing_credential:
   en: The selected Jev evaluation provider has no credential — routing falls back to the last used provider. Add one under Inference providers.
 models.favorite_hint:
@@ -3849,13 +3887,29 @@ suggestions.edit_prompt:
 suggestions.reset_prompt:
   en: Reset
 suggestions.prompt_text:
-  en: Suggested prompt text
+  en: Prompt
 suggestions.prompt_editor_description:
-  en: Clicking the suggestion sends this text.
+  en: Customize this suggestion. Existing eligibility rules still apply.
+suggestions.label:
+  en: Label
+suggestions.label_help:
+  en: Text shown above the composer when this prompt is suggested.
+suggestions.prompt_help:
+  en: Text sent to the agent when you choose this suggestion.
+suggestions.condition:
+  en: Condition
+suggestions.condition_help:
+  en: Instructions Jev uses to judge whether suggesting this prompt is appropriate.
+suggestions.workflow_condition_help:
+  en: This suggestion is controlled by its workflow. Its condition is informational and is not evaluated by Jev.
+suggestions.fields_invalid:
+  en: Enter a label of 1–96 characters and a condition of 1–2,000 characters.
 suggestions.prompt_invalid:
   en: Enter a prompt of at most 2,000 characters.
 suggestions.prompt_duplicate:
   en: Another suggested action already sends this prompt.
+suggestions.do_that:
+  en: Do that
 suggestions.proceed:
   en: Yes, proceed.
 suggestions.make_it_happen:
@@ -3865,7 +3919,7 @@ suggestions.add_details:
 suggestions.choose_manually:
   en: Choose an option
 suggestions.keep_going:
-  en: Keep going
+  en: Continue
 suggestions.done:
   en: Done — continue.
 suggestions.run_tests:
@@ -4088,6 +4142,8 @@ errors.task_not_loaded:
   en: This task is not loaded
 errors.task_already_forking:
   en: This task is already being forked
+errors.task_changed_during_prompt:
+  en: The task changed while preparing this prompt. Retry after its current changes finish.
 errors.task_already_rewinding:
   en: This task is already being rewound
 errors.no_live_runtime:
@@ -4121,6 +4177,8 @@ errors.store_pasted_text:
   en: "Could not attach the pasted text: %{error}"
 errors.create_worktree:
   en: "Could not create the worktree: %{error}"
+errors.send_workspace_preparation:
+  en: "Message wasn’t sent because the workspace couldn’t be prepared. Try sending again."
 errors.move_to_worktree:
   en: "Could not move the task to a worktree: %{error}"
 errors.prepared_runtime_unavailable:
@@ -4434,6 +4492,8 @@ background.description:
   en: Inspect agent-started processes and subagents
 background.processes:
   en: Background processes
+background.exited_processes:
+  en: Exited processes
 background.agents:
   en: Subagents
 background.process:
@@ -4909,6 +4969,8 @@ find.bad_pattern:
   en: Bad pattern
 find.no_results:
   en: No results
+find.searching:
+  en: Searching…
 find.result_count:
   en: "%{current} of %{total}"
 find.match_case:
@@ -4952,14 +5014,28 @@ attachments.preview_unavailable:
 common.copy_named:
   en: Copy %{name}
 
+transcript.navigation_load_failed:
+  en: Could not load that turn. Select it to try again.
+transcript.history_loading:
+  en: Loading earlier messages…
+transcript.history_retry:
+  en: Retry loading earlier messages
+transcript.future_loading:
+  en: Loading newer messages…
 transcript.worked:
   en: Worked
+transcript.rewind_completed:
+  en: Rewind completed.
 transcript.worked_for:
   en: Worked for %{duration}
 transcript.you_stopped_after:
   en: You stopped after %{duration}
 transcript.interrupted_after:
   en: Interrupted after %{duration}
+transcript.sending_prompt:
+  en: Sending prompt…
+transcript.employee_prompt_unconfirmed:
+  en: Delivery could not be confirmed. Check the transcript before sending again.
 transcript.working_for:
   en: Working for %{duration}
 transcript.checking_changes:
@@ -5691,6 +5767,12 @@ friends.your_code:
   en: Your friend code
 friends.code_hint:
   en: Share this code with someone running Goddard. Once they add you and you accept, either of you can send files.
+friends.actions:
+  en: Friend actions
+friends.edit_profile:
+  en: Edit name
+friends.copy_code:
+  en: Copy my code
 friends.add_friend:
   en: Add a friend
 friends.add_hint:
@@ -6311,6 +6393,10 @@ keyboard_options.fast:
   en: Fast
 keyboard_options.keyboard_hint:
   en: ↑ ↓ Move · Enter Select · Esc Close
+settings.prefer_starred_when_nothing_unread:
+  en: Prefer starred projects when nothing is unread
+settings.prefer_starred_when_nothing_unread_description:
+  en: "When no unread completions remain, %{action} visits idle tasks in starred projects before other idle tasks. Turn off to follow sidebar order across all projects."
 settings.starred_idle_before_unseen:
   en: Starred tasks first when jumping
 settings.starred_idle_before_unseen_description:
@@ -6799,6 +6885,10 @@ deliverable.restore_many:
   en: "Restore %{count} deliverables"
 deliverable.archive_many:
   en: "Archive %{count} deliverables"
+deliverable.archived:
+  en: Deliverable archived.
+deliverable.archived_many:
+  en: "%{count} deliverables archived."
 deliverable.dismiss_many:
   en: "Remove %{count} deliverables"
 deliverable.pinned:
@@ -7445,3 +7535,287 @@ boss.employee_groups_description:
   en: Group employees by purpose and queue status. Turn off for one list without group headers, with planning sessions first.
 boss.employee_search_description:
   en: How far back Search employee chats looks, including archived chats. Off hides the command.
+boss.chains:
+  en: Chains
+boss.chains_empty:
+  en: No employee chains yet.
+boss.chain_select:
+  en: Select a chain to inspect it.
+boss.chain_untitled:
+  en: Employee chain
+boss.chain_gates:
+  en: Approval gates
+boss.chain_steps:
+  en: Steps
+boss.chain_current:
+  en: Current
+boss.chain_revision:
+  en: revision %{revision}
+boss.chain_gate_pending:
+  en: Awaiting your decision
+boss.chain_gate_approved:
+  en: Approved
+boss.chain_gate_rejected:
+  en: Rejected
+boss.chain_approve:
+  en: Approve
+boss.chain_reject:
+  en: Reject
+boss.chain_resume:
+  en: Resume
+boss.chain_pause:
+  en: Pause
+boss.chain_retry:
+  en: Retry
+boss.chain_cancel:
+  en: Cancel chain
+boss.chain_accept:
+  en: Accept handoff
+boss.chain_status_active:
+  en: Active
+boss.chain_status_paused:
+  en: Paused
+boss.chain_status_pausing:
+  en: Pausing
+boss.chain_status_cancelling:
+  en: Cancelling
+boss.chain_status_cancelled:
+  en: Cancelled
+boss.chain_status_completed:
+  en: Completed
+boss.chain_step_pending:
+  en: Pending
+boss.chain_step_active:
+  en: Active
+boss.chain_step_succeeded:
+  en: Succeeded
+boss.chain_step_failed:
+  en: Failed
+boss.chain_step_cancelled:
+  en: Cancelled
+
+terminal.actions:
+  en: Terminal actions
+terminal.move_pane_out:
+  en: Move Pane Out of Group
+terminal.unsplit_group:
+  en: Unsplit Group
+
+boss.message_current_employee:
+  en: Message current employee
+
+command_palette.search_worktrees:
+  en: Search worktrees…
+command_palette.worktree_task_placeholder:
+  en: Select a task…
+command_palette.main_checkout:
+  en: Main checkout
+command_palette.worktree_task_count:
+  en: "%{count} tasks"
+command_palette.new_task_in_worktree:
+  en: New task in this worktree…
+command_palette.show_archived_tasks:
+  en: Show archived tasks
+command_palette.hide_archived_tasks:
+  en: Hide archived tasks
+command_palette.archived_task:
+  en: Archived
+command_palette.idle_task:
+  en: Idle
+command_palette.worktree_change_project:
+  en: Change project…
+
+sidebar.changes_still_saving:
+  en: Still saving…
+sidebar.changes_show_details:
+  en: Details
+sidebar.changes_hide_details:
+  en: Hide details
+sidebar.changes_syncing:
+  en: Syncing %{count} sidebar changes
+sidebar.changes_blocked:
+  en: '%{count} sidebar changes need attention'
+sidebar.changes_not_saved:
+  en: Sidebar changes aren't saved
+sidebar.changes_detail:
+  en: Your choices appear immediately and synchronize in the background.
+sidebar.changes_retry:
+  en: Apply my changes
+sidebar.changes_undo:
+  en: Undo archive
+sidebar.changes_adopt:
+  en: Use daemon state
+sidebar.archive_inspection_offline:
+  en: Archive needs a connection to inspect the workspace.
+sidebar.archive_inspection_failed:
+  en: Archive safety check failed. Retry from sidebar changes.
+sidebar.archive_undo_detail:
+  en: Undo restores archived items. It does not restart stopped turns or recover removed side chats.
+sidebar.changes_local_host:
+  en: This computer
+sidebar.changes_removed_host:
+  en: Removed host
+
+session.workspace_recovery_needed:
+  en: This task's workspace needs to be recovered. Your prompt has been kept.
+session.recover_workspace:
+  en: Recover workspace…
+session.workspace_recovery_detail:
+  en: Choose the existing checkout to keep all its files, or restore a workspace from this task's latest saved snapshot. Restoration cannot recover changes made after that snapshot. Pending prompts are kept until you continue.
+session.locate_worktree:
+  en: Choose existing worktree…
+session.restore_task_workspace:
+  en: Restore saved workspace
+session.more_recovery_worktrees:
+  en: More worktrees…
+session.workspace_recovered:
+  en: Workspace recovered. You can send your prompt again.
+session.workspace_recovery_failed:
+  en: "Workspace recovery failed: %{error}"
+
+command_palette.git_commit:
+  en: "Git: Commit…"
+command_palette.git_push:
+  en: "Git: Push"
+command_palette.git_pull:
+  en: "Git: Pull"
+command_palette.git_pull_rebase:
+  en: "Git: Pull with Rebase"
+
+terminal.go_to_primary_checkout:
+  en: "Terminal: Go to primary .git checkout root"
+terminal.copy_scrollback:
+  en: "Terminal: Copy scrollback"
+terminal.go_to_previous_worktree:
+  en: "Terminal: Go to previous worktree"
+terminal.go_to_default_checkout:
+  en: "Terminal: Go to default branch checkout"
+
+command_palette.sync_to_host:
+  en: Sync to remote host...
+command_palette.sync_to_friend:
+  en: Sync to friend...
+command_palette.sync_host_placeholder:
+  en: Choose a remote host…
+command_palette.sync_friend_pending:
+  en: Sync pairing requested. Your friend can enable it in Friends → Shared with you.
+command_palette.sync_source_offline:
+  en: The source project's host is offline.
+command_palette.sync_host_offline:
+  en: The remote host is offline.
+command_palette.sync_running:
+  en: Pushing to origin, then pulling on the remote host…
+command_palette.sync_complete:
+  en: Project synced to remote host.
+command_palette.sync_failed:
+  en: "Project sync failed: %{error}"
+
+git_panel.land_requesting:
+  en: Requesting landing…
+git_panel.land_queued_next:
+  en: Queued · next
+git_panel.land_queued_position:
+  en: 'Queued · #%{position}'
+git_panel.land_cancel_queued:
+  en: Cancel queued landing
+git_panel.land_canceling:
+  en: Canceling queued landing…
+git_panel.land_canceled:
+  en: Landing canceled
+git_panel.land_status_unavailable:
+  en: Landing status unavailable
+git_panel.land_refresh_status:
+  en: Refresh status
+git_panel.land_queue:
+  en: Landing queue
+git_panel.land_queue_submit:
+  en: Employee submission
+git_panel.land_result_unknown:
+  en: Landing result expired or daemon restarted; inspect the worktree before retrying.
+
+git_panel.land_queue_more:
+  en: '%{count} more queued'
+
+
+rush.toggle:
+  en: Rush this
+rush.enabled:
+  en: Rush mode enabled
+rush.dismiss:
+  en: Dismiss
+rush.tooltip:
+  en: Enable fast service where available, briefly interrupting active work to apply it, and bring this task forward when it needs you or finishes a turn. Rush lasts until switched off or this window closes. Turning it off keeps your service tier.
+
+command_palette.rush_current_task:
+  en: Rush current task
+command_palette.stop_rushing_current_task:
+  en: Stop rushing current task
+
+command_palette.unarchive:
+  en: Unarchive...
+command_palette.unarchive_placeholder:
+  en: Search archived chats to restore…
+
+transcript.possible_compaction:
+  en: Waiting · provider may be compacting
+usage.likely_compaction:
+  en: Context likely compacted — an unusually long wait was followed by a large drop in context usage.
+usage.possible_compaction:
+  en: Context is nearly full and the provider is taking unusually long to respond. It may be compacting.
+
+counsel.title:
+  en: "Counsel"
+
+counsel.subtitle:
+  en: "Counsel"
+
+counsel.command_description:
+  en: "Open Counsel to discuss what to do next"
+
+counsel.recommendation:
+  en: "Recommended next"
+
+counsel.saved_later:
+  en: "Saved for later"
+
+counsel.dismissed:
+  en: "Dismissed"
+
+counsel.approved:
+  en: "Approved · Counsel is delivering"
+
+counsel.delivery_pending:
+  en: "Sending to Boss"
+
+counsel.delivery_failed:
+  en: "Send failed"
+
+counsel.sent:
+  en: "Sent to Boss · queued or in progress"
+
+counsel.completed:
+  en: "Completed · reported evidence"
+
+counsel.approve:
+  en: "Approve"
+
+counsel.later:
+  en: "Later"
+
+counsel.dismiss:
+  en: "Dismiss"
+
+counsel.revise:
+  en: "Revise"
+
+counsel.revise_prompt:
+  en: "Revise the recommendation “%{title}” (ID %{id}). Use its ID as replaces when proposing the revision. My changes:"
+
+counsel.message_to_boss:
+  en: "Message to Boss"
+
+counsel.source:
+  en: "Source session"
+
+counsel.open_boss:
+  en: "Open Boss"

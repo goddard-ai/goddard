@@ -195,13 +195,7 @@ impl BucketStore {
         text: &str,
         retry_key: &str,
     ) -> Result<InsertResult> {
-        self.require(access, principal, bucket_id, true)?;
-        if text.trim().is_empty() || text.len() > 64 * 1024 {
-            bail!("memory note must be between 1 byte and 64 KiB")
-        }
-        if retry_key.trim().is_empty() || retry_key.len() > 512 {
-            bail!("memory retry key must be between 1 and 512 bytes")
-        }
+        self.validate_insert(access, principal, bucket_id, text, retry_key)?;
         self.with_bucket_lock(bucket_id, || {
             let path = self.bucket_dir(bucket_id).join("LOG.jsonl");
             let notes = read_notes(&path)?;
@@ -239,6 +233,26 @@ impl BucketStore {
             let compression = self.next_compression(bucket_id)?;
             Ok(InsertResult { note, compression })
         })
+    }
+
+    /// Check a proposed note without inserting it. Confirmation must check
+    /// access again because grants may change after the proposal is reviewed.
+    pub fn validate_insert(
+        &self,
+        access: &BucketAccess,
+        principal: &str,
+        bucket_id: &str,
+        text: &str,
+        retry_key: &str,
+    ) -> Result<()> {
+        self.require(access, principal, bucket_id, true)?;
+        if text.trim().is_empty() || text.len() > 64 * 1024 {
+            bail!("memory note must be between 1 byte and 64 KiB")
+        }
+        if retry_key.trim().is_empty() || retry_key.len() > 512 {
+            bail!("memory retry key must be between 1 and 512 bytes")
+        }
+        Ok(())
     }
 
     pub fn overview(

@@ -157,6 +157,8 @@ pub(super) enum SyncConflict {
         workspace: PathBuf,
         /// Working-tree paths still carrying conflict markers.
         files: Vec<String>,
+        /// The originating `/land` receipt: (session, message/operation).
+        transcript: Option<(Uuid, Uuid)>,
     },
     /// A "Change base branch" rebase that stopped midway. `base` is the new
     /// base being moved onto — it becomes the session's recorded base only
@@ -241,6 +243,8 @@ pub(super) struct GitPanelOperation {
     /// The spinner toast raised on the operation's behalf. `finish_git_panel_op`
     /// settles it to the outcome, or retires it when a modal takes over.
     pub toast_id: Option<u64>,
+    /// Composer `/land` updates the message with this operation's ID in place.
+    pub transcript_session: Option<Uuid>,
     /// This operation came from the "Sync branch…" command — its pull chains
     /// a push, and pull conflicts resolve in a fresh chat on the checkout.
     pub sync_branch: bool,
@@ -251,6 +255,8 @@ pub(super) struct GitPanelOperation {
     /// The base a `PushingBase`/`SyncingBase` op targets — the failure
     /// modal quotes it back when the run ends badly.
     pub base: Option<String>,
+    /// The landed task offered Archive while this push was running.
+    pub archive_follow_up: Option<push_base::ArchiveFollowUp>,
 }
 
 /// Everything the panel needs, created when the panel opens and rebuilt when
@@ -416,6 +422,8 @@ enum CommitLane {
     /// the row's top edge.
     Head,
     Worktree,
+    /// Shared history starts at HEAD, without a worktree-lane connector.
+    BaseHead,
     /// The merge-base row: the worktree lane curves off onto the base lane's
     /// dot, which the base lane continues down from.
     FirstBase,
@@ -459,7 +467,9 @@ fn commit_graph_cell(lane: CommitLane, theme: &Theme) -> Div {
     let line = theme.border_strong;
     let (circle_x, circle_color) = match lane {
         CommitLane::Head | CommitLane::Worktree => (COMMIT_LANE_WORKTREE, theme.accent),
-        CommitLane::FirstBase | CommitLane::Base => (COMMIT_LANE_BASE, theme.text_ghost),
+        CommitLane::BaseHead | CommitLane::FirstBase | CommitLane::Base => {
+            (COMMIT_LANE_BASE, theme.text_ghost)
+        }
     };
     let mid = GIT_PANEL_COMMIT_ROW_HEIGHT / 2.0;
     let mut cell = div()
@@ -482,6 +492,9 @@ fn commit_graph_cell(lane: CommitLane, theme: &Theme) -> Div {
         }
         CommitLane::Worktree => {
             cell = cell.child(vertical(COMMIT_LANE_WORKTREE, 0.0, 0.0));
+        }
+        CommitLane::BaseHead => {
+            cell = cell.child(vertical(COMMIT_LANE_BASE, mid, 0.0));
         }
         CommitLane::FirstBase => {
             cell = cell
@@ -533,7 +546,7 @@ impl Waku {
             })
             .on_click(cx.listener(|this, _, window, cx| {
                 cx.stop_propagation();
-                this.set_git_panel_visible(!this.git_panel_visible, window, cx);
+                this.set_git_panel_visible(true, window, cx);
             }))
     }
 
@@ -543,7 +556,7 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_git_panel_visible(!self.git_panel_visible, window, cx);
+        self.set_git_panel_visible(true, window, cx);
     }
 
     /// Show or hide the Git panel. It shares the right panel's slot, so the
@@ -564,11 +577,7 @@ impl Waku {
             return;
         }
         if visible {
-            // The slot is exclusive — dismiss the right panel without its
-            // own close semantics so the swap does not slide out and back.
-            self.right_panel_visible = false;
-            self.right_panel_pending_terminal_focus = None;
-            self.git_panel_visible = true;
+            self.open_right_panel_surface(RightPanelSurface::Git, cx);
             self.open_git_panel(window, cx, true);
             self.analytics
                 .track(crate::analytics::Event::GitPanelOpened);
@@ -840,6 +849,7 @@ impl Waku {
         let panel_id = panel.id;
         let workspace = panel.workspace.clone();
         let base = panel.base.clone();
+        self.watch_landing_queue(panel_id, workspace.clone(), cx);
         self.git_panel_generation = self.git_panel_generation.wrapping_add(1);
         let generation = self.git_panel_generation;
         let Some(client) = self.workspace_client_for_path(&workspace) else {
@@ -1183,7 +1193,13 @@ impl Waku {
         let Some(panel) = self.git_panel.as_ref() else {
             return GitPanelPrimary::Unavailable;
         };
-        if self.git_panel_operation.is_some() {
+        if self.git_panel_operation.is_some()
+            || self.git_panel.as_ref().is_some_and(|panel| {
+                self.landing_operations
+                    .values()
+                    .any(|entry| entry.operation.workspace == panel.workspace)
+            })
+        {
             return GitPanelPrimary::Busy;
         }
         let Some(snapshot) = panel.snapshot.as_ref() else {
@@ -1256,7 +1272,12 @@ impl Waku {
         workspace: PathBuf,
         cx: &mut Context<Self>,
     ) -> Option<(Uuid, PathBuf)> {
-        if self.git_panel_operation.is_some() {
+        if self.git_panel_operation.is_some()
+            || self
+                .landing_operations
+                .values()
+                .any(|entry| entry.operation.workspace == workspace)
+        {
             return None;
         }
         let id = Uuid::new_v4();
@@ -1265,9 +1286,11 @@ impl Waku {
             workspace: workspace.clone(),
             pending,
             toast_id: None,
+            transcript_session: None,
             sync_branch: false,
             sync_branch_name: None,
             base: None,
+            archive_follow_up: None,
         });
         cx.notify();
         Some((id, workspace))
@@ -1510,8 +1533,8 @@ impl Waku {
     }
 
     /// `/land` in the composer: land the session the composer answers to —
-    /// the big-picture target while that overlay is open. With no button to
-    /// show the pending label, the run reports through a spinner toast.
+    /// the big-picture target while that overlay is open. One transcript row
+    /// carries progress and remains as the outcome or conflict receipt.
     pub(super) fn land_composer_session(&mut self, strategy: PullStrategy, cx: &mut Context<Self>) {
         let Some(session) = self.composer_session() else {
             self.show_toast(tr!("git_panel.no_task"));
@@ -1555,23 +1578,38 @@ impl Waku {
     /// fast-forward the base to the result. A conflict raises the same modal
     /// a conflicted pull does.
     ///
-    /// `progress_toast` raises a spinner toast that resolves to the outcome —
-    /// how `/land` reports from the composer, where no button shows the
-    /// pending label. The panel's land button renders it inline and passes
-    /// `false`.
+    /// `transcript_progress` keeps composer-started progress and its outcome
+    /// in one transcript row. The panel's button uses its own pending label.
     fn start_git_panel_land(
         &mut self,
         workspace: PathBuf,
         base: Option<String>,
         strategy: PullStrategy,
-        progress_toast: bool,
+        transcript_progress: bool,
         cx: &mut Context<Self>,
     ) {
+        if self
+            .workspace_client_for_path(&workspace)
+            .is_some_and(|client| client.landing_queue_available())
+        {
+            self.start_queued_landing(workspace, base, strategy, transcript_progress, cx);
+            return;
+        }
         let Some((op_id, workspace)) =
             self.begin_workspace_op(GitPanelPending::Landing, workspace, cx)
         else {
             return;
         };
+        if transcript_progress && let Some(session) = self.composer_session_id() {
+            let label = base
+                .as_ref()
+                .map(|base| tr!("git_panel.landing_onto", base = base))
+                .unwrap_or_else(|| tr!("git_panel.landing"));
+            self.start_landing_transcript(session, op_id, label);
+            if let Some(operation) = self.git_panel_operation.as_mut() {
+                operation.transcript_session = Some(session);
+            }
+        }
         let Some(client) = self.workspace_client_for_path(&workspace) else {
             self.finish_git_panel_op(
                 op_id,
@@ -1580,17 +1618,6 @@ impl Waku {
             );
             return;
         };
-        if progress_toast {
-            let message = match &base {
-                Some(base) => tr!("git_panel.landing_onto", base = base.clone()),
-                None => tr!("git_panel.landing"),
-            };
-            let toast_id = self.show_progress_toast(message, PROGRESS_TOAST_DURATION);
-            if let Some(operation) = self.git_panel_operation.as_mut() {
-                operation.toast_id = Some(toast_id);
-            }
-            cx.notify();
-        }
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
@@ -1700,13 +1727,36 @@ impl Waku {
         // A picker-origin conflict that stops the merge retry too still
         // resolves in a fresh chat on the checkout.
         let sync_branch = matches!(&conflict, SyncConflict::Pull { new_chat: true, .. });
-        let Some((op_id, workspace)) =
+        let Some((mut op_id, workspace)) =
             self.begin_workspace_op(GitPanelPending::AbortingSync, conflict.workspace(), cx)
         else {
             return;
         };
         if let Some(operation) = self.git_panel_operation.as_mut() {
             operation.sync_branch = sync_branch;
+            if let SyncConflict::Land {
+                transcript: Some((session, message)),
+                ..
+            } = &conflict
+            {
+                operation.id = *message;
+                operation.transcript_session = Some(*session);
+                operation.pending = GitPanelPending::Landing;
+                op_id = *message;
+            }
+        }
+        if let SyncConflict::Land {
+            transcript: Some((session, message)),
+            base,
+            ..
+        } = &conflict
+        {
+            self.update_landing_transcript(
+                *session,
+                *message,
+                tr!("git_panel.landing_onto", base = base),
+                None,
+            );
         }
         let Some(client) = self.workspace_client_for_path(&workspace) else {
             self.finish_git_panel_op(
@@ -1866,6 +1916,7 @@ impl Waku {
     fn send_land_conflict_to_chat(
         &mut self,
         conflict: &SyncConflict,
+        show_toast: bool,
         cx: &mut Context<Self>,
     ) -> bool {
         let (base, workspace, toast) = match conflict {
@@ -1896,7 +1947,9 @@ impl Waku {
         if matches!(conflict, SyncConflict::Rebase { .. }) {
             self.set_workspace_base_branch(workspace, base, cx);
         }
-        self.show_toast(toast);
+        if show_toast {
+            self.show_toast(toast);
+        }
         true
     }
 
@@ -1994,9 +2047,29 @@ impl Waku {
         let Some(op) = self
             .git_panel_operation
             .take_if(|operation| operation.id == op_id)
+            .or_else(|| {
+                self.landing_operations
+                    .remove(&op_id)
+                    .map(|entry| entry.operation)
+            })
         else {
             return;
         };
+        if let Some(session) = op.transcript_session {
+            let (content, notice) = landing::landing_transcript_outcome(&result);
+            self.update_landing_transcript(session, op.id, content, notice);
+        }
+        if let Some(follow_up) = op.archive_follow_up
+            && !matches!(
+                &result,
+                Ok(WorkspaceResult::PushBase {
+                    outcome: waku_client::git::PushBaseOutcome::Pushed { .. }
+                        | waku_client::git::PushBaseOutcome::UpToDate { .. }
+                })
+            )
+        {
+            self.set_action_follow_up(follow_up.session_id, "push-base", op.base.clone());
+        }
         let same_panel = self
             .git_panel
             .as_ref()
@@ -2095,13 +2168,18 @@ impl Waku {
                         base,
                         workspace: op.workspace.clone(),
                         files,
+                        transcript: op.transcript_session.map(|session| (session, op.id)),
                     };
                     // The land-specific setting wins first — it hands the
                     // conflict to the session that owns the worktree. The
                     // broader sync setting — or no session owning the path —
                     // falls back to a fresh chat on the checkout.
                     let sent_to_owner = self.state.auto_resolve_land_conflicts
-                        && self.send_land_conflict_to_chat(&conflict, cx);
+                        && self.send_land_conflict_to_chat(
+                            &conflict,
+                            op.transcript_session.is_none(),
+                            cx,
+                        );
                     if !sent_to_owner {
                         if self.state.auto_resolve_in_chat {
                             // Same trade as a pull conflict: the modal gives
@@ -2119,12 +2197,20 @@ impl Waku {
                     commits,
                     ahead,
                 } => {
-                    self.settle_operation_toast(
-                        op.toast_id,
-                        tr!("git_panel.landed", base = base),
-                        ToastTone::Success,
+                    if op.transcript_session.is_none() {
+                        self.settle_operation_toast(
+                            op.toast_id,
+                            tr!("git_panel.landed", base = base),
+                            ToastTone::Success,
+                        );
+                    }
+                    self.record_landed_transcript_notice(
+                        &op.workspace,
+                        &base,
+                        commits,
+                        ahead,
+                        op.transcript_session,
                     );
-                    self.record_landed_transcript_notice(&op.workspace, &base, commits, ahead);
                     self.mark_workspace_sessions_landed(&op.workspace, cx);
                     if let Some(session_id) = self.journal_session_for_workspace(&op.workspace) {
                         self.set_action_follow_up(session_id, "push-base", Some(base.clone()));
@@ -2138,11 +2224,13 @@ impl Waku {
                     self.refresh_git_panel_commits(cx);
                 }
                 LandOutcome::AlreadyLanded { base } => {
-                    self.settle_operation_toast(
-                        op.toast_id,
-                        tr!("git_panel.already_landed", base = base),
-                        ToastTone::Notice,
-                    );
+                    if op.transcript_session.is_none() {
+                        self.settle_operation_toast(
+                            op.toast_id,
+                            tr!("git_panel.already_landed", base = base),
+                            ToastTone::Notice,
+                        );
+                    }
                     self.mark_workspace_sessions_landed(&op.workspace, cx);
                     if self.state.auto_commit_reminder_on_land {
                         self.remind_land_session_to_commit(&op.workspace, cx);
@@ -2166,7 +2254,11 @@ impl Waku {
                         files,
                     };
                     let sent_to_owner = self.state.auto_resolve_land_conflicts
-                        && self.send_land_conflict_to_chat(&conflict, cx);
+                        && self.send_land_conflict_to_chat(
+                            &conflict,
+                            op.transcript_session.is_none(),
+                            cx,
+                        );
                     if !sent_to_owner {
                         if self.state.auto_resolve_in_chat {
                             self.auto_resolve_sync_conflict(conflict, cx);
@@ -2274,15 +2366,15 @@ impl Waku {
                         cx,
                     );
                 } else {
-                    // A composer-started land can fail with the panel closed;
-                    // its errors need a surface the panel doesn't provide. When
-                    // the panel shows the failed workspace it carries the error
-                    // inline — a run that raised a toast still resolves it, and
-                    // the picker's runs always toast since its card is gone.
+                    // Transcript-owned lands already carry their error. Other
+                    // operations still need a toast when the panel is closed,
+                    // or when they originally reported progress through one.
                     if same_panel && let Some(panel) = self.git_panel.as_mut() {
                         panel.error = Some(error.to_string());
                     }
-                    if op.toast_id.is_some() || !same_panel || op.sync_branch {
+                    if op.transcript_session.is_none()
+                        && (op.toast_id.is_some() || !same_panel || op.sync_branch)
+                    {
                         self.settle_operation_toast(
                             op.toast_id,
                             error.to_string(),
@@ -2365,12 +2457,14 @@ impl Waku {
     /// except the row is written per land rather than once: a repeat land
     /// after new commits appends another. The message keeps `content` as the
     /// pill fallback and `turn_id` unset so a rewind never drops it.
+    /// `exclude_session` already has its operation's progress row updated.
     fn record_landed_transcript_notice(
         &mut self,
         workspace: &Path,
         base: &str,
         commits: Vec<CommitEntry>,
         ahead: u64,
+        exclude_session: Option<Uuid>,
     ) {
         let notice = TranscriptNotice::Landed {
             base: base.to_owned(),
@@ -2382,7 +2476,10 @@ impl Waku {
             .state
             .sessions
             .iter()
-            .filter(|session| self.workspace_path_for_session(session) == Some(workspace))
+            .filter(|session| {
+                Some(session.id) != exclude_session
+                    && self.workspace_path_for_session(session) == Some(workspace)
+            })
             .map(|session| session.id)
             .collect::<Vec<_>>()
         {
@@ -2936,6 +3033,7 @@ impl Waku {
         }
         let reference = crate::model::ReferenceContext::decode_reference(sha);
         if reference.is_none()
+            && self.big_picture.rush_session_id().is_none()
             && let Some(entry) = self.git_panel.as_ref().and_then(|panel| {
                 panel
                     .commits
@@ -2948,7 +3046,7 @@ impl Waku {
                 sha.to_owned(),
                 TranscriptCommitDetail::Ready(
                     entry,
-                    self.selected_workspace_path()
+                    self.transcript_workspace_path()
                         .unwrap_or(std::path::Path::new(""))
                         .to_path_buf(),
                 ),
@@ -2960,13 +3058,13 @@ impl Waku {
             .as_ref()
             .map(|(context, _)| context.workspace().to_path_buf())
             .or_else(|| {
-                self.selected_workspace_path()
+                self.transcript_workspace_path()
                     .map(std::path::Path::to_path_buf)
             })
         else {
             return;
         };
-        let session_id = self.selected_session().map(|session| session.id);
+        let session_id = self.transcript_session_id();
         let key = sha.to_owned();
         let requested_sha = sha.to_owned();
         let request_sha = reference_sha(sha).to_owned();
@@ -2997,7 +3095,7 @@ impl Waku {
                 })
                 .await;
             let _ = waku.update(cx, move |waku, cx| {
-                if waku.selected_session().map(|session| session.id) != session_id {
+                if waku.transcript_session_id() != session_id {
                     return;
                 }
                 let detail = match result {
@@ -3109,6 +3207,14 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.big_picture.rush_session_id().is_some() {
+            if let Some(TranscriptCommitDetail::Ready(entry, workspace)) =
+                self.transcript_commit_details.get(sha)
+            {
+                self.open_commit_diff(workspace.clone(), &entry.clone(), cx);
+            }
+            return;
+        }
         // The Git panel cannot host a managed owner's commit view — the Boss
         // chat's SHA opens the commit in the right panel's Review tab instead,
         // experiment flag or not.
@@ -3406,7 +3512,7 @@ impl Waku {
             .into_any_element()
     }
 
-    fn render_git_panel(
+    pub(super) fn render_git_panel(
         &mut self,
         width: f32,
         window: &mut Window,
@@ -3430,8 +3536,7 @@ impl Waku {
             .flex()
             .flex_col()
             .min_w_0()
-            .relative()
-            .child(self.render_git_panel_header(window, cx));
+            .relative();
         if self.git_panel.is_some() {
             column = column.child(self.render_git_panel_top(column_width, window, cx));
         }
@@ -3606,12 +3711,13 @@ impl Waku {
                     icon("icons/cloud-upload.svg", 12.0, theme.text).into_any_element(),
                     tr!("git_panel.push_changes"),
                 ),
-                GitPanelPrimary::Unavailable => (
+                // A queued landing or an operation in another checkout blocks
+                // the primary action without a pending label for this panel.
+                GitPanelPrimary::Busy | GitPanelPrimary::Unavailable => (
                     icon("icons/git-commit-horizontal.svg", 12.0, theme.text_ghost)
                         .into_any_element(),
                     tr!("git_panel.commit"),
                 ),
-                GitPanelPrimary::Busy => unreachable!(),
             }
         };
 
@@ -3721,7 +3827,13 @@ impl Waku {
             .git_panel_operation
             .as_ref()
             .is_some_and(|operation| operation.pending == GitPanelPending::Landing);
-        let enabled = self.git_panel_operation.is_none();
+        let own = self.git_panel.as_ref().and_then(|panel| {
+            self.landing_operations
+                .iter()
+                .find(|(_, entry)| entry.operation.workspace == panel.workspace)
+        });
+        let landing = landing || own.is_some();
+        let enabled = self.git_panel_operation.is_none() && own.is_none();
         let mut button = div()
             .id("git-panel-land")
             .track_focus(
@@ -3754,7 +3866,8 @@ impl Waku {
                 icon("icons/git-merge.svg", 12.0, theme.text_tertiary).into_any_element()
             })
             .child(if landing {
-                tr!("git_panel.landing")
+                own.map(|(id, _)| self.landing_label(*id))
+                    .unwrap_or_else(|| tr!("git_panel.landing"))
             } else {
                 tr!("git_panel.land_onto", base = target.branch.clone())
             });
@@ -3813,6 +3926,7 @@ impl Waku {
                 .w_full()
                 .flex()
                 .flex_col()
+                .child(self.render_landing_queue(cx))
                 .child(self.render_git_panel_commit_area(cx));
             if let Some(snapshot) = self
                 .git_panel
@@ -4944,12 +5058,13 @@ impl Waku {
             let unpushed = !panel.commits_from_base && index < ahead as usize;
             let lane = if panel.commits_from_base {
                 if index == 0 {
-                    CommitLane::Head
+                    CommitLane::BaseHead
                 } else {
                     CommitLane::Base
                 }
             } else {
                 match merge_base_index {
+                    Some(0) if index == 0 => CommitLane::BaseHead,
                     Some(base_index) if index > base_index => CommitLane::Base,
                     Some(base_index) if index == base_index && index > 0 => CommitLane::FirstBase,
                     _ if index == 0 => CommitLane::Head,

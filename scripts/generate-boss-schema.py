@@ -115,8 +115,8 @@ def patch_obj(schema, fragment):
                     v['default'] = 0
             if m[2].strip().startswith('u') and v.get('type') == 'integer':
                 v['minimum'] = 0
-for name in ['BossOperation', 'EmployeeControl', 'MemoryOperation', 'PersonaDefaultAction', 'ChainOperation', 'InstructionPinOperation', 'InstructionPinRetirement']:
-    file = 'chains.rs' if name == 'ChainOperation' else 'instruction_pins.rs' if name.startswith('InstructionPin') else 'boss.rs'
+for name in ['BossOperation', 'EmployeeControl', 'MemoryOperation', 'PersonaDefaultAction', 'ChainOperation', 'InstructionPinOperation', 'InstructionPinRetirement', 'CounselOperation']:
+    file = 'counsel.rs' if name == 'CounselOperation' else 'chains.rs' if name == 'ChainOperation' else 'instruction_pins.rs' if name.startswith('InstructionPin') else 'boss.rs'
     enum_source = pathlib.Path('crates/waku-protocol/src', file).read_text()
     schema = defs[name]
     for variant in schema.get('anyOf', [schema]):

@@ -6,6 +6,22 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "counsel"
+            },
+            "action": {
+              "$ref": "#/definitions/CounselOperation"
+            }
+          },
+          "required": [
+            "type",
+            "action"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "instructionPin"
             },
             "action": {
@@ -1708,6 +1724,23 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "confirm"
+            },
+            "proposalId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "type",
+            "proposalId"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "submitSummary"
             },
             "bucket": {
@@ -3189,6 +3222,230 @@
       "required": [],
       "additionalProperties": false
     },
+    "CounselOperation": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "open"
+            },
+            "provider": {
+              "$ref": "#/definitions/ProviderKind"
+            },
+            "model": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "mode": {
+              "$ref": "#/definitions/RuntimeMode"
+            }
+          },
+          "required": [
+            "type",
+            "provider",
+            "model",
+            "mode"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "view"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "propose"
+            },
+            "title": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "instruction": {
+              "type": "string"
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "replaces": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "title",
+            "reason",
+            "instruction",
+            "sources"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "decide"
+            },
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "expectedRevision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "decision": {
+              "$ref": "#/definitions/CounselDecision"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "expectedRevision",
+            "decision"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "send"
+            },
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "expectedRevision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "expectedRevision"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "handoff"
+            },
+            "instruction": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "instruction"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "rename"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "regenerateAvatar"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "complete"
+            },
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "expectedRevision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "evidence": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "expectedRevision",
+            "evidence"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "CounselDecision": {
+      "anyOf": [
+        {
+          "const": "approve"
+        },
+        {
+          "const": "later"
+        },
+        {
+          "const": "dismiss"
+        }
+      ]
+    },
     "CustomCommandIcon": {
       "anyOf": [
         {
@@ -3688,6 +3945,9 @@
             },
             "at": {
               "type": "integer"
+            },
+            "recordedAt": {
+              "type": "integer"
             }
           },
           "required": [
@@ -3704,6 +3964,9 @@
             },
             "note": {
               "type": "string"
+            },
+            "recordedAt": {
+              "type": "integer"
             }
           },
           "required": [
@@ -4102,6 +4365,22 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "counsel"
+            },
+            "state": {
+              "protocolType": "CounselState"
+            }
+          },
+          "required": [
+            "type",
+            "state"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "instructionPins"
             },
             "pins": {
@@ -4316,6 +4595,26 @@
           },
           "required": [
             "type"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "deliverablePublished"
+            },
+            "deliverable": {
+              "protocolType": "BossDeliverable"
+            },
+            "reference": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "deliverable",
+            "reference"
           ],
           "additionalProperties": false
         },
@@ -4579,6 +4878,16 @@
               ]
             },
             "recorded": {
+              "anyOf": [
+                {
+                  "protocolType": "JsonValue"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "proposal": {
               "anyOf": [
                 {
                   "protocolType": "JsonValue"

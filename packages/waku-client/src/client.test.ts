@@ -459,6 +459,34 @@ describe("WakuClient connection failures", () => {
     ).rejects.toThrow("timed out waiting for Goddard daemon");
   });
 
+  test("keeps queued requests attached until a reply or disconnect", async () => {
+    const { client, sockets } = fixture({ requestTimeoutMs: 1 });
+    const socket = await connect(client, sockets);
+    const command = {
+      type: "workspace",
+      operation: { type: "land", cwd: "/repo", base: "main", strategy: "rebase" },
+    } as const;
+    let settled = false;
+    const landing = client.request(command, undefined, undefined, { timeoutMs: null });
+    void landing.finally(() => { settled = true; });
+    await Bun.sleep(10);
+    expect(settled).toBe(false);
+    const request = JSON.parse(socket.sent.at(-1)!);
+    socket.receive({
+      type: "response",
+      requestId: request.requestId,
+      outcome: {
+        status: "ok",
+        payload: { type: "workspace", result: { type: "land", outcome: { alreadyLanded: { base: "main" } } } },
+      },
+    });
+    await expect(landing).resolves.toMatchObject({ type: "workspace" });
+
+    const abandoned = client.request(command, undefined, undefined, { timeoutMs: null });
+    socket.fail("connection closed");
+    await expect(abandoned).rejects.toThrow("Goddard daemon disconnected");
+  });
+
   test("settles requests and clears the socket before listeners hear a remote close", async () => {
     const { client, sockets } = fixture();
     const socket = await connect(client, sockets);
