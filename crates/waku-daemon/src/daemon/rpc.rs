@@ -1311,8 +1311,8 @@ impl Backend for WakuBackend {
                 self.start_archive_detail_prune();
                 let boss = self.boss.document();
                 // Boss-managed rows ride the catalog even unstarted — a
-                // queued employee's task shell is what its roster click
-                // selects. Other unstarted rows are client drafts:
+                // queued or retired employee's retained task shell is what
+                // its Boss row selects. Other unstarted rows are client drafts:
                 // cataloguing one would project a phantom "New task"
                 // skeleton to every client.
                 let managed = |session_id: Uuid| {
@@ -1320,6 +1320,7 @@ impl Backend for WakuBackend {
                         || boss
                             .employees
                             .iter()
+                            .chain(boss.retired_employees.iter())
                             .any(|employee| employee.session_id == session_id)
                         || boss
                             .planning
@@ -1337,7 +1338,9 @@ impl Backend for WakuBackend {
                     sessions: state
                         .sessions
                         .iter()
-                        .filter(|session| session.has_started() || managed(session.id))
+                        .filter(|session| {
+                            session.has_started() || session.boss_managed || managed(session.id)
+                        })
                         .map(|session| {
                             let mut projection = session.list_projection();
                             project_employee_selection(

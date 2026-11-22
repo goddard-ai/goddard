@@ -8351,6 +8351,78 @@ fn a_retired_employees_task_stays_boss_managed() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+#[test]
+fn retained_unstarted_employee_task_stays_in_catalog_after_retirement() {
+    use waku_protocol::boss::EmployeeGoal;
+
+    let root = std::env::temp_dir().join(format!("boss-retained-catalog-{}", Uuid::new_v4()));
+    let (backend, supervisor) = surface_test_backend(&root);
+    backend.boss.set_session_id(supervisor).unwrap();
+    let employee = backend
+        .boss
+        .prepare_employee(
+            supervisor,
+            Some(backend.boss.document().personas[0].id),
+            "Blocked before launch".into(),
+            None,
+            false,
+            EmployeeGoal::Errand,
+            None,
+        )
+        .unwrap();
+    let employee_id = employee.session_id;
+    backend.boss.add_employee(employee).unwrap();
+    let now = crate::model::unix_time();
+    let eleven_days_ago = now - 11 * 24 * 60 * 60;
+    {
+        let mut state = backend.task_state.lock();
+        let project = state.sessions[0].project_id;
+        let mut child = AgentSession::new(project, ProviderKind::Codex);
+        child.id = employee_id;
+        child.boss_managed = true;
+        assert!(!child.has_started());
+        state.push_session(child);
+        state.push_session(AgentSession::new(project, ProviderKind::Codex));
+        backend.task_store.save(&mut state).unwrap();
+    }
+    backend
+        .boss
+        .set_employee_expired_at(employee_id, eleven_days_ago)
+        .unwrap();
+    assert_eq!(backend.boss.retire_expired(now).unwrap().len(), 1);
+
+    let request = |command| {
+        backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: Uuid::nil(),
+                    runtime_id: Uuid::nil(),
+                    command,
+                },
+                EventSink::detached(),
+                None,
+            )
+            .unwrap()
+    };
+    let ResponsePayload::TaskState { sessions, .. } = request(Command::LoadTaskState) else {
+        panic!("expected catalog");
+    };
+    assert!(sessions.iter().any(|session| session.id == employee_id));
+    assert!(sessions.iter().all(|session| {
+        session.id == employee_id || session.id == supervisor
+    }));
+    let ResponsePayload::Session { session: Some(session) } =
+        request(Command::HydrateSession { session_id: employee_id })
+    else {
+        panic!("expected retained employee detail");
+    };
+    assert_eq!(session.id, employee_id);
+    assert!(!session.has_started());
+    drop(backend);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 /// A worktree summon is the same managed worktree `agent create` makes:
 /// the employee task runs in the detached checkout and its assignment
 /// names that path, not the supervisor's primary checkout. The launch

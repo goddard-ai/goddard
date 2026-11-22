@@ -10826,6 +10826,81 @@ mod live_employee_approvals {
     }
 
     #[gpui::test]
+    fn stale_blocked_outcome_employee_click_focuses_retained_task(cx: &mut gpui::TestAppContext) {
+        use super::super::{RightPanelSurface, SessionActivationTransition};
+        use waku_client::boss::{
+            Assignment, AssignmentSettle, AssignmentVerdict, BossOutcome, EmployeeLifecycle,
+        };
+
+        let (_env, dir) = isolated_env();
+        let project = Project::from_path(dir.clone());
+        let mut boss = AgentSession::new(project.id, ProviderKind::Codex);
+        boss.boss_managed = true;
+        boss.begin_turn("Check the outcome");
+        let mut employee = AgentSession::new(project.id, ProviderKind::Codex);
+        employee.boss_managed = true;
+        let employee_id = employee.id;
+        let boss_id = boss.id;
+        let stale = unix_time() - 11 * 24 * 60 * 60;
+        let outcome_id = Uuid::new_v4();
+        let mut retired = employee_record(employee_id, boss_id, "Ana", "Verify the result");
+        retired.state = EmployeeLifecycle::Expired.into();
+        retired.expired_at = Some(stale);
+        retired.blocker = Some("Provider unavailable".into());
+        retired.assignment = Some(Assignment {
+            outcome_id,
+            after_success: String::new(),
+            finishes_outcome: true,
+            prerequisites: Vec::new(),
+        });
+        let mut outcome: BossOutcome = serde_json::from_value(serde_json::json!({
+            "id": outcome_id,
+            "outcome": "Verify the release",
+            "createdAt": stale,
+            "lastActivityAt": stale,
+            "assignments": [{
+                "session": employee_id,
+                "generation": 1,
+                "identity": retired.identity.clone(),
+                "assignedAt": stale
+            }]
+        }))
+        .unwrap();
+        outcome.assignments[0].settled = Some(AssignmentSettle {
+            verdict: AssignmentVerdict::Failed,
+            cause: None,
+            blocked: true,
+            at: Some(stale),
+        });
+        let mut state = boss_state(Some(boss_id), Vec::new());
+        state.retired_employees = Arc::new(vec![retired]);
+        state.outcomes.push(outcome);
+        let daemon = FakeDaemon::start(dir, project, vec![boss, employee], state);
+        let supervisor = DaemonSupervisor::connect(&daemon.address, "test-token".into()).unwrap();
+        let (view, vcx) = test_app(cx, supervisor);
+        wait_for(vcx, &view, |waku| {
+            waku.boss_ui
+                .outcome_rows
+                .values()
+                .flat_map(|rows| rows.iter())
+                .any(|row| row.outcome.id == outcome_id && row.attention)
+                && waku.state.sessions.iter().any(|session| session.id == employee_id)
+        });
+        update_app(vcx, &view, |waku, _, cx| {
+            waku.request_session_activation(boss_id, SessionActivationTransition::Visit, cx);
+            let key = waku.boss_chat_key().unwrap();
+            waku.boss_ui.goals_row_expanded.insert((key, outcome_id));
+            waku.open_right_panel_surface(RightPanelSurface::Goals, cx);
+            waku.right_panel_slide = None;
+        });
+        click(vcx, selector(format!("boss-goal-employee-{employee_id}")));
+        assert_eq!(
+            read_app(vcx, &view, |waku| waku.state.selected_session),
+            Some(employee_id),
+        );
+    }
+
+    #[gpui::test]
     fn auto_start_records_the_started_model_after_a_route_or_fallback(
         cx: &mut gpui::TestAppContext,
     ) {

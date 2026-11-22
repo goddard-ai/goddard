@@ -2887,6 +2887,7 @@ fn boss_goal_employee_element(
             "boss-employee-row-{}-{session_id}",
             employee.slot
         )))
+        .debug_selector(|| format!("boss-goal-employee-{session_id}"))
         .when_some(employee.focus.clone(), |element, focus| {
             element.track_focus(&focus)
         })

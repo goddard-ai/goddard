@@ -1,0 +1,1 @@
+- Open retained employee tasks from older blocked outcomes in the Boss Tasks tab, including employees whose work never started.
