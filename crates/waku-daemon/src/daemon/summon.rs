@@ -549,25 +549,23 @@ impl WakuBackend {
                 return Ok(true);
             }
         };
-        if shell.is_none() && chain_project.is_none() {
-            // The ticket's project must still resolve to a registered
-            // checkout: a row another client removed — or a checkout that
-            // no longer exists — ends the admission like an explicit
-            // removal rather than wedging the queue on a lookup error.
+        if chain_project.is_none() {
+            // A persisted session shell can outlive its checkout.
             let project = dunce::canonicalize(Path::new(&ticket.project)).ok();
-            let registered =
-                project.is_some_and(|project| {
-                    self.task_state.lock().projects.iter().any(|entry| {
-                        dunce::canonicalize(&entry.path).is_ok_and(|path| path == project)
-                    })
-                });
-            if !registered {
+            let Some(project) = project else {
+                self.stop_queued_employee(session_id)?;
+                return Ok(true);
+            };
+            if shell.is_none()
+                && !self.task_state.lock().projects.iter().any(|entry| {
+                    dunce::canonicalize(&entry.path).is_ok_and(|path| path == project)
+                })
+            {
                 self.stop_queued_employee(session_id)?;
                 return Ok(true);
             }
-            self.restore_employee_shell(employee, &ticket)?;
         }
-        if shell.is_none() && chain_project.is_some() {
+        if shell.is_none() {
             self.restore_employee_shell(employee, &ticket)?;
         }
         // A chain-bound ticket may only launch while its attempt still
