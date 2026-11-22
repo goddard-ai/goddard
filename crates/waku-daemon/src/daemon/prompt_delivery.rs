@@ -875,20 +875,12 @@ pub(super) fn record_agent_steer(
         Vec::new(),
         Some(sent_by_task),
     );
-    if let Some(preferred) = preferred_message_id
-        && let Some(stored) = session
-            .messages
-            .iter_mut()
-            .find(|stored| stored.id == message_id)
+    if let Some(stored) = session
+        .messages
+        .iter_mut()
+        .find(|stored| stored.id == message_id)
     {
-        stored.id = preferred;
-    }
-    if (hidden || report_trigger.is_some())
-        && let Some(stored) = session
-            .messages
-            .iter_mut()
-            .find(|stored| stored.id == message_id)
-    {
+        stored.id = preferred_message_id.unwrap_or(message_id);
         stored.hidden = hidden;
         stored.report_trigger = report_trigger;
     }
