@@ -1,1 +1,1 @@
-- Open Git as a right-panel tab from the Git button in the top bar.
+- Open Git as a right-panel tab from the top bar or with ⌘⌥G. Press the shortcut again with Git focused to hide the panel. Select a commit to open its overview in the main area.

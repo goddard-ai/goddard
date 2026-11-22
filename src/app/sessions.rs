@@ -4479,6 +4479,7 @@ impl Waku {
                 self.close_git_panel_state();
             }
         } else {
+            self.right_panel_pending_focus = None;
             self.right_panel_pending_terminal_focus = None;
             self.right_panel_pending_browser_focus = None;
         }

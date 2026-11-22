@@ -6118,7 +6118,7 @@ impl Waku {
                                 || this.right_panel_surfaces.contains(&RightPanelSurface::Git))
                                 && this.git_panel.is_none()
                             {
-                                this.open_git_panel(window, cx, false);
+                                this.open_git_panel(window, cx);
                             }
                         });
                     });
@@ -6365,13 +6365,14 @@ impl Waku {
             // A restored-visible panel wins the slot back from the Git panel.
             self.close_git_panel_state();
         } else if self.state.git_panel_enabled {
-            // The slot's other tenant: this owner's parked Git panel comes
-            // back — flag, live state, and open commit view together.
+            // Older layouts can restore Git in its own slot.
             self.git_panel_visible = state.git_panel_open;
-            if state.git_panel_open {
-                self.git_panel = state.git_panel;
-                self.git_panel_commit_diff = state.git_panel_commit_diff;
-            }
+        }
+        if self.state.git_panel_enabled
+            && (self.git_panel_visible || state.surfaces.contains(&RightPanelSurface::Git))
+        {
+            self.git_panel = state.git_panel;
+            self.git_panel_commit_diff = state.git_panel_commit_diff;
         }
         self.right_panel_surfaces = state.surfaces;
         self.right_panel_active_surface = state.active_surface;
@@ -7272,6 +7273,17 @@ impl Waku {
         if self.right_panel_visible
             && let Some(focus) = self.right_panel_pending_focus.take()
         {
+            let focus = if self.active_right_panel_surface() == Some(&RightPanelSurface::Git) {
+                if !self.git_commit_overview_visible()
+                    && let Some(panel) = &self.git_panel
+                {
+                    panel.message.read(cx).focus()
+                } else {
+                    self.git_tab_focus(cx)
+                }
+            } else {
+                focus
+            };
             // Deferred like the file-editor pending: render runs inside
             // prepaint, and moving focus here would let a second element
             // claim the frame's a11y focus after an earlier one already did.

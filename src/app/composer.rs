@@ -6014,6 +6014,7 @@ impl Waku {
     /// it (Big Picture remounts the same entity, so it stays mounted).
     pub(super) fn composer_mounted(&self) -> bool {
         self.selected_project().is_some()
+            && !self.git_commit_overview_visible()
             && self.selected_terminal.is_none()
             && self.projects_page.is_none()
             && !self.notifications.open

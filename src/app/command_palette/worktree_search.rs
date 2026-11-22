@@ -122,7 +122,9 @@ impl Waku {
         } else if self.settings_page.is_none()
             && matches!(
                 self.main_screen(self.live_deliverable_page().is_some()),
-                render::MainScreen::Session | render::MainScreen::Terminal(_)
+                render::MainScreen::Session
+                    | render::MainScreen::GitCommitOverview
+                    | render::MainScreen::Terminal(_)
             )
         {
             self.infer_issue_target(cx)

@@ -8201,7 +8201,8 @@ impl Waku {
                 })
                 .unwrap_or_else(|| tr!("session.new_task")),
             // These screens supply their own header content through render_header_frame.
-            MainScreen::Brain
+            MainScreen::GitCommitOverview
+            | MainScreen::Brain
             | MainScreen::Drafts
             | MainScreen::Automations
             | MainScreen::Projects

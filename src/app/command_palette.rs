@@ -2731,6 +2731,7 @@ impl Waku {
         match self.main_screen(self.live_deliverable_page().is_some()) {
             render::MainScreen::Terminal(id) => self.terminal_cwd(id, cx),
             render::MainScreen::Session
+            | render::MainScreen::GitCommitOverview
             | render::MainScreen::Deliverable
             | render::MainScreen::VoiceScratchpad => self.workspace_subject_path(),
             render::MainScreen::Projects => self
@@ -6196,6 +6197,7 @@ impl Waku {
                     .and_then(|path| {
                         match self.main_screen(self.live_deliverable_page().is_some()) {
                             render::MainScreen::Session
+                            | render::MainScreen::GitCommitOverview
                             | render::MainScreen::Deliverable
                             | render::MainScreen::VoiceScratchpad => self.workspace_subject().1,
                             render::MainScreen::Projects => self.projects_page,

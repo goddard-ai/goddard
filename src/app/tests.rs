@@ -9749,7 +9749,7 @@ mod live_employee_approvals {
             waku.state.selected_session = Some(session.id);
             waku.state.projects = vec![project.clone()];
             waku.state.sessions = vec![session];
-            waku.open_git_panel(window, cx, false);
+            waku.open_git_panel(window, cx);
             let workspace = waku.selected_workspace_path().unwrap().to_path_buf();
             waku.start_queued_landing(
                 workspace,
@@ -9763,6 +9763,129 @@ mod live_employee_approvals {
             assert_eq!(waku.landing_operations.len(), 1);
             waku.git_panel_pane_content(window, cx);
         });
+    }
+
+    #[gpui::test]
+    fn git_shortcut_hides_focused_tab_and_keeps_commit_overview_in_main_area(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use super::super::{RightPanelSurface, ToggleGitPanel, render::MainScreen};
+        use waku_client::git::CommitEntry;
+        use waku_client::workspace::{
+            ReviewDiffData, ReviewDiffSource, WorkspaceOperation, WorkspaceResult,
+        };
+
+        let (_env, dir) = isolated_env();
+        let project = Project::from_path(dir.join("project"));
+        std::fs::create_dir_all(&project.path).unwrap();
+        let session = AgentSession::new(project.id, ProviderKind::Codex);
+        let daemon = FakeDaemon::start(
+            dir,
+            project.clone(),
+            vec![session.clone()],
+            boss_state(None, Vec::new()),
+        );
+        *daemon.response_hook.lock() = Some(Arc::new(|_, command| {
+            let Command::Workspace { operation } = command else {
+                return None;
+            };
+            let result = match operation {
+                WorkspaceOperation::InspectGitPanel { .. } => WorkspaceResult::GitPanel {
+                    snapshot: Some(Default::default()),
+                },
+                WorkspaceOperation::ListCommits { .. }
+                | WorkspaceOperation::ListBaseCommits { .. } => WorkspaceResult::Commits {
+                    entries: vec![CommitEntry {
+                        sha: "0123456789abcdef0123456789abcdef01234567".into(),
+                        short_sha: "01234567".into(),
+                        subject: "Add a file".into(),
+                        body: String::new(),
+                        author: "Author".into(),
+                        author_email: String::new(),
+                        authored_at: 0,
+                        additions: 0,
+                        deletions: 0,
+                    }],
+                },
+                WorkspaceOperation::CommitDiff { .. } => WorkspaceResult::ReviewDiff {
+                    data: ReviewDiffData {
+                        source: ReviewDiffSource::Commit,
+                        numstat: String::new(),
+                        patch: String::new(),
+                        complete_context: true,
+                    },
+                },
+                _ => return None,
+            };
+            Some(ResponseOutcome::Ok {
+                payload: ResponsePayload::Workspace { result },
+            })
+        }));
+        let supervisor = DaemonSupervisor::connect(&daemon.address, "test-token".into()).unwrap();
+        let (view, vcx) = test_app(cx, supervisor);
+        update_app(vcx, &view, |waku, window, cx| {
+            cx.bind_keys([gpui::KeyBinding::new("secondary-alt-g", ToggleGitPanel, None)]);
+            super::super::git_panel::init(cx);
+            cx.set_reduce_motion(true);
+            waku.state.git_panel_enabled = true;
+            waku.state.selected_project = Some(project.id);
+            waku.state.selected_session = Some(session.id);
+            waku.state.projects = vec![project];
+            waku.state.sessions = vec![session];
+            waku.sync_right_panel_owner(cx);
+            waku.refocus_composer(window, cx);
+        });
+        vcx.run_until_parked();
+        vcx.simulate_keystrokes("secondary-alt-g");
+        vcx.update(|window, cx| window.simulate_next_frame(cx));
+        update_app(vcx, &view, |waku, window, cx| {
+            assert!(waku.right_panel_focus.contains_focused(window, cx));
+            waku.refocus_composer(window, cx);
+        });
+        vcx.simulate_keystrokes("secondary-alt-g");
+        vcx.update(|window, cx| window.simulate_next_frame(cx));
+        update_app(vcx, &view, |waku, window, cx| {
+            assert!(waku.right_panel_visible);
+            assert_eq!(
+                waku.active_right_panel_surface(),
+                Some(&RightPanelSurface::Git)
+            );
+            assert!(waku.right_panel_focus.contains_focused(window, cx));
+        });
+
+        wait_for(vcx, &view, |waku| {
+            waku.git_panel
+                .as_ref()
+                .is_some_and(|panel| !panel.commits.is_empty())
+        });
+        click(vcx, "git-panel-commit-0");
+        let overview = vcx.debug_bounds("git-panel-commit-view").unwrap();
+        let panel = vcx.debug_bounds("git-panel").unwrap();
+        assert!(overview.size.width > px(0.0));
+        assert!(overview.origin.x + overview.size.width <= panel.origin.x + px(1.0));
+
+        vcx.simulate_keystrokes("secondary-alt-g");
+        vcx.run_until_parked();
+        read_app(vcx, &view, |waku| {
+            assert!(!waku.right_panel_visible);
+            assert_eq!(waku.main_screen(false), MainScreen::GitCommitOverview);
+        });
+        vcx.simulate_keystrokes("secondary-alt-g");
+        vcx.run_until_parked();
+        vcx.update(|window, cx| window.simulate_next_frame(cx));
+        update_app(vcx, &view, |waku, window, cx| {
+            assert!(waku.right_panel_visible);
+            assert!(waku.right_panel_focus.contains_focused(window, cx));
+            assert_eq!(
+                waku.active_right_panel_surface(),
+                Some(&RightPanelSurface::Git)
+            );
+        });
+        vcx.simulate_keystrokes("escape");
+        assert_eq!(
+            read_app(vcx, &view, |waku| waku.main_screen(false)),
+            MainScreen::Session
+        );
     }
 
     // Deliver the late snapshot explicitly so the ordering is deterministic.

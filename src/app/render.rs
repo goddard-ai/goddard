@@ -19,6 +19,7 @@ fn should_render_empty_state(session: Option<&AgentSession>) -> bool {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum MainScreen {
     Session,
+    GitCommitOverview,
     Terminal(Uuid),
     Brain,
     VoiceScratchpad,
@@ -31,7 +32,9 @@ pub(super) enum MainScreen {
 
 impl Waku {
     pub(super) fn main_screen(&self, deliverable_available: bool) -> MainScreen {
-        if let Some(id) = self
+        if self.git_commit_overview_visible() {
+            MainScreen::GitCommitOverview
+        } else if let Some(id) = self
             .selected_terminal
             .filter(|id| self.right_panel_terminals.contains_key(id))
         {
@@ -60,7 +63,12 @@ impl MainScreen {
     fn uses_session_header(self) -> bool {
         match self {
             Self::Session | Self::Terminal(_) | Self::VoiceScratchpad | Self::Deliverable => true,
-            Self::Brain | Self::Drafts | Self::Automations | Self::Projects | Self::Inbox => false,
+            Self::GitCommitOverview
+            | Self::Brain
+            | Self::Drafts
+            | Self::Automations
+            | Self::Projects
+            | Self::Inbox => false,
         }
     }
 }
@@ -233,16 +241,7 @@ impl Waku {
         }
         let (sidebar_content, right_panel_fitted) = self.effective_panel_widths(window);
         let right_panel_visible = self.right_panel_content_visible();
-        // An open commit turns the Git panel into the workspace's main
-        // surface: the slot stretches to the sidebar so the diff column gets
-        // everything the transcript had. The pane reads the unexpanded width
-        // back out of `effective_panel_widths` for its own column.
-        let commit_expanded = self.git_panel_visible && self.git_panel_commit_diff.is_some();
-        let mut right_panel_content = if commit_expanded {
-            (f32::from(window.viewport_size().width) - sidebar_content).max(right_panel_fitted)
-        } else {
-            right_panel_fitted
-        };
+        let mut right_panel_content = right_panel_fitted;
         let sidebar = slide_width(
             &mut self.sidebar_slide,
             if self.sidebar_visible {
@@ -266,10 +265,7 @@ impl Waku {
         // the settled fit without a snap. The surface keeps laying out at
         // the uncrowded fit meanwhile, so it reflows once at the settle —
         // the container clips the difference, like the slot's own slide.
-        // An expanded commit deliberately covers the chat column, and a
-        // slide of the slot's own already owns the edge; that pair still
-        // may not squeeze the chat under its minimum.
-        if self.sidebar_slide.is_some() && !commit_expanded {
+        if self.sidebar_slide.is_some() {
             if self.right_panel_slide.is_none() {
                 (right_panel, right_panel_content) = sidebar_slide_right_panel_widths(
                     f32::from(window.viewport_size().width),
@@ -827,6 +823,7 @@ impl Render for Waku {
         let agy_surface = self
             .selected_session()
             .is_some_and(|session| session.uses_antigravity_terminal());
+        let commit_overview_visible = self.git_commit_overview_visible();
         let composer_mounted = self.composer_mounted();
         let (deliverable_header, deliverable_page) = self
             .render_deliverable_preview_page(window, cx)
@@ -1114,7 +1111,9 @@ impl Render for Waku {
                     // shifts down to make room.
                     .children(
                         self.docked_terminal
-                            .filter(|id| self.docked_terminal_visible(*id))
+                            .filter(|id| {
+                                !commit_overview_visible && self.docked_terminal_visible(*id)
+                            })
                             .map(|terminal_id| {
                                 self.render_docked_terminal_card(
                                     terminal_id,
@@ -1127,6 +1126,9 @@ impl Render for Waku {
                     // A selected terminal takes the column in place of the
                     // transcript, the Projects page, or the new-task prompt.
                     .child(match screen {
+                        MainScreen::GitCommitOverview => {
+                            self.render_git_panel_commit_view(window, cx)
+                        }
                         MainScreen::Terminal(terminal_id) => self.render_main_terminal(
                             terminal_id,
                             self.chat_viewport_width(window),
@@ -1164,7 +1166,11 @@ impl Render for Waku {
                             }
                         }
                     })
-                    .children(permission.map(|card| div().flex_none().child(card)))
+                    .children(
+                        permission
+                            .filter(|_| !commit_overview_visible)
+                            .map(|card| div().flex_none().child(card)),
+                    )
                     // Big Picture remounts the one composer entity inside its
                     // own layer; mounting it here too would collide. The
                     // pages own no composer at all. While the overlay is
@@ -1468,6 +1474,7 @@ mod tests {
     #[test]
     fn unrelated_pages_own_their_headers() {
         for screen in [
+            MainScreen::GitCommitOverview,
             MainScreen::Brain,
             MainScreen::Drafts,
             MainScreen::Automations,

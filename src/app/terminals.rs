@@ -847,7 +847,7 @@ impl Waku {
                         && this.git_panel.is_none()
                         && this.standalone_git_panel_terminal().is_some()
                     {
-                        this.open_git_panel(window, cx, false);
+                        this.open_git_panel(window, cx);
                     }
                 });
             });

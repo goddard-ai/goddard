@@ -1,10 +1,8 @@
-//! The Git panel: a working-tree surface that shares the right panel's slot.
+//! The Git tab hosts the working tree and commit history. A selected commit
+//! opens its diff in the main area and exposes its file tree in the tab.
 //!
-//! The panels are alternatives, not tabs — opening one dismisses the other,
-//! and the Git panel reuses the right panel's slide and resize affordances
-//! while remembering its own width. Every Git read and mutation runs on the
-//! daemon through workspace requests on the background executor; render
-//! only ever reads the state those requests landed.
+//! Git reads and mutations use daemon workspace requests on the background
+//! executor; render reads the resulting state.
 
 use std::rc::Rc;
 
@@ -34,6 +32,7 @@ actions!(
 
 const PANEL_CONTEXT: &str = "GitPanel";
 const PANEL_INPUT_CONTEXT: &str = "GitPanel > TextInput";
+const COMMIT_OVERVIEW_CONTEXT: &str = "GitCommitOverview";
 const MODAL_CONTEXT: &str = "GitPanelModal";
 
 /// The journal action a finished panel operation was — the same kinds
@@ -66,6 +65,11 @@ pub fn init(cx: &mut App) {
         // Dismissal works from the modal itself and from anywhere in the
         // panel, so Escape still reaches it while the input holds focus.
         KeyBinding::new("escape", DismissGitPanelModal, Some(PANEL_CONTEXT)),
+        KeyBinding::new(
+            "escape",
+            DismissGitPanelModal,
+            Some(COMMIT_OVERVIEW_CONTEXT),
+        ),
         KeyBinding::new("escape", DismissGitPanelModal, Some(MODAL_CONTEXT)),
         // Enter on the card runs the modal's primary action; a focused
         // button consumes its own Enter before this sees it.
@@ -76,7 +80,6 @@ pub fn init(cx: &mut App) {
 /// `git log` page size for the commits section; more arrive as the list
 /// scrolls to its end.
 const GIT_PANEL_COMMIT_PAGE: usize = 100;
-const MACOS_TRAFFIC_LIGHTS_RIGHT_EDGE: f32 = 72.0;
 const GIT_PANEL_FILE_ROW_HEIGHT: f32 = 26.0;
 const GIT_PANEL_COMMIT_ROW_HEIGHT: f32 = 26.0;
 /// How far a file row's diff preview crosses the panel's left edge — the
@@ -372,11 +375,11 @@ pub(super) struct GitPanelDiscard {
 }
 
 /// The open commit view's state. While set, the panel slot expands to fill
-/// the workspace: the diff column on the left, the panel — its commit box
-/// and changes swapped for the commit's file tree — on the right.
+/// the workspace: the diff in the main area and the file tree in Git.
 pub(super) struct GitPanelCommitDiff {
-    /// The text sent to Git for this modal; `sha` may later become the full
-    /// resolved hash while this remains the request's stale-result guard.
+    request_id: Uuid,
+    /// The original reference so a transcript lookup can still update
+    /// the title after resolving an abbreviated hash.
     pub requested_sha: String,
     pub sha: String,
     pub workspace: PathBuf,
@@ -556,46 +559,93 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let git_tab_visible = self.git_tab_visible();
+        if (git_tab_visible || self.git_panel_visible)
+            && self.right_panel_focus.contains_focused(window, cx)
+        {
+            if git_tab_visible {
+                self.set_right_panel_visible(false, cx);
+            } else {
+                self.set_git_panel_visible(false, window, cx);
+            }
+            self.focus_after_git_panel(window, cx);
+            return;
+        }
         self.set_git_panel_visible(true, window, cx);
     }
 
-    /// Show or hide the Git panel. It shares the right panel's slot, so the
-    /// two are never visible at once and the slide carries straight across
-    /// a swap — between the panels' own remembered widths.
+    /// Reveal and focus the Git tab, or dismiss the standalone Git panel
+    /// restored from older layouts.
     pub(super) fn set_git_panel_visible(
         &mut self,
         visible: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.git_panel_visible == visible {
-            return;
-        }
         // Experimental — employee sessions can host the panel in their own
         // checkout, while the boss's managed chat remains restricted.
         if visible && (!self.state.git_panel_enabled || !self.git_panel_owner_allowed()) {
             return;
         }
         if visible {
+            if self.git_panel_visible {
+                window.focus(&self.right_panel_focus, cx);
+                return;
+            }
             self.open_right_panel_surface(RightPanelSurface::Git, cx);
-            self.open_git_panel(window, cx, true);
+            if self.active_right_panel_surface() != Some(&RightPanelSurface::Git) {
+                return;
+            }
+            if self.git_panel.is_none() {
+                self.open_git_panel(window, cx);
+            }
+            self.right_panel_pending_focus = Some(self.right_panel_focus.clone());
             self.analytics
                 .track(crate::analytics::Event::GitPanelOpened);
-        } else {
+        } else if self.git_panel_visible {
             self.close_git_panel_state();
+            self.right_panel_slide = self.begin_panel_slide(self.right_panel_rendered_width, cx);
+            self.persist_panel_layout();
         }
-        self.right_panel_slide = self.begin_panel_slide(self.right_panel_rendered_width, cx);
-        self.persist_panel_layout();
         cx.notify();
+    }
+
+    fn git_tab_visible(&self) -> bool {
+        self.right_panel_content_visible()
+            && self.active_right_panel_surface() == Some(&RightPanelSurface::Git)
+    }
+
+    pub(super) fn git_tab_focus(&self, cx: &mut App) -> FocusHandle {
+        self.transcript_control_focus("git-panel-content", cx)
+    }
+
+    fn focus_after_git_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.git_commit_overview_visible() {
+            let focus = self.transcript_control_focus("git-commit-overview", cx);
+            window.focus(&focus, cx);
+        } else if let Some(terminal) = self
+            .selected_terminal
+            .and_then(|id| self.right_panel_terminals.get(&id))
+        {
+            let focus = terminal.read(cx).focus_handle(cx);
+            window.focus(&focus, cx);
+        } else if self.composer_mounted() {
+            self.refocus_composer(window, cx);
+        }
+    }
+
+    pub(super) fn git_commit_overview_visible(&self) -> bool {
+        self.git_panel_commit_diff.is_some()
+            && self.state.git_panel_enabled
+            && !self.big_picture.is_open()
+            && (self.git_panel_visible
+                || self.right_panel_surfaces.contains(&RightPanelSurface::Git))
     }
 
     /// Dismiss the Git panel wherever the right panel takes the slot — its
     /// toggle, a surface reveal, or a session restore — so the two never
     /// share it.
     pub(super) fn close_git_panel_state(&mut self) {
-        if !self.git_panel_visible && self.git_panel.is_none() {
-            return;
-        }
         self.git_panel_visible = false;
         self.clear_git_panel_contents();
     }
@@ -655,16 +705,9 @@ impl Waku {
         }
     }
 
-    /// Build the panel state for the selected workspace and start
-    /// the first snapshot and commit page. `take_focus` is false for restores
-    /// that happen under a session switch — the panel reopens without
-    /// claiming the keyboard.
-    pub(super) fn open_git_panel(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-        take_focus: bool,
-    ) {
+    /// Build the panel state for the selected workspace and start the first
+    /// snapshot and commit page.
+    pub(super) fn open_git_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.standalone_git_panel_terminal().is_some() {
             self.ensure_sidebar_terminal_repo_roots(cx);
         }
@@ -686,7 +729,7 @@ impl Waku {
             workspace,
             base,
             invocation,
-            message: message.clone(),
+            message,
             snapshot: None,
             snapshot_loading: false,
             error: None,
@@ -708,14 +751,6 @@ impl Waku {
         self.git_panel_generation = self.git_panel_generation.wrapping_add(1);
         self.refresh_git_panel(cx);
         self.refresh_git_panel_commits(cx);
-        if take_focus {
-            let focus = message.read(cx).focus();
-            // Two frames out: the panel needs a paint before its input can
-            // take focus (the same deferral the commit dialog uses).
-            window.on_next_frame(move |window, _| {
-                window.on_next_frame(move |window, cx| window.focus(&focus, cx));
-            });
-        }
     }
 
     /// The selected session's recorded base for landing its worktree.
@@ -2820,7 +2855,7 @@ impl Waku {
         .detach();
     }
 
-    /// A commit row's click: fetch its diff and open the modal.
+    /// Open the selected commit in the main area.
     fn open_git_panel_commit_diff(&mut self, entry: &CommitEntry, cx: &mut Context<Self>) {
         self.git_panel_commit_hover = None;
         // Re-clicking the open commit collapses the expanded view.
@@ -2839,8 +2874,7 @@ impl Waku {
         self.open_commit_diff(workspace, entry, cx);
     }
 
-    /// Shared by Git panel rows and transcript SHAs: open the modal for
-    /// `entry` and fetch its diff on the background executor.
+    /// Shared by Git panel rows and transcript SHAs.
     fn open_commit_diff(
         &mut self,
         workspace: PathBuf,
@@ -2851,8 +2885,10 @@ impl Waku {
         self.transcript_commit_hover = None;
         *self.transcript_selection.hovered_commit.borrow_mut() = None;
         let sha = entry.sha.clone();
-        let requested_sha = sha.clone();
+        let request_id = Uuid::new_v4();
+        let owner = self.right_panel_live_owner;
         self.git_panel_commit_diff = Some(GitPanelCommitDiff {
+            request_id,
             requested_sha: sha.clone(),
             sha: sha.clone(),
             workspace: workspace.clone(),
@@ -2913,14 +2949,18 @@ impl Waku {
                 })
                 .await;
             let _ = waku.update(cx, move |waku, cx| {
-                // A result only lands on the modal still showing the sha it
-                // was requested for — a retargeted modal keeps its own fetch.
-                let Some(modal) = waku.git_panel_commit_diff.as_mut() else {
+                let live = waku.right_panel_live_owner == owner;
+                let overview = if live {
+                    waku.git_panel_commit_diff.as_mut()
+                } else {
+                    waku.right_panel_states
+                        .get_mut(&owner)
+                        .and_then(|panel| panel.git_panel_commit_diff.as_mut())
+                };
+                let Some(modal) = overview.filter(|overview| overview.request_id == request_id)
+                else {
                     return;
                 };
-                if modal.requested_sha != requested_sha {
-                    return;
-                }
                 match result {
                     Ok(snapshot) => {
                         let count = snapshot.lines.len();
@@ -2944,7 +2984,9 @@ impl Waku {
                         modal.state = GitPanelCommitDiffState::Failed(error.to_string());
                     }
                 }
-                cx.notify();
+                if live {
+                    cx.notify();
+                }
             });
         })
         .detach();
@@ -3510,9 +3552,6 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        // The slot's published content width already folds in a commit's
-        // stretch and any sidebar travel (see `settle_panel_slides`); the
-        // pane lays out at that same target so a slide only clips it.
         self.render_git_panel(self.right_panel_content_width, window, cx)
             .into_any_element()
     }
@@ -3524,38 +3563,14 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let theme = Theme::current(cx);
-        // An open commit splits the expanded slot in two: the diff column
-        // takes the slack on the left while the panel keeps its fitted width
-        // on the right, its commit box and changes swapped for the commit's
-        // file tree.
-        let commit_open = self.git_panel_commit_diff.is_some();
-        let column_width = if commit_open {
-            self.effective_panel_widths(window).1.min(width)
-        } else {
-            width
-        };
-        let mut column = div()
-            .w(px(column_width))
-            .h_full()
-            .flex_none()
-            .flex()
-            .flex_col()
-            .min_w_0()
-            .relative();
-        if self.git_panel.is_some() {
-            column = column.child(self.render_git_panel_top(column_width, window, cx));
-        }
-        column = column.child(self.render_git_panel_body(column_width, cx));
-        // With a commit open this handle lands on the divider between the
-        // diff column and the file tree instead of the slot's outer edge;
-        // either way it drags the Git panel's own fitted width.
-        column = column.child(self.render_panel_resize_handle(
-            "git-panel-resize-handle",
-            PanelResizeTarget::RightPanel,
-            cx,
-        ));
         div()
             .id("git-panel")
+            .debug_selector(|| "git-panel".into())
+            .track_focus(&if self.git_panel_visible {
+                self.right_panel_focus.clone()
+            } else {
+                self.git_tab_focus(cx)
+            })
             .key_context(PANEL_CONTEXT)
             .on_action(cx.listener(|this, _: &GitPanelPrimaryAction, _, cx| {
                 this.run_git_panel_primary(cx);
@@ -3564,20 +3579,28 @@ impl Waku {
                 this.dismiss_git_panel_modal(cx);
             }))
             .w(px(width))
-            .h_full()
-            .flex_none()
+            .flex_1()
+            .min_h_0()
             .flex()
+            .flex_col()
             .min_w_0()
-            .border_l(hairline())
-            .border_color(theme.separator)
             .bg(theme.surface)
             .relative()
-            .when(commit_open, |element| {
-                element.child(self.render_git_panel_commit_view(cx))
+            .when(self.git_panel_visible, |element| {
+                element
+                    .border_l(hairline())
+                    .border_color(theme.separator)
+                    .child(self.render_git_panel_header(window, cx))
+                    .child(self.render_panel_resize_handle(
+                        "git-panel-resize-handle",
+                        PanelResizeTarget::RightPanel,
+                        cx,
+                    ))
             })
-            .child(column.when(commit_open, |column| {
-                column.border_l(hairline()).border_color(theme.separator)
-            }))
+            .when(self.git_panel.is_some(), |element| {
+                element.child(self.render_git_panel_top(width, window, cx))
+            })
+            .child(self.render_git_panel_body(width, cx))
     }
 
     fn render_git_panel_header(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -3913,7 +3936,7 @@ impl Waku {
             f32::from(window.viewport_size().height),
             self.git_panel_top_height,
         );
-        let content = if self.git_panel_commit_diff.is_some() {
+        let content = if self.git_commit_overview_visible() {
             self.render_git_panel_commit_tree(cx)
         } else {
             let scroll = self
@@ -5027,7 +5050,7 @@ impl Waku {
     }
 
     /// The paged commit list. Rows mark commits the upstream lacks and dwell
-    /// for their full message; a click opens the commit-diff modal.
+    /// for their full message; a click opens the commit overview.
     fn render_git_panel_commits(&self, width: f32, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let Some(panel) = self.git_panel.as_ref() else {
@@ -5166,6 +5189,7 @@ impl Waku {
         let entry_for_click = entry.clone();
         div()
             .id(SharedString::from(format!("{id_prefix}-{index}")))
+            .debug_selector(|| format!("{id_prefix}-{index}"))
             .relative()
             .track_focus(&focus)
             .tab_index(0)
@@ -5782,18 +5806,15 @@ impl Waku {
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
     }
 
-    /// The diff column of the expanded commit view: the modal's header and
-    /// scrollable diff, minus the card chrome — the panel sits to its right.
-    fn render_git_panel_commit_view(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_git_panel_commit_view(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let Some(modal) = self.git_panel_commit_diff.as_ref() else {
             return div().into_any_element();
         };
         let theme = Theme::current(cx);
-        let header_left_padding = if cfg!(target_os = "macos") {
-            (MACOS_TRAFFIC_LIGHTS_RIGHT_EDGE - self.sidebar_rendered_width).max(14.0)
-        } else {
-            14.0
-        };
         // `…/commit/<sha>` and `#<n>` issue links only make sense when the
         // workspace's origin remote is a github.com repository.
         let github_base = self
@@ -5879,117 +5900,125 @@ impl Waku {
                 }
             }
         };
+        let header = div()
+            .h_full()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            // The hash and subject share one baseline so different
+            // faces and sizes still sit on the same line; the buttons
+            // stay centered on the row itself.
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .flex()
+                    .items_baseline()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .flex_none()
+                            .font_family(crate::fonts::current(cx).code)
+                            .text_size(sp(12.0))
+                            .text_color(theme.text_tertiary)
+                            .child(modal.sha.chars().take(8).collect::<String>()),
+                    )
+                    .child(
+                        div()
+                            .id("git-panel-commit-modal-subject")
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .text_size(sp(13.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .when(!subject_linked, |element| {
+                                element.tooltip(Tooltip::text(modal.subject.clone()))
+                            })
+                            .child(subject_text),
+                    ),
+            )
+            .when(
+                matches!(&modal.state, GitPanelCommitDiffState::Ready(_)),
+                |row| {
+                    let all_collapsed = modal.state.snapshot().is_some_and(|snapshot| {
+                        !snapshot.files.is_empty()
+                            && modal.collapsed_files.len() == snapshot.files.len()
+                    });
+                    row.child(
+                        div()
+                            .id("git-panel-commit-modal-toggle-all")
+                            .track_focus(
+                                &self.transcript_control_focus("git-panel-commit-toggle-all", cx),
+                            )
+                            .tab_index(0)
+                            .px(px(8.0))
+                            .py(px(4.0))
+                            .rounded(px(5.0))
+                            .text_size(sp(11.5))
+                            .text_color(theme.text_secondary)
+                            .hover(|style| style.bg(theme.overlay))
+                            .focus_visible(|style| style.bg(theme.focus_highlight()))
+                            .child(if all_collapsed {
+                                tr!("diff.expand_all_files")
+                            } else {
+                                tr!("diff.collapse_all_files")
+                            })
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.toggle_git_panel_commit_files(None, cx)
+                            }))
+                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                    this.toggle_git_panel_commit_files(None, cx);
+                                    cx.stop_propagation();
+                                }
+                            })),
+                    )
+                },
+            )
+            .when_some(github_base.clone(), |row, base| {
+                let url = format!("{base}/commit/{}", modal.sha);
+                row.child(
+                    icon_button("git-panel-commit-modal-github", "icons/github.svg", theme)
+                        .track_focus(
+                            &self.transcript_control_focus("git-commit-overview-github", cx),
+                        )
+                        .tab_index(0)
+                        .focus_visible(|style| style.bg(theme.focus_highlight()))
+                        .tooltip(Tooltip::text(tr!("git_panel.view_on_github")))
+                        .on_activation_app(move |_, cx| cx.open_url(&url)),
+                )
+            })
+            .child(
+                icon_button("git-panel-commit-modal-close", "icons/x.svg", theme)
+                    .track_focus(&self.transcript_control_focus("git-commit-overview-close", cx))
+                    .tab_index(0)
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                    .tooltip(Tooltip::text(tr!("common.close")))
+                    .on_activation(cx, Self::close_git_commit_overview),
+            )
+            .when(!self.right_panel_slot_visible(), |header| {
+                header.child(self.render_panel_toggles(cx))
+            });
         div()
             .id("git-panel-commit-view")
+            .debug_selector(|| "git-panel-commit-view".into())
+            .track_focus(&self.transcript_control_focus("git-commit-overview", cx))
+            .key_context(COMMIT_OVERVIEW_CONTEXT)
+            .on_action(cx.listener(|this, _: &DismissGitPanelModal, window, cx| {
+                this.close_git_commit_overview(window, cx);
+            }))
             .flex_1()
             .min_w_0()
-            .h_full()
+            .min_h_0()
             .flex()
             .flex_col()
             .bg(theme.canvas)
             .child(
                 div()
-                    .h(px(40.0))
-                    .flex_none()
-                    .pl(px(header_left_padding))
-                    .pr(px(14.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
                     .border_b(hairline())
                     .border_color(theme.separator)
-                    // The hash and subject share one baseline so different
-                    // faces and sizes still sit on the same line; the buttons
-                    // stay centered on the row itself.
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .flex()
-                            .items_baseline()
-                            .gap(px(8.0))
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .font_family(crate::fonts::current(cx).code)
-                                    .text_size(sp(12.0))
-                                    .text_color(theme.text_tertiary)
-                                    .child(modal.sha.chars().take(8).collect::<String>()),
-                            )
-                            .child(
-                                div()
-                                    .id("git-panel-commit-modal-subject")
-                                    .min_w_0()
-                                    .flex_1()
-                                    .truncate()
-                                    .text_size(sp(13.0))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .when(!subject_linked, |element| {
-                                        element.tooltip(Tooltip::text(modal.subject.clone()))
-                                    })
-                                    .child(subject_text),
-                            ),
-                    )
-                    .when(
-                        matches!(&modal.state, GitPanelCommitDiffState::Ready(_)),
-                        |row| {
-                            let all_collapsed = modal.state.snapshot().is_some_and(|snapshot| {
-                                !snapshot.files.is_empty()
-                                    && modal.collapsed_files.len() == snapshot.files.len()
-                            });
-                            row.child(
-                                div()
-                                    .id("git-panel-commit-modal-toggle-all")
-                                    .track_focus(&self.transcript_control_focus(
-                                        "git-panel-commit-toggle-all",
-                                        cx,
-                                    ))
-                                    .tab_index(0)
-                                    .px(px(8.0))
-                                    .py(px(4.0))
-                                    .rounded(px(5.0))
-                                    .text_size(sp(11.5))
-                                    .text_color(theme.text_secondary)
-                                    .hover(|style| style.bg(theme.overlay))
-                                    .focus_visible(|style| style.bg(theme.focus_highlight()))
-                                    .child(if all_collapsed {
-                                        tr!("diff.expand_all_files")
-                                    } else {
-                                        tr!("diff.collapse_all_files")
-                                    })
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.toggle_git_panel_commit_files(None, cx)
-                                    }))
-                                    .on_key_down(cx.listener(
-                                        |this, event: &KeyDownEvent, _, cx| {
-                                            if matches!(
-                                                event.keystroke.key.as_str(),
-                                                "enter" | "space"
-                                            ) {
-                                                this.toggle_git_panel_commit_files(None, cx);
-                                                cx.stop_propagation();
-                                            }
-                                        },
-                                    )),
-                            )
-                        },
-                    )
-                    .when_some(github_base.clone(), |row, base| {
-                        let url = format!("{base}/commit/{}", modal.sha);
-                        row.child(
-                            icon_button("git-panel-commit-modal-github", "icons/github.svg", theme)
-                                .tooltip(Tooltip::text(tr!("git_panel.view_on_github")))
-                                .on_click(move |_, _, cx| cx.open_url(&url)),
-                        )
-                    })
-                    .child(
-                        icon_button("git-panel-commit-modal-close", "icons/x.svg", theme)
-                            .tooltip(Tooltip::text(tr!("common.close")))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.dismiss_git_panel_modal(cx);
-                            })),
-                    ),
+                    .child(self.render_header_frame(header.into_any_element(), window, cx)),
             )
             .when(!modal.body.is_empty(), |card| {
                 let scroll = modal.body_scroll.clone();
@@ -6030,6 +6059,17 @@ impl Waku {
             })
             .child(body)
             .into_any_element()
+    }
+
+    fn close_git_commit_overview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.dismiss_git_panel_modal(cx);
+        if self.git_panel_visible {
+            window.focus(&self.right_panel_focus, cx);
+        } else if self.git_tab_visible() {
+            window.focus(&self.git_tab_focus(cx), cx);
+        } else {
+            self.focus_after_git_panel(window, cx);
+        }
     }
 
     /// A row in the commit-diff modal — the Review panel's own row shapes,
