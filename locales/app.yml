@@ -531,6 +531,10 @@ big_picture.empty_transcript:
   en: No messages yet
 project_switcher.recently_used:
   en: Recently used
+file_finder.project_placeholder:
+  en: Choose a project to search…
+file_finder.no_projects:
+  en: Add a project to search its files
 project_switcher.terminal_placeholder:
   en: Search projects to open a terminal in…
 

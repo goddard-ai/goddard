@@ -43,6 +43,7 @@ enum ProjectSwitcherTarget {
     BigPicture,
     BossChat,
     Terminal,
+    FileFinder,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -611,6 +612,34 @@ impl Waku {
         opened
     }
 
+    pub(super) fn toggle_file_finder_project_switcher(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.project_switcher.is_open() {
+            let was_file_finder = self.project_switcher.target == ProjectSwitcherTarget::FileFinder;
+            self.cancel_project_switcher(window, cx);
+            if was_file_finder {
+                return;
+            }
+        }
+        if self.open_switcher(
+            None,
+            self.state.selected_session,
+            ProjectSwitcherTarget::FileFinder,
+            true,
+            false,
+            window,
+            cx,
+        ) {
+            self.begin_project_switcher_search(window, cx);
+        } else {
+            self.show_toast(tr!("file_finder.no_projects"));
+            cx.notify();
+        }
+    }
+
     /// The first ⌘N opens the switcher searching — a focused field over the
     /// recency list — which the boss chat and the New Task page share.
     /// ⌘T's terminal pick reuses the same searching overlay.
@@ -623,7 +652,7 @@ impl Waku {
             .copied()
             .filter(|id| !is_picker_action_id(*id))
             .collect();
-        let terminal_target = self.project_switcher.target == ProjectSwitcherTarget::Terminal;
+        let target = self.project_switcher.target;
         let search = self
             .project_switcher
             .search
@@ -644,10 +673,10 @@ impl Waku {
             })
             .clone();
         search.update(cx, |input, cx| {
-            let label = if terminal_target {
-                tr!("project_switcher.terminal_placeholder")
-            } else {
-                tr!("command_palette.new_task_in_placeholder")
+            let label = match target {
+                ProjectSwitcherTarget::Terminal => tr!("project_switcher.terminal_placeholder"),
+                ProjectSwitcherTarget::FileFinder => tr!("file_finder.project_placeholder"),
+                _ => tr!("command_palette.new_task_in_placeholder"),
             };
             input.set_placeholder(label.clone(), cx);
             input.set_accessibility_label(label, cx);
@@ -706,7 +735,10 @@ impl Waku {
         target: ProjectSwitcherTarget,
         exclude_projectless: bool,
     ) -> Vec<Project> {
-        if target == ProjectSwitcherTarget::Terminal {
+        if matches!(
+            target,
+            ProjectSwitcherTarget::Terminal | ProjectSwitcherTarget::FileFinder
+        ) {
             return self
                 .state
                 .projects
@@ -967,6 +999,44 @@ impl Waku {
             }
             if let Some(previous_focus) = previous_focus {
                 window.focus(&previous_focus, cx);
+            }
+            cx.notify();
+            return;
+        }
+        if target == ProjectSwitcherTarget::FileFinder {
+            if let Some(previous_focus) = previous_focus {
+                window.focus(&previous_focus, cx);
+            }
+            if let Some(project_id) = selected
+                && self
+                    .project_switcher_pool(target, true)
+                    .iter()
+                    .any(|project| project.id == project_id)
+            {
+                // The project draft owns the strip that will hold the file tab.
+                self.create_session_for(project_id, self.state.last_provider, cx);
+                if let Some(pending) = self.pending_session_activation.as_ref()
+                    && pending.deferred.is_some()
+                    && self.state.sessions.iter().any(|session| {
+                        session.id == pending.session_id && session.project_id == project_id
+                    })
+                {
+                    self.request_session_activation(
+                        pending.session_id,
+                        SessionActivationTransition::Visit,
+                        cx,
+                    );
+                }
+                if self
+                    .selected_session()
+                    .is_some_and(|session| session.project_id == project_id)
+                    && self.resolve_right_panel_files_root(cx).is_some()
+                {
+                    if self.settings_page.take().is_some() {
+                        window.focus(&self.composer_focus(cx), cx);
+                    }
+                    self.open_file_finder(window, cx);
+                }
             }
             cx.notify();
             return;

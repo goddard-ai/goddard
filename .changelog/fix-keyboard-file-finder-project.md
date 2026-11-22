@@ -1,0 +1,1 @@
+- Cmd+P asks you to choose a project when the current view has no file search context.

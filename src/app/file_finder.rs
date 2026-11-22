@@ -340,10 +340,9 @@ impl Waku {
         }
     }
 
-    fn open_file_finder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // The finder's scope is the panel's files root — a session workspace
-        // or the terminal's cwd. With neither, there is nothing to search.
+    pub(super) fn open_file_finder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.resolve_right_panel_files_root(cx).is_none() {
+            self.toggle_file_finder_project_switcher(window, cx);
             return;
         }
         // Land the panel's files slice on that same root first, so a confirm
