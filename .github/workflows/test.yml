@@ -22,7 +22,8 @@ jobs:
       matrix:
         os: [macos-latest, ubuntu-24.04, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    # A cold macOS build ran through the 90-minute limit before tests began.
+    timeout-minutes: ${{ matrix.os == 'macos-latest' && 150 || 90 }}
     env:
       RUSTC_WRAPPER: sccache
       # CI runners have no incremental state to reuse. Disabling incremental
@@ -93,6 +94,8 @@ jobs:
       # linker incompatibility fails here instead of during a release.
       - name: Run tests
         env:
+          # MSVC 14.52's conforming preprocessor rejects eSpeak's __has_include_next shim.
+          _CL_: ${{ runner.os == 'Windows' && '/Zc:preprocessor-' || '' }}
           RUSTFLAGS: ${{ (runner.os == 'Linux' && '-C linker=clang -C link-arg=-fuse-ld=mold') || (runner.os == 'Windows' && '-C linker=rust-lld') || '' }}
         run: cargo test --workspace --locked
 
