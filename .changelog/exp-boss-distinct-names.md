@@ -1,0 +1,1 @@
+- Boss, Counsel, and employees keep distinct names so you can tell who is speaking.

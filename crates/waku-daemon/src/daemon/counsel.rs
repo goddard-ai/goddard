@@ -1,4 +1,5 @@
 use super::*;
+use waku_boss::counsel::counsel_identity_seed;
 use waku_protocol::boss::{BossOperation, BossResult};
 use waku_protocol::counsel::{
     CounselDecision, CounselOperation, CounselRecommendation, CounselSource, CounselState,
@@ -22,18 +23,6 @@ pub(super) fn is_automatic_counsel_prompt(entry: &crate::agent::AgentPrompt) -> 
     entry.hidden
         && entry.sender.is_none()
         && matches!(entry.prompt.as_str(), REVIEW | RECOMMEND | LEGACY_RECOMMEND)
-}
-
-fn counsel_identity_seed() -> waku_protocol::boss::BossIdentity {
-    let id = Uuid::new_v4();
-    waku_protocol::boss::BossIdentity {
-        id,
-        name: ["Atlas", "Nova", "Sage", "Orion", "Clover", "Quinn"]
-            [id.as_bytes()[0] as usize % 6]
-            .into(),
-        avatar_seed: id.to_string(),
-        avatar_style: Default::default(),
-    }
 }
 
 impl WakuBackend {
@@ -114,7 +103,7 @@ impl WakuBackend {
                     // seed lazily so an existing chat upgrades on next open.
                     let seeded_identity = counsel.identity.is_none();
                     if seeded_identity {
-                        let mut identity = counsel_identity_seed();
+                        let mut identity = counsel_identity_seed(&document);
                         identity.avatar_style = document.identity.avatar_style;
                         counsel.identity = Some(identity);
                     }
@@ -459,11 +448,12 @@ impl WakuBackend {
                     "name must contain 1–100 characters"
                 );
                 self.boss.with_operation_lock(|| {
-                    let mut counsel = self.boss.document().counsel;
+                    let document = self.boss.document();
+                    let mut counsel = document.counsel.clone();
                     let expected = counsel.revision;
                     let identity = counsel
                         .identity
-                        .get_or_insert_with(counsel_identity_seed);
+                        .get_or_insert_with(|| counsel_identity_seed(&document));
                     identity.name = name.trim().into();
                     self.boss.save_counsel(expected, counsel, None)?;
                     Ok(BossResult::Counsel {
@@ -477,11 +467,12 @@ impl WakuBackend {
                     "only the human can re-roll Counsel's avatar"
                 );
                 self.boss.with_operation_lock(|| {
-                    let mut counsel = self.boss.document().counsel;
+                    let document = self.boss.document();
+                    let mut counsel = document.counsel.clone();
                     let expected = counsel.revision;
                     let identity = counsel
                         .identity
-                        .get_or_insert_with(counsel_identity_seed);
+                        .get_or_insert_with(|| counsel_identity_seed(&document));
                     identity.avatar_seed = Uuid::new_v4().to_string();
                     self.boss.save_counsel(expected, counsel, None)?;
                     Ok(BossResult::Counsel {

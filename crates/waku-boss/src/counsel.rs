@@ -1,8 +1,10 @@
 //! Counsel has read access to work and proposes instructions; the daemon
 //! keeps human approval and delivery separate from model output.
 
+use crate::boss::{LEADERSHIP_NAMES, employee_names, same_identity_name};
 use crate::{BossService, SessionCommit};
 use uuid::Uuid;
+use waku_protocol::boss::{BossIdentity, BossState};
 use waku_protocol::counsel::CounselState;
 use waku_protocol::model::{AgentSession, Project};
 
@@ -45,6 +47,38 @@ pub fn recent_context(
     )
 }
 
+pub(crate) fn available_counsel_name(state: &BossState, id: Uuid) -> String {
+    let names = LEADERSHIP_NAMES;
+    let start = id.as_bytes()[0] as usize % names.len();
+    let available = |candidate: &str| {
+        !same_identity_name(&state.identity.name, candidate)
+            && !employee_names(state).any(|name| same_identity_name(name, candidate))
+    };
+    names
+        .into_iter()
+        .cycle()
+        .skip(start)
+        .take(names.len())
+        .find(|name| available(name))
+        .map(str::to_owned)
+        .unwrap_or_else(|| {
+            (1..)
+                .map(|suffix| format!("{} {suffix}", names[start]))
+                .find(|name| available(name))
+                .expect("a finite roster cannot hold every suffix")
+        })
+}
+
+pub fn counsel_identity_seed(state: &BossState) -> BossIdentity {
+    let id = Uuid::new_v4();
+    BossIdentity {
+        id,
+        name: available_counsel_name(state, id),
+        avatar_seed: id.to_string(),
+        avatar_style: Default::default(),
+    }
+}
+
 impl BossService {
     /// Optimistic state write, optionally atomic with the host's session rows.
     pub fn save_counsel(
@@ -59,6 +93,14 @@ impl BossService {
                 state.counsel.revision == expected_revision,
                 "Counsel changed; refresh and try again"
             );
+            if let Some(identity) = &counsel.identity {
+                anyhow::ensure!(
+                    !same_identity_name(&state.identity.name, &identity.name)
+                        && !employee_names(state)
+                            .any(|name| same_identity_name(name, &identity.name)),
+                    "name is already used by Boss or an employee"
+                );
+            }
             state.counsel = counsel;
             Ok(())
         };

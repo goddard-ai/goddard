@@ -508,6 +508,7 @@ impl BossService {
         fs::create_dir_all(self.root.join("files/memory"))?;
         let mut state = self.storage.load(&self.root)?.unwrap_or_else(fresh_state);
         let now = waku_protocol::model::unix_time();
+        reconcile_identity_names(&mut state);
         reconcile_persona_defaults(&mut state);
         for employee in &mut state.employees {
             if employee.expired() && employee.expired_at.is_none() {
@@ -574,11 +575,15 @@ impl BossService {
                     .enumerate()
                     .filter(|(other_index, _)| *other_index != index)
                     .map(|(_, employee)| employee.identity.name.as_str())
+                    .chain(leadership_names(&state))
                     .collect::<Vec<_>>();
+                let mut cursor = state.name_cursor;
                 state.employees[index].identity.name =
-                    employee_human_name(existing_names, &mut state.name_cursor);
+                    employee_human_name(existing_names, &mut cursor);
+                state.name_cursor = cursor;
             }
         }
+        reconcile_identity_names(&mut state);
         reconcile_persona_defaults(&mut state);
         // Older documents recorded only the expired flag, not when the
         // employee finished. Give those entries a full reuse window after
@@ -776,6 +781,7 @@ impl BossService {
     pub fn add_employee(&self, employee: BossEmployee) -> anyhow::Result<()> {
         let now = waku_protocol::model::unix_time();
         self.update(|state| {
+            validate_employee_name(state, &employee.identity.name)?;
             state.employees.push(employee.clone());
             record_assignment_admission(state, &employee, now);
             Ok(())
@@ -2446,13 +2452,16 @@ impl BossService {
         let id = Uuid::new_v4();
         let mut name = String::new();
         self.update(|state| {
+            let mut cursor = state.name_cursor;
             name = employee_human_name(
                 state
                     .employees
                     .iter()
-                    .map(|employee| employee.identity.name.as_str()),
-                &mut state.name_cursor,
+                    .map(|employee| employee.identity.name.as_str())
+                    .chain(leadership_names(state)),
+                &mut cursor,
             );
+            state.name_cursor = cursor;
             Ok(())
         })?;
         Ok(BossEmployee {
@@ -3679,6 +3688,7 @@ impl BossService {
         mut ticket: SummonTicket,
     ) -> anyhow::Result<()> {
         let now = waku_protocol::model::unix_time();
+        validate_employee_name(state, &employee.identity.name)?;
         plan_contract::validate_binding(state, employee)?;
         state.next_sequence = state.next_sequence.saturating_add(1);
         ticket.sequence = state.next_sequence;
@@ -4786,6 +4796,13 @@ impl BossService {
                 self.require_owner(caller)?;
                 validate_name(&name)?;
                 self.update(|state| {
+                    anyhow::ensure!(
+                        !employee_names(state).any(|used| same_identity_name(used, &name))
+                            && !state.counsel.identity.as_ref().is_some_and(|identity| {
+                                same_identity_name(&identity.name, &name)
+                            }),
+                        "name is already used by Counsel or an employee"
+                    );
                     state.identity.name = name.trim().to_owned();
                     Ok(())
                 })?;
@@ -4798,6 +4815,7 @@ impl BossService {
                 self.require_owner(caller)?;
                 validate_name(&name)?;
                 self.update(|state| {
+                    validate_employee_name(state, &name)?;
                     let employee = state
                         .employees
                         .iter_mut()
@@ -5921,6 +5939,7 @@ impl BossService {
     fn reload_state(&self, state: &mut BossState) -> anyhow::Result<()> {
         let mut fresh = self.storage.load(&self.root)?.unwrap_or_else(fresh_state);
         let now = waku_protocol::model::unix_time();
+        reconcile_identity_names(&mut fresh);
         reconcile_persona_defaults(&mut fresh);
         for employee in &mut fresh.employees {
             if employee.expired() && employee.expired_at.is_none() {
@@ -6816,6 +6835,7 @@ fn employee_human_name<'a>(
     });
     let existing_names = existing_names
         .into_iter()
+        .map(|name| name.trim().to_lowercase())
         .collect::<std::collections::HashSet<_>>();
     let existing_initials = existing_names
         .iter()
@@ -6830,7 +6850,9 @@ fn employee_human_name<'a>(
                 .as_bytes()
                 .first()
                 .is_some_and(|initial| !existing_initials.contains(&initial.to_ascii_uppercase()));
-            if !existing_names.contains(candidate) && (!prefer_unused_initial || unused_initial) {
+            if !existing_names.contains(&candidate.to_ascii_lowercase())
+                && (!prefer_unused_initial || unused_initial)
+            {
                 *cursor = (*cursor).saturating_add(step + 1);
                 return candidate.into();
             }
@@ -6846,17 +6868,90 @@ fn employee_human_name<'a>(
     for step in 0..26u8 {
         let initial = (b'A' + (start + step) % 26) as char;
         let candidate = format!("{base} {initial}.");
-        if !existing_names.contains(candidate.as_str()) {
+        if !existing_names.contains(&candidate.to_ascii_lowercase()) {
             return candidate;
         }
     }
     for value in 27usize.. {
         let candidate = format!("{base} {}.", surname_suffix(value));
-        if !existing_names.contains(candidate.as_str()) {
+        if !existing_names.contains(&candidate.to_ascii_lowercase()) {
             return candidate;
         }
     }
     unreachable!("there is always an unused employee name suffix")
+}
+
+pub(crate) const LEADERSHIP_NAMES: [&str; 6] =
+    ["Atlas", "Nova", "Sage", "Orion", "Clover", "Quinn"];
+
+pub(crate) fn same_identity_name(left: &str, right: &str) -> bool {
+    left.trim().to_lowercase() == right.trim().to_lowercase()
+}
+
+pub(crate) fn employee_names(state: &BossState) -> impl Iterator<Item = &str> {
+    state
+        .employees
+        .iter()
+        .chain(state.retired_employees.iter())
+        .map(|employee| employee.identity.name.as_str())
+}
+
+fn leadership_names(state: &BossState) -> impl Iterator<Item = &str> {
+    std::iter::once(state.identity.name.as_str()).chain(
+        state
+            .counsel
+            .identity
+            .iter()
+            .map(|identity| identity.name.as_str()),
+    )
+}
+
+fn validate_employee_name(state: &BossState, name: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        !leadership_names(state).any(|used| same_identity_name(used, name)),
+        "name is already used by Boss or Counsel"
+    );
+    Ok(())
+}
+
+// Keep Boss's name. Move Counsel first so a Counsel-only collision can
+// be repaired without changing the employee, even if the employee retired.
+fn reconcile_identity_names(state: &mut BossState) {
+    let boss_name = state.identity.name.clone();
+    if let Some(identity) = state.counsel.identity.as_ref() {
+        if same_identity_name(&boss_name, &identity.name)
+            || employee_names(state).any(|name| same_identity_name(name, &identity.name))
+        {
+            let name = crate::counsel::available_counsel_name(state, identity.id);
+            state
+                .counsel
+                .identity
+                .as_mut()
+                .expect("Counsel identity exists")
+                .name = name;
+            state.counsel.revision = state.counsel.revision.saturating_add(1);
+        }
+    }
+
+    if !employee_names(state).any(|name| same_identity_name(name, &boss_name)) {
+        return;
+    }
+    let mut reserved: Vec<String> = employee_names(state)
+        .chain(leadership_names(state))
+        .map(str::to_owned)
+        .collect();
+    for employee in state
+        .employees
+        .iter_mut()
+        .chain(std::sync::Arc::make_mut(&mut state.retired_employees).iter_mut())
+    {
+        if same_identity_name(&employee.identity.name, &boss_name) {
+            let name =
+                employee_human_name(reserved.iter().map(String::as_str), &mut state.name_cursor);
+            reserved.push(name.clone());
+            employee.identity.name = name;
+        }
+    }
 }
 
 fn validate_name(name: &str) -> anyhow::Result<()> {
@@ -8031,7 +8126,7 @@ fn fresh_state() -> BossState {
     let id = Uuid::new_v4();
     let persona_id = Uuid::new_v4();
     let employee_id = Uuid::new_v4();
-    let names = ["Atlas", "Nova", "Sage", "Orion", "Clover", "Quinn"];
+    let names = LEADERSHIP_NAMES;
     let specialist_ids: BTreeMap<PersonaDefaultRole, Uuid> = PersonaDefaultRole::SPECIALISTS
         .iter()
         .copied()
@@ -8166,6 +8261,100 @@ mod tests {
         assert!(service.document().session_id.is_none());
         assert!(service.document().identity.id.is_nil());
         assert!(!root.exists());
+    }
+
+    #[test]
+    fn employee_names_reserve_leadership_names_across_restart_and_rename() {
+        let root = std::env::temp_dir().join(format!("boss-names-{}", Uuid::new_v4()));
+        let database = root.join("app.db");
+        let service = BossService::open_database(root.clone(), database.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service.set_session_id(boss).unwrap();
+        let mut employee = service
+            .prepare_employee(
+                boss,
+                None,
+                "Release checks".into(),
+                None,
+                false,
+                EmployeeGoal::Errand,
+                None,
+            )
+            .unwrap();
+        employee.identity.name = " atlas ".into();
+        let mut unrelated = employee.clone();
+        unrelated.session_id = Uuid::new_v4();
+        unrelated.identity.id = unrelated.session_id;
+        unrelated.identity.name = "Unrelated".into();
+        let counsel_id = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.identity.name = "Atlas".into();
+                state.counsel.identity = Some(BossIdentity {
+                    id: counsel_id,
+                    name: "ATLAS".into(),
+                    avatar_seed: "keep".into(),
+                    avatar_style: Default::default(),
+                });
+                state.employees.push(unrelated.clone());
+                std::sync::Arc::make_mut(&mut state.retired_employees).push(employee.clone());
+                Ok(())
+            })
+            .unwrap();
+        drop(service);
+
+        let service = BossService::disabled_database(root.clone(), database.clone());
+        service.activate().unwrap();
+        let document = service.document();
+        let counsel = document.counsel.identity.as_ref().unwrap();
+        let retired = &document.retired_employees[0];
+        assert_eq!(document.identity.name, "Atlas");
+        assert_eq!(counsel.id, counsel_id);
+        assert_eq!(counsel.avatar_seed, "keep");
+        assert_eq!(document.employees[0].identity, unrelated.identity);
+        assert_eq!(retired.identity.id, employee.identity.id);
+        assert!(validate_employee_name(&document, &retired.identity.name).is_ok());
+        assert!(!same_identity_name(&counsel.name, "Atlas"));
+
+        for name in [&counsel.name, &retired.identity.name] {
+            assert!(
+                service
+                    .handle(
+                        None,
+                        BossOperation::Rename {
+                            name: format!(" {} ", name.to_uppercase()),
+                        }
+                    )
+                    .is_err()
+            );
+        }
+        assert!(
+            service
+                .handle(
+                    None,
+                    BossOperation::RenameEmployee {
+                        session_id: unrelated.session_id,
+                        name: counsel.name.to_uppercase(),
+                    }
+                )
+                .is_err()
+        );
+        let mut renamed = document.counsel.clone();
+        renamed.identity.as_mut().unwrap().name = " atlas ".into();
+        assert!(
+            service
+                .save_counsel(renamed.revision, renamed, None)
+                .is_err()
+        );
+        assert_eq!(service.document().revision, document.revision);
+        drop(service);
+
+        let reopened = BossService::open_database(root.clone(), database)
+            .unwrap()
+            .document();
+        assert_eq!(reopened.counsel.identity.as_ref(), Some(counsel));
+        assert_eq!(reopened.retired_employees[0].identity, retired.identity);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
