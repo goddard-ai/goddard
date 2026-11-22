@@ -70,7 +70,7 @@ pub(super) fn availability(path: &str) -> Value {
             json!({"roles":["boss","planning","human"],"conditions":["Boss experiment enabled","Daemon enforces operation-specific authority"]})
         }
         "create" => {
-            json!({"roles":["task","human"],"conditions":["Explicit human request","Boss uses summon; employee cannot create ordinary tasks"]})
+            json!({"roles":["boss","task","human"],"conditions":["Explicit human request","Boss means the active Boss chat; planning sessions, Counsel and employees cannot create ordinary tasks"]})
         }
         "resource acquire" | "resource run" => {
             json!({"roles":["task","employee","human"],"conditions":["Boss delegates resource execution to employees"]})

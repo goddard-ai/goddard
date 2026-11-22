@@ -16,7 +16,7 @@ impl WakuBackend {
         events: EventSink,
     ) -> anyhow::Result<ResponsePayload> {
         self.require_agent_tools()?;
-        if sender.is_some_and(|id| self.boss.is_managed(id)) {
+        if sender.is_some_and(|id| self.boss.is_managed(id) && !self.boss.is_boss(id)) {
             bail!("Boss roles summon employees through `goddard-agent boss`, not `create`");
         }
         let session_id = self.create_agent_task(

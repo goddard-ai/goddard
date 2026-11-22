@@ -2672,12 +2672,6 @@ impl Backend for WakuBackend {
                 let sender = agent.or_else(|| {
                     (!session_id.is_nil() && self.known_session(session_id)).then_some(session_id)
                 });
-                // The coordinator delegates execution — an unmanaged task
-                // launch would bypass employee admission, grants and durable
-                // records. Boss principals summon instead.
-                if sender.is_some_and(|id| self.boss.is_boss_principal(id)) {
-                    bail!("the boss delegates task work to employees — summon one instead");
-                }
                 self.agent_create_session(
                     sender,
                     AgentCreateSelection {

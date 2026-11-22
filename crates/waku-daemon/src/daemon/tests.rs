@@ -8423,6 +8423,156 @@ fn retained_unstarted_employee_task_stays_in_catalog_after_retirement() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+#[test]
+#[ignore = "set GODDARD_TEST_AGENT_CLI to the built goddard-agent executable"]
+fn boss_creates_a_normal_worktree_task_through_the_cli() {
+    struct FixtureRoot(PathBuf);
+    impl Drop for FixtureRoot {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let root = FixtureRoot(std::env::temp_dir().join(format!("boss-create-{}", Uuid::new_v4())));
+    let (mut backend, boss) = surface_test_backend(&root.0);
+    backend.boss.set_session_id(boss).unwrap();
+    runtime_generation_configure_launch(&mut backend, &root.0);
+    let mut settings = backend.settings.get();
+    settings.agent_tools_enabled = true;
+    backend.settings.replace(settings).unwrap();
+    let capture = Arc::new(CaptureDriver::default());
+    let driver_capture = capture.clone();
+    backend.runtime_test_start = Some(Arc::new(move |_, _, _| {
+        Ok(DriverHandle::from_control(driver_capture.clone()))
+    }));
+
+    let repo = root.0.join("repo");
+    let git = |cwd: &Path, args: &[&str]| {
+        let output = crate::command_env::search_path_command("git")
+            .current_dir(cwd)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    };
+    git(&repo, &["init", "-b", "dev"]);
+    git(
+        &repo,
+        &[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.com",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "Local dev base",
+        ],
+    );
+    git(&repo, &["checkout", "-b", "other"]);
+    git(
+        &repo,
+        &[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.com",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "Different checkout head",
+        ],
+    );
+
+    let token = backend.agent.mint(boss);
+    let backend = Arc::new(backend);
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let server_shutdown = shutdown.clone();
+    let server_backend = backend.clone();
+    let server = std::thread::spawn(move || {
+        crate::server::serve(
+            listener,
+            "test-desktop-token".into(),
+            server_backend,
+            server_shutdown,
+            crate::server::ServerOptions::default(),
+        )
+        .unwrap()
+    });
+
+    let output = std::process::Command::new(std::env::var_os("GODDARD_TEST_AGENT_CLI").unwrap())
+        .env_remove(waku_protocol::RUNTIME_INGRESS_ENV)
+        .env("GODDARD_DAEMON_ADDRESS", address.to_string())
+        .env("GODDARD_AGENT_TOKEN", token)
+        .env("GODDARD_TASK_ID", boss.to_string())
+        .args([
+            "create",
+            "--output",
+            "json",
+            "--project",
+            repo.to_str().unwrap(),
+            "--workspace",
+            "worktree",
+            "--base-branch",
+            "dev",
+            "--provider",
+            "codex",
+            "--model",
+            "gpt-6.1-sol",
+            "--effort",
+            "medium",
+            "--text",
+            "Fixture prompt",
+        ])
+        .output();
+    shutdown.store(true, std::sync::atomic::Ordering::Release);
+    server.join().unwrap();
+    let output = output.unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let created: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let id: Uuid = created["task_id"].as_str().unwrap().parse().unwrap();
+    let mut state = backend.task_state.lock();
+    let task = state.session_mut(id).unwrap();
+    backend.task_store.hydrate(task).unwrap();
+    assert!(!task.boss_managed);
+    assert!(!backend.boss.is_managed(id));
+    assert_eq!(task.provider, ProviderKind::Codex);
+    assert_eq!(task.model.as_deref(), Some("gpt-6.1-sol"));
+    assert_eq!(task.reasoning_effort.as_deref(), Some("medium"));
+    let SessionWorkspace::Worktree {
+        path, base_branch, ..
+    } = &task.workspace
+    else {
+        panic!("expected a worktree task");
+    };
+    assert_eq!(base_branch.as_deref(), Some("dev"));
+    assert_ne!(
+        git(&repo, &["rev-parse", "HEAD"]),
+        git(path, &["rev-parse", "HEAD"])
+    );
+    assert_eq!(
+        git(&repo, &["rev-parse", "dev"]),
+        git(path, &["rev-parse", "HEAD"])
+    );
+    assert!(
+        capture
+            .prompts
+            .lock()
+            .iter()
+            .any(|prompt| prompt.contains("Fixture prompt"))
+    );
+}
+
 /// A worktree summon is the same managed worktree `agent create` makes:
 /// the employee task runs in the detached checkout and its assignment
 /// names that path, not the supervisor's primary checkout. The launch

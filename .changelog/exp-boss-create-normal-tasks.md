@@ -1,0 +1,1 @@
+- The Boss can start a normal Goddard task with `goddard-agent create` when you ask for one.

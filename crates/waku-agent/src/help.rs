@@ -19,7 +19,9 @@ turn, or cancel and deliver after settlement when steering is unsupported. Idle 
 resume through admission; queued assignments still respect capacity. Human and non-Boss
 queue delivery waits behind current work; explicit steer requires a live turn. Boss policy requires an explicit
 employee icon even though the CLI permits omission. Respect assigned model routing, resource
-caps and human preferences. Employees own execution, watching, commits and merge submit; Boss
+caps and human preferences. The Boss chat can use goddard-agent create to start a normal task
+when the human asks for one. Use boss summon for employee assignments. Employees own the
+execution, watching, commits and merge submit for those assignments; Boss
 delegates those jobs. errand finishes report upward; goal completion is visible in Goals
 without a routine success report; actionable blockers still report upward. Employees cannot prompt or steer supervisors; results are delivered at turn end. Persona names resolve exactly;
 use UUIDs if ambiguous. Project selection does not grant private memory access. Plan
@@ -115,7 +117,8 @@ fn authority(path: &str) -> &str {
         p if p == "wireframe" || p.starts_with("wireframe comment ") => {
             "Any scoped task, including planning sessions; Wireframes experiment must be enabled"
         }
-        "create" | "rename" => {
+        "create" => "Active Boss chat, ordinary tasks and human clients; explicit human request",
+        "rename" => {
             "Ordinary-task-only; Boss credentials are rejected; rename may wait for human approval"
         }
         "command list" | "command upsert" | "command remove" => {
