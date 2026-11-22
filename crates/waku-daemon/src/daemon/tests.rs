@@ -24235,4 +24235,5 @@ mod scratch;
 #[path = "tests/configured_prompts.rs"]
 mod configured_prompts;
 
+#[cfg(unix)]
 mod stable_configuration_stop;

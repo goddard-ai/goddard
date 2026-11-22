@@ -247,7 +247,9 @@ fn probe(configured_prompt: bool, same_connection: bool) -> Observation {
             );
             let _ = finished.send((began.elapsed(), result));
         });
-        let early = completion.recv_timeout(Duration::from_millis(250)).ok();
+        // This fixture checks ordering, not a latency budget. Keep activation
+        // withheld, with a watchdog shorter than the five-second RPC deadline.
+        let early = completion.recv_timeout(Duration::from_secs(2)).ok();
         let cancelled_before_activation = !adapter.cancels().is_empty();
         // Release before joining or asserting, including on the old blocked path.
         let (revision, target) = adapter
