@@ -2,11 +2,9 @@ use super::*;
 use waku_boss::counsel::counsel_identity_seed;
 use waku_protocol::boss::{BossOperation, BossResult};
 use waku_protocol::counsel::{
-    CounselDecision, CounselOperation, CounselRecommendation, CounselSource, CounselState,
-    CounselStatus,
+    COUNSEL_REVIEW_PROMPT, CounselDecision, CounselOperation, CounselRecommendation, CounselSource,
+    CounselState, CounselStatus,
 };
-
-const REVIEW: &str = "Review my recent sessions and current priorities. Check the relevant transcript endings, including recently archived work. Offer the clearest useful next action with supporting session links, or say there is no clear next step. Respect my previous Later and Dismiss choices, and check results of instructions already sent to Boss.";
 
 // Older daemons parked this exact text in the durable queue.
 const LEGACY_RECOMMEND: &str = "Your last answer settled the human's question. Now act on your own initiative: review my recent sessions and current priorities, including recently archived work. Offer the clearest useful next action — propose it with `goddard-agent boss counsel propose` when it is actionable — or say there is no clear next step. Respect my previous Later and Dismiss choices, and check results of instructions already sent to Boss.";
@@ -22,7 +20,10 @@ pub(super) const DIRECT_HANDOFF_PREFIX: &str =
 pub(super) fn is_automatic_counsel_prompt(entry: &crate::agent::AgentPrompt) -> bool {
     entry.hidden
         && entry.sender.is_none()
-        && matches!(entry.prompt.as_str(), REVIEW | RECOMMEND | LEGACY_RECOMMEND)
+        && matches!(
+            entry.prompt.as_str(),
+            COUNSEL_REVIEW_PROMPT | RECOMMEND | LEGACY_RECOMMEND
+        )
 }
 
 impl WakuBackend {
@@ -71,7 +72,7 @@ impl WakuBackend {
                 mode,
             } => {
                 anyhow::ensure!(caller.is_none(), "only the human can open Counsel");
-                let (session, project, review) = self.boss.with_operation_lock(|| {
+                let (session, project) = self.boss.with_operation_lock(|| {
                     let document = self.boss.document();
                     let mut counsel = document.counsel.clone();
                     let expected = counsel.revision;
@@ -107,36 +108,9 @@ impl WakuBackend {
                         identity.avatar_style = document.identity.avatar_style;
                         counsel.identity = Some(identity);
                     }
-                    let (_, activity) =
-                        waku_boss::counsel::recent_context(&state.projects, &state.sessions, id);
-                    let changed = counsel.reviewed_activity.as_ref() != Some(&activity);
-                    // A queued review reads fresh context at delivery. Reuse
-                    // it when more work changes while Counsel is busy/offline.
-                    let review_pending =
-                        state.sessions[index].queued_messages.iter().any(|message| {
-                            message.is_agent_owned() && message.hidden && message.content == REVIEW
-                        });
-                    let review = if changed
-                        && !review_pending
-                        && !counsel.has_outstanding_recommendation()
-                    {
-                        let mut message = crate::model::QueuedMessage::agent(REVIEW, None);
-                        message.hidden = true;
-                        Some(message)
-                    } else {
-                        None
-                    };
-                    if created
-                        || review.is_some()
-                        || seeded_identity
-                        || state.sessions[index].archived_at.is_some()
-                    {
+                    if created || seeded_identity || state.sessions[index].archived_at.is_some() {
                         let previous = state.sessions[index].clone();
                         state.sessions[index].archived_at = None;
-                        if let Some(message) = &review {
-                            state.sessions[index].queued_messages.push(message.clone());
-                            counsel.reviewed_activity = Some(activity);
-                        }
                         state.mark_session_dirty(id);
                         if let Err(error) =
                             self.save_counsel_sessions(&mut state, expected, counsel)
@@ -150,29 +124,9 @@ impl WakuBackend {
                             return Err(error);
                         }
                     }
-                    Ok::<_, anyhow::Error>((state.sessions[index].clone(), project, review))
+                    Ok::<_, anyhow::Error>((state.sessions[index].clone(), project))
                 })?;
                 self.boss.notify_session_commit();
-                if let Some(message) = review {
-                    // A failed launch remains durable; report it to the client
-                    // and let the next Open retry that same queued identity.
-                    self.queue_agent_message(session.id, message, events)
-                        .context("Counsel is saved, but its queued review could not start")?;
-                } else if !self.agent.user_stopped(session.id)
-                    && session
-                        .queued_messages
-                        .iter()
-                        .any(|message| message.is_agent_owned())
-                {
-                    let (runtime, driver) = self
-                        .ensure_agent_runtime(session.id, events)
-                        .context("Counsel's saved review could not resume")?;
-                    self.drain_agent_queue(
-                        session.id,
-                        &driver,
-                        &events.for_session(session.id, runtime),
-                    )?;
-                }
                 Ok(BossResult::Session {
                     session: Box::new(session),
                     project: Box::new(project),

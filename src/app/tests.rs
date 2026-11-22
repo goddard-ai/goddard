@@ -9853,6 +9853,78 @@ mod live_employee_approvals {
 
     // Headless state/navigation regression; no screenshots or visual assertions.
     #[gpui::test]
+    fn empty_enter_resumes_idle_counsel(cx: &mut gpui::TestAppContext) {
+        let (_env, dir) = isolated_env();
+        let project = Project::from_path(dir.clone());
+        let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+        session.boss_managed = true;
+        session.detail_loaded = true;
+        let id = session.id;
+        let runtime_id = Uuid::new_v4();
+        let mut boss = boss_state(None, Vec::new());
+        boss.counsel.session_id = Some(id);
+        let daemon = FakeDaemon::start(dir, project.clone(), vec![session.clone()], boss.clone());
+        *daemon.response_hook.lock() = Some(Arc::new(move |_, command| {
+            let payload = match command {
+                Command::GetSettings => ResponsePayload::Settings {
+                    settings: DaemonSettings {
+                        boss_experiment_enabled: true,
+                        counsel_experiment_enabled: true,
+                        ..Default::default()
+                    },
+                },
+                Command::AttachSession => ResponsePayload::SessionRuntime {
+                    runtime_id: Some(runtime_id),
+                    supports_steer: true,
+                    supports_user_input_actions: true,
+                },
+                _ => return None,
+            };
+            Some(ResponseOutcome::Ok { payload })
+        }));
+        let supervisor = DaemonSupervisor::connect(&daemon.address, "test-token".into()).unwrap();
+        let (view, vcx) = test_app(cx, supervisor.clone());
+        update_app(vcx, &view, |waku, window, cx| {
+            crate::input::init(cx);
+            waku.state.projects = vec![project];
+            waku.state.sessions = vec![session];
+            waku.probes.insert(
+                waku_client::DaemonKey::Local,
+                vec![crate::model::ProviderProbe {
+                    provider: ProviderKind::Codex,
+                    installed: true,
+                    path: Some("controlled-provider".into()),
+                    models: Vec::new(),
+                    agent_presets: Vec::new(),
+                }],
+            );
+            waku.state.boss_experiment_enabled = true;
+            waku.state.counsel_experiment_enabled = true;
+            waku.boss_ui.states.insert(waku_client::DaemonKey::Local, boss);
+            let runtime = attach_runtime(waku, &supervisor, id, runtime_id);
+            waku.runtimes.insert(id, runtime);
+            waku.request_session_activation(
+                id,
+                super::super::SessionActivationTransition::Visit,
+                cx,
+            );
+            waku.refocus_composer(window, cx);
+        });
+        let review_sent = || {
+            daemon.commands_for(id).iter().any(|command| match command {
+                Command::Prompt { prompt, hidden, .. }
+                | Command::PromptWithConfiguration { prompt, hidden, .. } => {
+                    *hidden && prompt == waku_protocol::counsel::COUNSEL_REVIEW_PROMPT
+                }
+                _ => false,
+            })
+        };
+        assert!(!review_sent());
+        vcx.simulate_keystrokes("enter");
+        wait_for(vcx, &view, |_| review_sent());
+    }
+
+    #[gpui::test]
     fn provider_switch_takes_focus_from_the_active_window(cx: &mut gpui::TestAppContext) {
         let (_env, dir) = isolated_env();
         let project = Project::from_path(dir.join("project"));

@@ -1,0 +1,1 @@
+- Opening Counsel leaves the chat idle. Press Enter on an empty composer to ask Counsel to continue.

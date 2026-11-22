@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
+/// Provider instruction used when the human resumes an idle Counsel chat.
+pub const COUNSEL_REVIEW_PROMPT: &str = "Review my recent sessions and current priorities. Check the relevant transcript endings, including recently archived work. Offer the clearest useful next action with supporting session links, or say there is no clear next step. Respect my previous Later and Dismiss choices, and check results of instructions already sent to Boss.";
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct CounselState {

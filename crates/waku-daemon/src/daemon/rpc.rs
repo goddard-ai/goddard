@@ -3343,6 +3343,15 @@ impl Backend for WakuBackend {
                         *prompt = self.boss_outbound_prompt(session_id, std::mem::take(prompt));
                     }
                 }
+                if let Command::Prompt {
+                    prompt,
+                    hidden: true,
+                    ..
+                } = &mut command
+                    && self.boss.is_counsel(session_id)
+                {
+                    *prompt = self.boss_outbound_prompt(session_id, std::mem::take(prompt));
+                }
                 if let Command::Steer {
                     prompt,
                     hidden: true,

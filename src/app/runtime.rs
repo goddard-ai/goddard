@@ -7245,8 +7245,7 @@ impl Waku {
 
     /// The submission a Continue sends on `session_id`: the dead turn's
     /// own prompt when it never reached the provider, else the hidden
-    /// continue. `None` when the session is missing, its last turn
-    /// settled, or no provider could run the retry.
+    /// continue. Idle Counsel receives a review request.
     fn interrupted_session_continue_submission(
         &mut self,
         session_id: Uuid,
@@ -7259,10 +7258,14 @@ impl Waku {
             .sessions
             .iter()
             .find(|session| session.id == session_id)?;
-        if !self.session_awaits_continue(session) {
+        let interrupted = self.session_awaits_continue(session);
+        let counsel = self.counsel_can_continue(session);
+        if !interrupted && !counsel {
             return None;
         }
-        let resend = composer::undelivered_turn_resend(session);
+        let resend = interrupted
+            .then(|| composer::undelivered_turn_resend(session))
+            .flatten();
         // A client-owned entry already queued resumes the session on its
         // own — a hidden nudge behind it would fire a redundant invisible
         // turn once the queue drains.
@@ -7286,6 +7289,9 @@ impl Waku {
                 submission
             }
             None if nudge_covered => return None,
+            None if counsel && !interrupted => ComposerSubmission::hidden_prompt(
+                waku_protocol::counsel::COUNSEL_REVIEW_PROMPT.to_owned(),
+            ),
             None => ComposerSubmission::hidden_continue(),
         })
     }

@@ -6746,12 +6746,10 @@ impl Waku {
                             && !this.has_annotations()
                             && this.selected_session().is_some_and(|session| {
                                 this.session_awaits_continue(session)
+                                    || this.counsel_can_continue(session)
                                     || this.quarantine_handoff_transfer(session).is_some()
                             })
                         {
-                            // Empty-composer Enter uses the play button's
-                            // Continue flow for stopped or Partial turns
-                            // and unstarted quarantined transfers.
                             this.continue_interrupted_session(cx);
                         } else if let Some(submission) =
                             this.submission_with_attachments(prompt, cx)
@@ -6777,7 +6775,16 @@ impl Waku {
                             if this.live_deliverable_page().is_some() {
                                 return;
                             }
-                            if !this.big_picture.is_open() && this.accept_displayed_suggestion(cx) {
+                            if this.state.composer_enter_steers
+                                && !this.big_picture.is_open()
+                                && this.composer_session().is_some_and(|session| {
+                                    this.counsel_can_continue(session)
+                                })
+                            {
+                                this.continue_interrupted_session(cx);
+                            } else if !this.big_picture.is_open()
+                                && this.accept_displayed_suggestion(cx)
+                            {
                                 // A suggestion chip owns ⌘⏎ while the
                                 // composer is empty — its hint advertises
                                 // the chord.

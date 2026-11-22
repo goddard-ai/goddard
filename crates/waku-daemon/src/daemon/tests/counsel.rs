@@ -1,5 +1,7 @@
 use super::*;
-use waku_protocol::counsel::{CounselDecision, CounselOperation as Action, CounselStatus};
+use waku_protocol::counsel::{
+    COUNSEL_REVIEW_PROMPT, CounselDecision, CounselOperation as Action, CounselStatus,
+};
 
 fn fixture(
     root: &Path,
@@ -56,6 +58,33 @@ fn open(backend: &WakuBackend) -> Uuid {
         panic!("expected Counsel chat")
     };
     session.id
+}
+
+fn submit_review(backend: &WakuBackend, counsel: Uuid) {
+    let events = EventSink::detached();
+    let (runtime_id, _) = backend.ensure_agent_runtime(counsel, &events).unwrap();
+    backend
+        .handle(
+            Request {
+                request_id: Uuid::new_v4(),
+                session_id: counsel,
+                runtime_id,
+                command: Command::Prompt {
+                    runtime_mode: None,
+                    prompt: COUNSEL_REVIEW_PROMPT.into(),
+                    turn_id: None,
+                    message_id: None,
+                    hidden: true,
+                    attachments: Vec::new(),
+                },
+            },
+            events,
+            None,
+        )
+        .unwrap();
+    let state = backend.task_state.lock();
+    let session = state.sessions.iter().find(|session| session.id == counsel).unwrap();
+    assert!(session.active_turn_id().is_some());
 }
 
 fn propose(
@@ -125,6 +154,7 @@ fn counsel_owns_history_and_approved_instruction_reaches_boss_once() {
     );
     assert_eq!(backend.boss.document().session_id, Some(boss));
     assert_eq!(open(&backend), counsel);
+    submit_review(&backend, counsel);
     let prompt = captures.lock()[&counsel].prompts.lock()[0].clone();
     assert!(prompt.contains("You are Counsel"));
     assert!(prompt.contains(&task.to_string()));
@@ -462,83 +492,23 @@ fn counsel_failed_approval_commit_leaves_no_instruction_for_boss() {
 }
 
 #[test]
-fn counsel_reopens_the_saved_review_after_a_provider_launch_failure() {
-    let root = std::env::temp_dir().join(format!("counsel-retry-{}", Uuid::new_v4()));
-    let (mut backend, task, captures) = fixture(&root);
-    let start = backend.runtime_test_start.take().unwrap();
-    let fail = std::sync::atomic::AtomicBool::new(true);
-    backend.runtime_test_start = Some(Arc::new(move |provider, options, sender| {
-        if fail.swap(false, std::sync::atomic::Ordering::SeqCst) {
-            anyhow::bail!("injected provider launch failure");
-        }
-        start(provider, options, sender)
-    }));
-    let result = invoke(
-        &backend,
-        None,
-        Action::Open {
-            provider: ProviderKind::Codex,
-            model: None,
-            mode: Default::default(),
-        },
-    );
-    assert!(
-        result
-            .unwrap_err()
-            .to_string()
-            .contains("queued review could not start")
-    );
-    let counsel = backend.boss.document().counsel.session_id.unwrap();
-    let review_id = {
+fn counsel_open_stays_passive_with_a_saved_review() {
+    let root = std::env::temp_dir().join(format!("counsel-passive-{}", Uuid::new_v4()));
+    let (backend, _task, captures) = fixture(&root);
+    let counsel = open(&backend);
+    assert!(captures.lock().is_empty());
+    {
         let mut state = backend.task_state.lock();
-        let source = state.session_mut(task).unwrap();
-        source.updated_at += 1;
+        let session = state.session_mut(counsel).unwrap();
+        assert!(session.turns.is_empty());
+        assert!(session.queued_messages.is_empty());
+        let mut legacy_review = crate::model::QueuedMessage::agent(COUNSEL_REVIEW_PROMPT, None);
+        legacy_review.hidden = true;
+        session.queued_messages.push(legacy_review);
         backend.task_store.save(&mut state).unwrap();
-        state
-            .sessions
-            .iter()
-            .find(|session| session.id == counsel)
-            .unwrap()
-            .queued_messages[0]
-            .id
-    };
-    assert_eq!(
-        backend
-            .task_state
-            .lock()
-            .sessions
-            .iter()
-            .find(|session| session.id == counsel)
-            .unwrap()
-            .queued_messages
-            .len(),
-        1
-    );
+    }
     assert_eq!(open(&backend), counsel);
-    assert_eq!(captures.lock()[&counsel].prompts.lock().len(), 1);
-    assert!(
-        backend
-            .task_state
-            .lock()
-            .sessions
-            .iter()
-            .find(|session| session.id == counsel)
-            .unwrap()
-            .messages
-            .iter()
-            .any(|message| message.id == review_id)
-    );
-    assert!(
-        backend
-            .task_state
-            .lock()
-            .sessions
-            .iter()
-            .find(|session| session.id == counsel)
-            .unwrap()
-            .queued_messages
-            .is_empty()
-    );
+    assert!(captures.lock().is_empty());
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
 }
@@ -960,8 +930,18 @@ fn outstanding_recommendations_block_scheduling_and_parked_delivery() {
             summary_i18n: None,
         },
     );
+    let (runtime, driver) = backend
+        .ensure_agent_runtime(counsel, &EventSink::detached())
+        .unwrap();
     let count = captures.lock()[&counsel].prompts.lock().len();
     open(&backend);
+    backend
+        .drain_agent_queue(
+            counsel,
+            &driver,
+            &EventSink::detached().for_session(counsel, runtime),
+        )
+        .unwrap();
     assert_eq!(captures.lock()[&counsel].prompts.lock().len(), count);
     let state = backend.task_state.lock();
     let session = state

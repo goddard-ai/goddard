@@ -20,6 +20,18 @@ impl Waku {
         })
     }
 
+    pub(super) fn counsel_can_continue(&self, session: &AgentSession) -> bool {
+        !session.status.is_busy()
+            && session.active_turn_id().is_none()
+            && self.session_detail_is_ready(session)
+            && !self.submission_preparations.contains(&session.id)
+            && !self.response_fork_preparations.contains_key(&session.id)
+            && !self.runtime_submission_checks.contains_key(&session.id)
+            && self
+                .counsel_state_for_session(session.id)
+                .is_some_and(|(key, _)| self.counsel_enabled_on(key))
+    }
+
     /// Counsel needs both experiment flags on the owning host — its own
     /// opt-in and the Boss experiment it rides on.
     pub(super) fn counsel_enabled_on(&self, key: DaemonKey) -> bool {

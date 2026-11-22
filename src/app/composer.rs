@@ -524,11 +524,12 @@ pub(super) fn undelivered_turn_resend(
     ))
 }
 
-/// The parked "continue" nudge `hidden_continue` enqueues — the only hidden
-/// queue entry the client writes. Naming it lets repeat presses dedupe and
-/// lets the queue card label the row instead of dropping it.
+/// Hidden continuation requests the queue card can label for the user.
 pub(super) fn queued_message_is_continue(message: &QueuedMessage) -> bool {
-    message.hidden && message.content.trim() == CONTINUE_PROMPT
+    message.hidden
+        && (message.content.trim() == CONTINUE_PROMPT
+            || (!message.is_agent_owned()
+                && message.content == waku_protocol::counsel::COUNSEL_REVIEW_PROMPT))
 }
 
 /// What the no-draft submit affordance can do for a stopped turn: send the
@@ -6243,6 +6244,7 @@ impl Waku {
         if !has_draft
             && session.is_some_and(|session| {
                 self.session_awaits_continue(session)
+                    || self.counsel_can_continue(session)
                     || self.quarantine_handoff_transfer(session).is_some()
             })
         {
