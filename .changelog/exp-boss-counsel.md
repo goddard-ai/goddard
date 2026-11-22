@@ -1,1 +1,1 @@
-- Counsel has its own chat after the Boss section. Open it with `/counsel` to discuss next steps grounded in recent sessions, revise or defer recommendations, and send an approved instruction to Boss with linked conversation history.
+- Counsel has its own chat after the Boss section. Open it with `/counsel` to discuss next steps grounded in recent sessions, revise or defer recommendations, and send an approved instruction to Boss with linked conversation history. The composer shows Counsel’s name and avatar. Use `/clear` to start a fresh Counsel conversation.

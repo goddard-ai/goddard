@@ -619,14 +619,18 @@ impl Waku {
                         template: None,
                     });
                 }
-                // `/clear` is the Boss chat's own reset — offered only on
-                // that surface and shadowing any provider entry so the
-                // shown row matches what Enter actually runs.
-                if self.transcript_boss_chat_key().is_some() {
+                if let Some((_, counsel)) = self
+                    .composer_session_id()
+                    .and_then(|id| self.managed_chat_clear_target(id))
+                {
                     merged.retain(|command| command.name != "clear");
                     merged.push(SlashCommand {
                         name: "clear".to_owned(),
-                        description: tr!("commands.clear_description"),
+                        description: if counsel {
+                            tr!("commands.clear_counsel_description")
+                        } else {
+                            tr!("commands.clear_description")
+                        },
                         scope: composer_complete::CommandScope::Waku,
                         argument_hint: None,
                         template: None,

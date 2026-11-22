@@ -1,4 +1,5 @@
 use super::*;
+use crate::model::MessageRole;
 use waku_boss::counsel::counsel_identity_seed;
 use waku_protocol::boss::{BossOperation, BossResult};
 use waku_protocol::counsel::{
@@ -129,6 +130,82 @@ impl WakuBackend {
                 self.boss.notify_session_commit();
                 Ok(BossResult::Session {
                     session: Box::new(session),
+                    project: Box::new(project),
+                })
+            }
+            CounselOperation::Clear { session_id } => {
+                anyhow::ensure!(caller.is_none(), "only the human can clear Counsel");
+                let (next, project) = self.boss.with_operation_lock(|| {
+                    let counsel = self.boss.document().counsel;
+                    anyhow::ensure!(
+                        counsel.session_id == Some(session_id),
+                        "the Counsel conversation has changed"
+                    );
+                    let mut state = self.task_state.lock();
+                    let previous = state
+                        .session_mut(session_id)
+                        .ok_or_else(|| anyhow::anyhow!("Counsel conversation is missing"))?;
+                    // Save the retirement fence together with the new owner.
+                    self.task_store.hydrate(previous)?;
+                    let old = previous.clone();
+                    let mut next = AgentSession::new(old.project_id, old.provider);
+                    next.title = old.title.clone();
+                    next.model = old.model.clone();
+                    next.runtime_mode = old.runtime_mode;
+                    next.environment = old.environment();
+                    next.reasoning_effort = old.reasoning_effort.clone();
+                    next.service_tier = old.service_tier.clone();
+                    next.context_window = old.context_window.clone();
+                    next.agent_preset = old.agent_preset.clone();
+                    next.agent_rename_allowed = false;
+                    next.boss_managed = true;
+                    next.push_message(MessageRole::System, "Counsel session cleared.");
+                    let project = state
+                        .projects
+                        .iter()
+                        .find(|project| project.id == old.project_id)
+                        .cloned()
+                        .ok_or_else(|| anyhow::anyhow!("Counsel project is missing"))?;
+                    state
+                        .session_mut(session_id)
+                        .expect("Counsel session exists")
+                        .archived_at = Some(crate::model::unix_time());
+                    state.push_session(next.clone());
+                    let replacement = CounselState {
+                        session_id: Some(next.id),
+                        identity: counsel.identity,
+                        ..CounselState::default()
+                    };
+                    if let Err(error) =
+                        self.save_counsel_sessions(&mut state, counsel.revision, replacement)
+                    {
+                        state.sessions.retain(|session| session.id != next.id);
+                        state.unmark_sessions_dirty(&HashSet::from([next.id]));
+                        *state
+                            .session_mut(session_id)
+                            .expect("Counsel session exists") = old;
+                        return Err(error);
+                    }
+                    Ok::<_, anyhow::Error>((next, project))
+                })?;
+                self.boss.reset_context(session_id);
+                if self.settings.get().composer_drafts_experiment_enabled
+                    && let Err(error) = self.composer_drafts.move_draft(
+                        crate::persistence::ComposerDraftKey::Session(session_id),
+                        crate::persistence::ComposerDraftKey::Session(next.id),
+                    )
+                {
+                    eprintln!("Counsel chat clear: composer draft carry failed: {error}");
+                }
+                // Runtime teardown takes the event-pump gate.
+                if let Err(error) = self.remove_session(session_id) {
+                    eprintln!(
+                        "Counsel chat clear could not remove session {session_id}: {error:#}"
+                    );
+                }
+                self.boss.notify_session_commit();
+                Ok(BossResult::Session {
+                    session: Box::new(next),
                     project: Box::new(project),
                 })
             }

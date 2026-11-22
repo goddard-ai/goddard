@@ -125,6 +125,10 @@ pub enum CounselOperation {
         model: Option<String>,
         mode: crate::model::RuntimeMode,
     },
+    /// Human reset, bound to the conversation visible when requested.
+    Clear {
+        session_id: Uuid,
+    },
     View,
     /// Counsel supplies evidence and drafts an instruction; this never sends it.
     Propose {

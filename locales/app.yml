@@ -3611,6 +3611,8 @@ commands.compact_description:
   en: Compact the conversation context
 commands.clear_description:
   en: Start a fresh Boss chat and remove its retired sessions
+commands.clear_counsel_description:
+  en: Start a fresh Counsel chat and remove the previous conversation
 commands.incognito_description:
   en: Start a temporary chat — in memory only, outside project memory
 commands.incognito_no_draft:

@@ -4139,7 +4139,7 @@ impl Waku {
             || self.execute_rename_composer_command(prompt, cx)
             || self.execute_land_composer_command(prompt, cx)
             || self.execute_compact_composer_command(prompt, cx)
-            || self.execute_clear_boss_command(prompt, cx)
+            || self.execute_clear_managed_command(prompt, cx)
             || self.execute_counsel_composer_command(prompt, cx)
             || self.execute_side_composer_command(prompt, cx)
             || self.execute_incognito_composer_command(prompt, cx)
@@ -4147,32 +4147,29 @@ impl Waku {
             || self.execute_goal_composer_command(prompt, cx)
     }
 
-    /// `/clear` on the Boss chat — reset the session and remove the retired
-    /// boss-owned chat generations. Reserved on boss surfaces only: on any
-    /// other session the text resolves against the command catalog, so a
-    /// provider's own `/clear` still reaches it.
-    fn execute_clear_boss_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
+    /// Reserve the local reset for the Boss and Counsel conversations.
+    fn execute_clear_managed_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
         if prompt.trim() != "/clear" {
             return false;
         }
         let Some(session_id) = self.composer_session_id() else {
             return false;
         };
-        let Some(key) = self
-            .boss_ui
-            .states
-            .iter()
-            .find_map(|(key, state)| (state.session_id == Some(session_id)).then_some(*key))
-        else {
+        let Some((key, is_counsel)) = self.managed_chat_clear_target(session_id) else {
             return false;
         };
+        let (operation, reply) = if is_counsel {
+            (
+                waku_client::boss::BossOperation::Counsel {
+                    action: waku_protocol::counsel::CounselOperation::Clear { session_id },
+                },
+                boss::BossReply::CounselOpen(Some(session_id)),
+            )
+        } else {
+            (waku_client::boss::BossOperation::Clear, boss::BossReply::Clear)
+        };
         self.composer.update(cx, |input, cx| input.clear(cx));
-        self.boss_request(
-            key,
-            waku_client::boss::BossOperation::Clear,
-            boss::BossReply::Clear,
-            cx,
-        );
+        self.boss_request(key, operation, reply, cx);
         true
     }
 
@@ -8274,23 +8271,30 @@ impl Waku {
         // runs in its boss's workspace, so its resolved Boss project still
         // makes the same swap to the boss's own identity. An employee
         // working in a project keeps the same chips as any task.
-        let managed = subject_session_id
-            .and_then(|id| self.boss_session_identity(id))
-            .filter(|_| subject_project_path.is_none() || subject_planning)
-            .map(|identity| {
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .pl(px(2.0))
-                    .child(self.boss_avatar(&identity, 16.0, cx))
-                    .child(SharedString::from(identity.name))
-            });
+        let counsel = subject_session_id.and_then(|id| self.counsel_state_for_session(id));
+        let managed = if let Some((_, state)) = counsel {
+            state.identity.clone()
+        } else {
+            subject_session_id
+                .and_then(|id| self.boss_session_identity(id))
+                .filter(|_| subject_project_path.is_none() || subject_planning)
+        }
+        .map(|identity| {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .pl(px(2.0))
+                .child(self.boss_avatar(&identity, 16.0, cx))
+                .child(SharedString::from(identity.name))
+        });
+        let counsel = counsel.is_some();
         // With no workspace choice to make, the selector follows the branch
         // chip and drops out entirely. A bound worktree keeps it — "Local"
         // remains a way back to the checkout — and an open menu stays mounted
         // until its own dismissal runs.
-        let hide_workspace_selector = managed.is_some()
+        let hide_workspace_selector = counsel
+            || managed.is_some()
             || self.boss_chat_key().is_some()
             || (projectless_selected || project_gitless)
                 && !matches!(workspace, SessionWorkspace::Worktree { .. })
@@ -8612,7 +8616,7 @@ impl Waku {
 
         // The identity swap covers the branch too — the boss workspace's
         // branch is no more the session's to pick than its project.
-        let branch_selector = if managed.is_some() {
+        let branch_selector = if counsel || managed.is_some() {
             None
         } else {
             self.render_branch_selector(cx)
@@ -8645,9 +8649,10 @@ impl Waku {
                             .tab_index(0)
                             .tab_group()
                             .tab_stop(false)
-                            .when(managed.is_none() && self.boss_chat_key().is_none(), |row| {
-                                row.child(project_selector)
-                            })
+                            .when(
+                                !counsel && managed.is_none() && self.boss_chat_key().is_none(),
+                                |row| row.child(project_selector),
+                            )
                             .when_some(managed, |row, chip| row.child(chip))
                             .when(!hide_workspace_selector, |row| row.child(worktree_selector))
                             .children(branch_selector)

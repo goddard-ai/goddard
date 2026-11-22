@@ -9925,6 +9925,99 @@ mod live_employee_approvals {
     }
 
     #[gpui::test]
+    fn counsel_and_boss_composers_discover_and_route_clear(cx: &mut gpui::TestAppContext) {
+        use crate::query::Query;
+        use waku_client::boss::BossOperation;
+        use waku_protocol::counsel::CounselOperation;
+
+        let (_env, dir) = isolated_env();
+        let project = Project::from_path(dir.clone());
+        let mut boss_chat = AgentSession::new(project.id, ProviderKind::Codex);
+        boss_chat.boss_managed = true;
+        boss_chat.detail_loaded = true;
+        let mut counsel = AgentSession::new(project.id, ProviderKind::Codex);
+        counsel.boss_managed = true;
+        counsel.detail_loaded = true;
+        let mut employee = AgentSession::new(project.id, ProviderKind::Codex);
+        employee.detail_loaded = true;
+        let (boss_id, counsel_id, employee_id) = (boss_chat.id, counsel.id, employee.id);
+        let sessions = vec![boss_chat, counsel, employee];
+        let mut boss = boss_state(Some(boss_id), Vec::new());
+        boss.identity.id = project.id;
+        boss.counsel.session_id = Some(counsel_id);
+        boss.counsel.identity = Some(waku_client::boss::BossIdentity {
+            id: Uuid::new_v4(),
+            name: "Test Counsel".into(),
+            avatar_seed: String::new(),
+            avatar_style: Default::default(),
+        });
+        let daemon = FakeDaemon::start(dir.clone(), project.clone(), sessions.clone(), boss.clone());
+        *daemon.response_hook.lock() = Some(Arc::new(|_, command| {
+            matches!(command, Command::GetSettings).then(|| ResponseOutcome::Ok {
+                payload: ResponsePayload::Settings {
+                    settings: DaemonSettings {
+                        boss_experiment_enabled: true,
+                        counsel_experiment_enabled: true,
+                        ..Default::default()
+                    },
+                },
+            })
+        }));
+        let supervisor = DaemonSupervisor::connect(&daemon.address, "test-token".into()).unwrap();
+        let (view, vcx) = test_app(cx, supervisor);
+        update_app(vcx, &view, |waku, _, cx| {
+            crate::input::init(cx);
+            waku.state.projects = vec![project];
+            waku.state.sessions = sessions;
+            waku.state.boss_experiment_enabled = true;
+            waku.state.counsel_experiment_enabled = true;
+            waku.boss_ui.states.insert(waku_client::DaemonKey::Local, boss);
+        });
+        for id in [counsel_id, boss_id, employee_id] {
+            update_app(vcx, &view, |waku, _, cx| {
+                waku.request_session_activation(
+                    id,
+                    super::super::SessionActivationTransition::Visit,
+                    cx,
+                );
+            });
+            wait_for(vcx, &view, |waku| waku.composer_session_id() == Some(id));
+            update_app(vcx, &view, |waku, _, cx| {
+                let session = waku.transcript_session().unwrap();
+                let (cwd, _) = waku.mention_files_key(session).unwrap();
+                let command_key = (session.provider, cwd, None);
+                waku.slash_commands.clear();
+                let Query::Missing(token) = waku.slash_commands.read(&command_key) else {
+                    panic!("expected a fresh command index");
+                };
+                assert!(waku.slash_commands.fulfill(token, Vec::new()));
+                waku.refresh_composer_sources(cx);
+                let managed = id != employee_id;
+                assert_eq!(
+                    waku.slash_command_index.iter().any(|command| command.name == "clear"),
+                    managed,
+                );
+                assert_eq!(waku.execute_local_composer_command("/clear", cx), managed);
+            });
+            if id != employee_id {
+                wait_for(vcx, &view, |_| {
+                    daemon.commands_for(Uuid::nil()).iter().any(|command| match command {
+                        Command::Boss {
+                            operation: BossOperation::Counsel {
+                                action: CounselOperation::Clear { session_id },
+                            },
+                        } => id == counsel_id && *session_id == id,
+                        Command::Boss { operation: BossOperation::Clear } => id == boss_id,
+                        _ => false,
+                    })
+                });
+            }
+        }
+        drop(daemon);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[gpui::test]
     fn provider_switch_takes_focus_from_the_active_window(cx: &mut gpui::TestAppContext) {
         let (_env, dir) = isolated_env();
         let project = Project::from_path(dir.join("project"));

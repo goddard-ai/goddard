@@ -11,6 +11,19 @@ impl Waku {
             .map(|(key, _)| key)
     }
 
+    /// Match the current chat IDs so an employee or a retired chat never
+    /// exposes a local reset for the conversation that replaced it.
+    pub(super) fn managed_chat_clear_target(&self, id: Uuid) -> Option<(DaemonKey, bool)> {
+        self.counsel_state_for_session(id)
+            .map(|(key, _)| (key, true))
+            .or_else(|| {
+                self.boss_ui
+                    .states
+                    .iter()
+                    .find_map(|(key, state)| (state.session_id == Some(id)).then_some((*key, false)))
+            })
+    }
+
     pub(super) fn counsel_state_for_session(
         &self,
         id: Uuid,

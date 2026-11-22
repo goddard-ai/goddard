@@ -1126,3 +1126,70 @@ fn counsel_experiment_requires_both_flags_and_preserves_state() {
     drop(backend);
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn counsel_clear_replaces_only_its_own_conversation_and_waits_for_resume() {
+    let root = std::env::temp_dir().join(format!("counsel-clear-{}", Uuid::new_v4()));
+    let (backend, task, captures) = fixture(&root);
+    let boss = rotation_boss(&backend);
+    let document = backend.boss.document();
+    let employee = backend.boss.prepare_employee(
+        boss,
+        Some(document.personas[0].id),
+        "Disposable employee".into(),
+        None,
+        false,
+        waku_protocol::boss::EmployeeGoal::Errand,
+        None,
+    ).unwrap();
+    let employee_id = employee.session_id;
+    backend.boss.add_employee(employee).unwrap();
+    {
+        let mut state = backend.task_state.lock();
+        let mut employee = AgentSession::new(document.identity.id, ProviderKind::Codex);
+        employee.id = employee_id;
+        employee.boss_managed = true;
+        employee.begin_turn("Disposable employee history");
+        state.push_session(employee);
+        backend.task_store.save(&mut state).unwrap();
+    }
+    let counsel = open(&backend);
+    human_turn(&backend, counsel, "Disposable Counsel history", true);
+    propose(&backend, counsel, task);
+    let before = backend.boss.document();
+    let clear = || Action::Clear { session_id: counsel };
+    assert!(invoke(&backend, Some(counsel), clear()).is_err());
+    let BossResult::Session { session, .. } = invoke(&backend, None, clear()).unwrap() else {
+        panic!("expected fresh Counsel chat");
+    };
+    assert_ne!(session.id, counsel);
+    assert_eq!(session.model.as_deref(), Some("gpt-6.1-sol"));
+    assert!(session.turns.is_empty());
+    assert!(session.queued_messages.is_empty());
+    assert_eq!(session.messages.len(), 1);
+    assert_eq!(session.messages[0].role, MessageRole::System);
+    assert_eq!(open(&backend), session.id);
+    assert!(!captures.lock().contains_key(&session.id));
+    assert!(invoke(&backend, None, clear()).is_err());
+    let after = backend.boss.document();
+    assert_eq!(after.session_id, Some(boss));
+    assert_eq!(after.employees[0].session_id, employee_id);
+    assert_eq!(after.counsel.identity, before.counsel.identity);
+    assert!(after.counsel.recommendations.is_empty());
+
+    drop(backend);
+    let reloaded = WakuBackend::new(
+        DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+        StateStore::daemon(root.join("app.db")),
+    )
+    .unwrap();
+    assert!(reloaded.boss.is_counsel(session.id));
+    let state = reloaded.task_state.lock();
+    assert!(state.sessions.iter().all(|entry| entry.id != counsel));
+    for id in [boss, task, employee_id, session.id] {
+        assert!(state.sessions.iter().any(|entry| entry.id == id));
+    }
+    drop(state);
+    drop(reloaded);
+    std::fs::remove_dir_all(root).unwrap();
+}
