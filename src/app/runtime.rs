@@ -8460,6 +8460,15 @@ impl Waku {
             })
         {
             self.active_transcript_rows().scroll_to_reveal_item(row);
+            // The send has already moved the viewport. A snapshot arriving
+            // before or after admission must not replay the activation landing.
+            if self
+                .transcript_landing
+                .as_ref()
+                .is_some_and(|(id, _)| *id == session_id)
+            {
+                self.transcript_landing = None;
+            }
         }
         let daemon = daemon.expect("eligible submission has a connected daemon");
         cx.spawn(async move |waku, cx| {
