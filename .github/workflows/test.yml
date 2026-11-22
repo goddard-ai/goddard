@@ -94,8 +94,7 @@ jobs:
       # linker incompatibility fails here instead of during a release.
       - name: Run tests
         env:
-          # MSVC 14.52's conforming preprocessor rejects eSpeak's __has_include_next shim.
-          _CL_: ${{ runner.os == 'Windows' && '/Zc:preprocessor-' || '' }}
+          _CL_: ${{ runner.os == 'Windows' && format('/FI"{0}/scripts/msvc-espeak-compat.h"', github.workspace) || '' }}
           RUSTFLAGS: ${{ (runner.os == 'Linux' && '-C linker=clang -C link-arg=-fuse-ld=mold') || (runner.os == 'Windows' && '-C linker=rust-lld') || '' }}
         run: cargo test --workspace --locked
 
