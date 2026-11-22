@@ -1539,6 +1539,7 @@ impl RightPanelSurface {
             Self::GitHub(_) => "github",
             Self::SideChat(_) => "side_chat",
             Self::Plan { .. } => "plan",
+            Self::Git => "git",
             Self::Goals => "goals",
             Self::PastedText { .. } => "pasted_text",
         }
@@ -1571,6 +1572,7 @@ impl RightPanelSurface {
             Self::Plan { plan_file, .. } => {
                 plan_file.rsplit('/').next().unwrap_or(plan_file).to_owned()
             }
+            Self::Git => "Git".to_string(),
             Self::Goals => tr!("right_panel.goals"),
             Self::PastedText { .. } => tr!("composer.pasted_block"),
         }
@@ -1588,6 +1590,7 @@ impl RightPanelSurface {
             Self::GitHub(_) => "icons/github.svg",
             Self::SideChat(_) => "icons/chat.svg",
             Self::Plan { plan_file, .. } => file_icon_for_path(plan_file),
+            Self::Git => "icons/git-branch.svg",
             Self::Goals => "icons/target.svg",
             Self::PastedText { .. } => "icons/file.svg",
         }
@@ -1682,7 +1685,8 @@ pub(super) fn reusable_surface_index(
         RightPanelSurface::Goals => surfaces
             .iter()
             .position(|surface| matches!(surface, RightPanelSurface::Goals)),
-        RightPanelSurface::Files
+        RightPanelSurface::Git
+        | RightPanelSurface::Files
         | RightPanelSurface::Diff
         | RightPanelSurface::File(_)
         | RightPanelSurface::FileAtRef { .. }
@@ -6065,7 +6069,7 @@ impl Waku {
         // in flight at park time failed their landing check. A relaunch
         // restore carries only the flag, so the panel rebuilds on the window
         // a tick out — without claiming focus like a user-opened one does.
-        if self.git_panel_visible {
+        if self.git_panel_visible || self.right_panel_surfaces.contains(&RightPanelSurface::Git) {
             if self.git_panel.is_some() {
                 if let Some(panel) = self.git_panel.as_mut() {
                     panel.snapshot_loading = false;
@@ -6083,7 +6087,10 @@ impl Waku {
                             // A faster second swap may have parked a real
                             // panel or closed the slot again — only rebuild
                             // when the flag still stands with none mounted.
-                            if this.git_panel_visible && this.git_panel.is_none() {
+                            if (this.git_panel_visible
+                                || this.right_panel_surfaces.contains(&RightPanelSurface::Git))
+                                && this.git_panel.is_none()
+                            {
                                 this.open_git_panel(window, cx, false);
                             }
                         });
@@ -6695,7 +6702,9 @@ impl Waku {
         }
         self.right_panel_file_tree_visible = false;
         if self.right_panel_files_selected_path.as_deref() == Some(&relative_path)
-            && self.right_panel_surfaces.contains(&RightPanelSurface::Files)
+            && self
+                .right_panel_surfaces
+                .contains(&RightPanelSurface::Files)
         {
             self.open_right_panel_surface(RightPanelSurface::Files, cx);
             return;
@@ -7229,6 +7238,9 @@ impl Waku {
             }
         }
         let body = match self.active_right_panel_surface().cloned() {
+            Some(RightPanelSurface::Git) => {
+                self.render_git_panel(width, window, cx).into_any_element()
+            }
             None => self.render_right_panel_chooser(cx).into_any_element(),
             Some(RightPanelSurface::BackgroundWork { key, .. }) => self
                 .render_background_work_surface(&key, cx)

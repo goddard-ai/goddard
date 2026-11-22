@@ -913,6 +913,7 @@ enum RightPanelSurface {
         number: u64,
     },
     Files,
+    Git,
     Diff,
     File(String),
     /// A file's blob at a git ref (`git show ref:path`), read-only. Opened
@@ -2170,7 +2171,7 @@ fn persisted_panel_surface(surface: &RightPanelSurface) -> Option<PersistedRight
         RightPanelSurface::SideChat(session_id) => {
             Some(PersistedRightPanelSurface::SideChat(*session_id))
         }
-        RightPanelSurface::Goals => None,
+        RightPanelSurface::Goals | RightPanelSurface::Git => None,
         RightPanelSurface::Terminal(terminal_id) => {
             Some(PersistedRightPanelSurface::Terminal(*terminal_id))
         }

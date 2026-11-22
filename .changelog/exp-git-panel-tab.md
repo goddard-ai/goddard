@@ -1,0 +1,1 @@
+- Open Git as a right-panel tab from the Git button in the top bar.

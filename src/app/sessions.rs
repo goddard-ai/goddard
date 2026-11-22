@@ -4466,7 +4466,9 @@ impl Waku {
             self.request_active_terminal_focus();
             // The Git panel shares this slot: opening the right panel
             // dismisses it without touching its width or slide.
-            self.close_git_panel_state();
+            if self.git_panel_visible {
+                self.close_git_panel_state();
+            }
         } else {
             self.right_panel_pending_terminal_focus = None;
             self.right_panel_pending_browser_focus = None;

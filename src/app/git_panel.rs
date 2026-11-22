@@ -546,7 +546,7 @@ impl Waku {
             })
             .on_click(cx.listener(|this, _, window, cx| {
                 cx.stop_propagation();
-                this.set_git_panel_visible(!this.git_panel_visible, window, cx);
+                this.set_git_panel_visible(true, window, cx);
             }))
     }
 
@@ -556,7 +556,7 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_git_panel_visible(!self.git_panel_visible, window, cx);
+        self.set_git_panel_visible(true, window, cx);
     }
 
     /// Show or hide the Git panel. It shares the right panel's slot, so the
@@ -577,11 +577,7 @@ impl Waku {
             return;
         }
         if visible {
-            // The slot is exclusive — dismiss the right panel without its
-            // own close semantics so the swap does not slide out and back.
-            self.right_panel_visible = false;
-            self.right_panel_pending_terminal_focus = None;
-            self.git_panel_visible = true;
+            self.open_right_panel_surface(RightPanelSurface::Git, cx);
             self.open_git_panel(window, cx, true);
             self.analytics
                 .track(crate::analytics::Event::GitPanelOpened);
@@ -3516,7 +3512,7 @@ impl Waku {
             .into_any_element()
     }
 
-    fn render_git_panel(
+    pub(super) fn render_git_panel(
         &mut self,
         width: f32,
         window: &mut Window,
@@ -3540,8 +3536,7 @@ impl Waku {
             .flex()
             .flex_col()
             .min_w_0()
-            .relative()
-            .child(self.render_git_panel_header(window, cx));
+            .relative();
         if self.git_panel.is_some() {
             column = column.child(self.render_git_panel_top(column_width, window, cx));
         }
