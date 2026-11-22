@@ -2228,7 +2228,7 @@ pub fn configure_sidebar_material(
 /// window — a panic, not an `Err` — so probe it under `catch_unwind`; a
 /// window with no real platform behind it takes the same early return a
 /// foreign toolkit handle would.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) fn native_window_handle(window: &Window) -> Option<raw_window_handle::WindowHandle<'_>> {
     use raw_window_handle::HasWindowHandle;
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

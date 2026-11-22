@@ -1154,10 +1154,8 @@ mod host {
 fn window_hwnd(window: &Window) -> isize {
     use raw_window_handle::RawWindowHandle;
 
-    // GPUI has its own inherent `window_handle`, so the trait method needs
-    // naming explicitly.
     match crate::platform::native_window_handle(window).map(|handle| handle.as_raw()) {
-        Ok(RawWindowHandle::Win32(handle)) => handle.hwnd.get(),
+        Some(RawWindowHandle::Win32(handle)) => handle.hwnd.get(),
         _ => 0,
     }
 }
