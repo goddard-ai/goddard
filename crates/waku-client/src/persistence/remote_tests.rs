@@ -126,12 +126,15 @@ impl Drop for StoreFixture {
 
 #[test]
 fn offline_remote_submissions_survive_local_checkpoint_and_restart() {
-    let local = DaemonFixture::with_handler(|command| match command {
+    // Loading the local catalog updates the process-wide workspace root.
+    // Keep the fixture from changing the root used by concurrent tests.
+    let projectless_root = waku_protocol::projectless::workspace_root();
+    let local = DaemonFixture::with_handler(move |command| match command {
         Command::LoadTaskState => Some(ResponsePayload::TaskState {
             projects: Vec::new(),
             sessions: Vec::new(),
             default_cwd: PathBuf::from("/fixture"),
-            projectless_root: None,
+            projectless_root: projectless_root.clone(),
         }),
         _ => None,
     });
