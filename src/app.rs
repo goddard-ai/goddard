@@ -4785,7 +4785,7 @@ pub use reset_credit_dialog::{ConfirmResetCreditDialog, DismissResetCreditDialog
 pub use send_file_dialog::{ConfirmSendFileDialog, DismissSendFileDialog};
 pub use settings::{FocusNext, FocusPrevious};
 pub use shortcuts_dialog::DismissShortcutsDialog;
-pub use sidebar::CancelSessionRename;
+pub use sidebar::{CancelSessionRename, ReleaseSidebarGroupAlt};
 use streaming::*;
 pub use terminal_close_dialog::{ConfirmTerminalClose, DismissTerminalClose};
 use terminals::{RIGHT_PANEL_TERMINAL_MAX_PANES, TerminalGroupLayout, TerminalRecord};

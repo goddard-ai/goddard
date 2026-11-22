@@ -941,6 +941,15 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         builtin_label: None,
     },
     CommandDescriptor {
+        id: "sidebar.release_group_alt",
+        action: || Box::new(crate::app::ReleaseSidebarGroupAlt),
+        title_key: "shortcuts.dismiss",
+        title_index: None,
+        category: C::Workspace,
+        editability: EDITABLE,
+        builtin_label: None,
+    },
+    CommandDescriptor {
         id: "bigpicture.dismiss",
         action: || Box::new(crate::app::DismissBigPicture),
         title_key: "shortcuts.dismiss",
@@ -2748,6 +2757,7 @@ pub static ENTRIES: &[CatalogEntry] = &[
     ),
     // === app::init_big_picture_keys ===================================================
     e("bigpicture.dismiss", All, "escape", BigPicture),
+    e("bigpicture.dismiss", All, "escape", RushModal),
     e("bigpicture.left", All, "left", BigPicture),
     e("bigpicture.right", All, "right", BigPicture),
     e("bigpicture.confirm", All, "enter", BigPicture),
@@ -2814,6 +2824,7 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("dialog.image_preview.dismiss", All, "escape", ImagePreview),
     // === app::init_sidebar_keys =============================================================
     e("sidebar.cancel_rename", All, "escape", SessionRenameField),
+    e("sidebar.release_group_alt", All, "escape", SidebarGroupAlt),
     // === app::init_skills_keys ================================================================
     e("menu.select_next", All, "down", SkillsSearch),
     e("menu.select_previous", All, "up", SkillsSearch),
@@ -3181,6 +3192,7 @@ mod ctx {
     pub const PushBaseDialog: &str = "PushBaseDialog";
     pub const ResetCreditDialog: &str = "ResetCreditDialog";
     pub const BigPicture: &str = "BigPicture";
+    pub const RushModal: &str = "RushModal";
     pub const GoalInput: &str = "GoalDialog > TextInput";
     pub const GoalDialog: &str = "GoalDialog";
     pub const SendFileInput: &str = "SendFileDialog > TextInput";
@@ -3190,6 +3202,7 @@ mod ctx {
     pub const PastedText: &str = "PastedText";
     pub const ImagePreview: &str = "ImagePreview";
     pub const SessionRenameField: &str = "SessionRename > TextInput";
+    pub const SidebarGroupAlt: &str = "SidebarGroupAlt";
     pub const SkillsSearch: &str = "SkillsPane > TextInput";
     pub const ShortcutsDialog: &str = "ShortcutsDialog";
     pub const TerminalBarInput: &str = "TerminalCommandBar > TextInput";

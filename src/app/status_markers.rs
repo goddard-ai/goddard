@@ -2006,17 +2006,21 @@ mod tests {
         assert!(session_awaits_continue(&session, Some(&verdict)));
         assert!(!session_awaits_continue(&session, None));
 
-        for (ending, score) in [
-            ("partial", 0.49),
-            ("complete", 0.9),
-            ("awaiting-input", 0.9),
+        for (ending, score, expected_actions) in [
+            ("partial", 0.49, &[][..]),
+            ("complete", 0.9, &[][..]),
+            (
+                "awaiting-input",
+                0.9,
+                &[StatusSuggestedAction::YouDecide][..],
+            ),
         ] {
             verdict.answers.insert(
                 ENDING_QUESTION.to_owned(),
                 ending_choice(ending, &[(ending, score)]),
             );
             assert!(!session_awaits_continue(&session, Some(&verdict)));
-            assert!(suggested_actions(&verdict).is_empty());
+            assert_eq!(suggested_actions(&verdict), expected_actions);
         }
         verdict.answers.insert(
             ENDING_QUESTION.to_owned(),

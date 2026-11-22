@@ -9786,10 +9786,20 @@ mod live_employee_approvals {
             vec![session.clone()],
             boss_state(None, Vec::new()),
         );
+        let runtime_id = Uuid::new_v4();
+        *daemon.response_hook.lock() = Some(Arc::new(move |_, command| {
+            matches!(command, Command::AttachSession).then(|| ResponseOutcome::Ok {
+                payload: ResponsePayload::SessionRuntime {
+                    runtime_id: Some(runtime_id),
+                    supports_steer: true,
+                    supports_user_input_actions: true,
+                },
+            })
+        }));
         let supervisor = DaemonSupervisor::connect(&daemon.address, "test-token".into()).unwrap();
         let (view, vcx) = test_app(cx, supervisor.clone());
-        update_app(vcx, &view, |waku, _, cx| {
-            for compact in [false, true] {
+        for compact in [false, true] {
+            update_app(vcx, &view, |waku, _, cx| {
                 waku.state.projects = vec![project.clone()];
                 waku.state.sessions = vec![session.clone()];
                 waku.state.selected_session = Some(id);
@@ -9815,14 +9825,16 @@ mod live_employee_approvals {
                 });
                 waku.transcript_is_scrolled.set(true);
                 assert!(waku.transcript_watches_latest_turn());
-                let runtime = attach_runtime(waku, &supervisor, id, Uuid::new_v4());
+                let runtime = attach_runtime(waku, &supervisor, id, runtime_id);
                 waku.runtimes.insert(id, runtime);
                 waku.submit_submission_for_session(
                     id,
                     ComposerSubmission::plain("Next".into()),
                     cx,
                 );
-                assert_eq!(waku.state.sessions[0].turns.len(), 4);
+            });
+            wait_for(vcx, &view, |waku| waku.state.sessions[0].turns.len() == 4);
+            update_app(vcx, &view, |waku, _, cx| {
                 let sent_row = waku
                     .transcript_row_kinds
                     .borrow()
@@ -9847,8 +9859,8 @@ mod live_employee_approvals {
                     waku.active_transcript_rows().logical_scroll_top().item_ix >= sent_row,
                     "a late snapshot must not restore the pre-send landing (compact={compact})"
                 );
-            }
-        });
+            });
+        }
     }
 
     // Headless state/navigation regression; no screenshots or visual assertions.
