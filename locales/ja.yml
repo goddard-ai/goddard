@@ -3828,7 +3828,7 @@ command_palette.show_archived_tasks: "アーカイブ済みのタスクを表示
 command_palette.stop_rushing_current_task: "現在のタスクの優先モードを解除"
 command_palette.sync_complete: "プロジェクトをリモートホストに同期しました。"
 command_palette.sync_failed: "プロジェクトを同期できませんでした：%{error}"
-command_palette.sync_friend_pending: "同期のペアリングを申請しました。友達は「友達 → 自分に共有されたもの」で有効にできます。"
+command_palette.sync_friend_pending: "同期のペアリングを申請しました。友達は「友達 → あなたと共有中」で有効にできます。"
 command_palette.sync_host_offline: "リモートホストがオフラインです。"
 command_palette.sync_host_placeholder: "リモートホストを選択…"
 command_palette.sync_running: "origin にプッシュしてからリモートホストでプルしています…"
