@@ -456,7 +456,6 @@ fn slow_or_disconnected_connection_keeps_other_admission_independent() {
 
     let (mut disconnected, disconnected_stop, disconnected_thread) =
         connect(dispatcher.clone(), hub.clone());
-    let rejected_before = request_pool_snapshot()["long-control"].rejected;
     let saturation_started = Instant::now();
     let mut pending_ids = HashSet::new();
     for _ in 0..POOL_DEFERRED_ADMISSIONS_PER_POOL {
@@ -467,21 +466,16 @@ fn slow_or_disconnected_connection_keeps_other_admission_independent() {
     let rejected = request(slow_mutation.clone());
     let rejected_id = rejected.request_id;
     write_json(&mut disconnected, &ClientMessage::Request(rejected)).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while dispatcher
-        .long_control_requests
-        .deferred_count
-        .load(Ordering::Acquire)
-        != POOL_DEFERRED_ADMISSIONS_PER_POOL
-        || request_pool_snapshot()["long-control"].rejected != rejected_before + 1
-    {
-        assert!(
-            Instant::now() < deadline,
-            "deferred or overflow request was not processed"
-        );
-        std::thread::sleep(Duration::from_millis(1));
-    }
+    // Wait for this connection's overflow response. The process-wide
+    // rejection counter is shared with other dispatchers and tests.
     let (got, outcome) = read(&mut disconnected);
+    assert_eq!(
+        dispatcher
+            .long_control_requests
+            .deferred_count
+            .load(Ordering::Acquire),
+        POOL_DEFERRED_ADMISSIONS_PER_POOL,
+    );
     assert_eq!(got, rejected_id);
     assert!(matches!(
         outcome,
