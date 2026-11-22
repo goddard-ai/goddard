@@ -12,7 +12,6 @@ Changes specific to the mobile app are in
   - Tasks running out of view use less desktop work while retaining permissions and completion notifications. Transcripts retry loading automatically. Follow-ups keep their worktree, with recovery offering an existing checkout or saved snapshot when needed.
   - Active task goals pause automatically when Jev marks the latest turn as “Awaiting decision”.
   - Devin failures now leave a local diagnostic timeline of runtime startup, submissions, and outcomes without message content. Logs rotate within 20 MB and expire after seven days while Goddard is running.
-  - **Rush this:** Turn on “Rush this” from a sidebar task’s right-click menu or choose “Rush current task” in the command palette to enable fast service where available, briefly interrupting and resuming active work. Rushed tasks appear in a dedicated sidebar group above Pinned. Input requests and finished tasks open the task’s usual conversation and controls in a modal when another task is selected. Queued prompts and active goals continue without opening the modal. Click outside or press Escape to dismiss without responding. The modal keeps its width when the right panel is open behind it.
   - **Task scratch:** `goddard-agent scratch NAME` gives a task's agent a daemon-owned folder for reproducible files (downloads, fixtures, caches) that survives machine restarts and lives on the host the task runs on. It is deleted when the task is archived or removed, and Reclaim Disk Space can clear an idle task's scratch.
   - Restore archived chats with “Unarchive...” in the command palette; browse the 20 most recently archived chats or search older chats.
 - **Sidebar**
@@ -101,6 +100,7 @@ Changes specific to the mobile app are in
   - **Landing queue:** See `/land` queue position in desktop, web, and mobile, and cancel a landing before it starts. `/land` and `merge submit` share each repository’s queue; duplicate requests attach to existing jobs, and reconnecting checks status without submitting again. Desktop `/land` uses one transcript element for progress and results, retaining conflict details when resolution continues in chat. You can keep the desktop Git panel open while a landing is in progress.
   - Open Git as a right-panel tab from the Git button in the top bar.
 - Dependency chains can retry from verified committed repairs in their original workspace while preserving ownership and recovery checks.
+- **Rush this:** Turn on “Rush this” from a sidebar task’s right-click menu or choose “Rush current task” in the command palette to enable fast service where available, briefly interrupting and resuming active work. Rushed tasks appear in a dedicated sidebar group above Pinned. Input requests and finished tasks open the task’s usual conversation and controls in a modal when another task is selected. Queued prompts and active goals continue without opening the modal. Click outside or press Escape to dismiss without responding. The modal keeps its width when the right panel is open behind it.
 
 ### Fixed
 
