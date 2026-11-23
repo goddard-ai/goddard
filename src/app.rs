@@ -1044,6 +1044,7 @@ struct SideChatComposer {
     composer: Entity<ComposerInput>,
     autocomplete: autocomplete::AutocompleteUi,
     atoms: Vec<composer::ComposerInlineAtom>,
+    attachments: Vec<ComposerAttachment>,
     /// The drawn command index and the `(provider, workspace, binary)` key it
     /// was filtered for — the same contract `slash_command_index` and
     /// `slash_command_index_key` keep for the selected session.
@@ -6908,7 +6909,11 @@ impl Waku {
             cx.subscribe(
                 &composer,
                 |this: &mut Self, _, event: &ComposerAttachmentPaste, cx| {
-                    this.stage_pasted_attachments(event.0.clone(), cx);
+                    this.stage_pasted_attachments(
+                        &composer::ComposerCard::Main,
+                        event.0.clone(),
+                        cx,
+                    );
                 },
             )
             .detach();

@@ -19,6 +19,7 @@ use base64::Engine as _;
 use gpui::{AnyView, KeyBinding};
 
 use crate::input::Clear;
+use crate::persistence::ComposerDraftKey;
 
 mod paste_classification;
 
@@ -375,7 +376,7 @@ pub(super) enum ComposerSubmitAction {
 /// session column's field is fully interactive; a side chat's panel copy
 /// renders the same card bound to the chat's own session and input —
 /// full typing, autocomplete, atoms, and drops, minus the main-only
-/// chrome (Big Picture chip, attachments, the pasted-text editor). Its
+/// chrome (Big Picture chip and the pasted-text editor). Its
 /// model pickers also stay live until the chat starts: there is no
 /// provider conversation to preserve yet, so provider, model, effort,
 /// and preset stay pickable until the first prompt locks the posture the
@@ -3246,20 +3247,27 @@ impl Waku {
         )
     }
 
-    /// Stage files dropped onto the composer as attachment chips. The mention
-    /// each chip will submit takes the autocomplete's form: relative to the
-    /// project root when the file is inside it, absolute otherwise,
-    /// directories with a trailing slash.
+    /// Stage files dropped onto the main task column.
     pub(super) fn stage_dropped_files(
         &mut self,
         paths: &ExternalPaths,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.stage_attachment_paths(paths.paths(), cx) {
+        self.stage_dropped_files_for(&ComposerCard::Main, paths, window, cx);
+    }
+
+    fn stage_dropped_files_for(
+        &mut self,
+        surface: &ComposerCard,
+        paths: &ExternalPaths,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.stage_attachment_paths(surface, paths.paths(), cx) {
             return;
         }
-        let focus = self.composer.read(cx).focus();
+        let focus = self.surface_composer(surface).read(cx).focus();
         window.focus(&focus, cx);
     }
 
@@ -3455,18 +3463,62 @@ impl Waku {
         remap_atoms_for_splice(&composer, &mut chat.atoms, splice, &planning, &avatars, cx);
     }
 
-    fn stage_attachment_paths(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) -> bool {
+    fn attachment_draft_key(&self, surface: &ComposerCard) -> Option<ComposerDraftKey> {
+        match surface {
+            ComposerCard::Main => self.composer_draft_key(),
+            ComposerCard::SideChat {
+                session_id,
+                composer,
+            } => self
+                .side_chat_composers
+                .get(session_id)
+                .filter(|chat| chat.composer == *composer)
+                .map(|_| ComposerDraftKey::Session(*session_id)),
+        }
+    }
+
+    fn composer_attachments_mut(
+        &mut self,
+        surface: &ComposerCard,
+    ) -> Option<&mut Vec<ComposerAttachment>> {
+        match surface {
+            ComposerCard::Main => Some(&mut self.composer_attachments),
+            ComposerCard::SideChat {
+                session_id,
+                composer,
+            } => self
+                .side_chat_composers
+                .get_mut(session_id)
+                .filter(|chat| chat.composer == *composer)
+                .map(|chat| &mut chat.attachments),
+        }
+    }
+
+    fn composer_attachments_edited(&mut self, surface: &ComposerCard, cx: &mut Context<Self>) {
+        if matches!(surface, ComposerCard::Main) {
+            self.schedule_composer_draft_save(cx);
+        }
+        cx.notify();
+    }
+
+    fn stage_attachment_paths(
+        &mut self,
+        surface: &ComposerCard,
+        paths: &[PathBuf],
+        cx: &mut Context<Self>,
+    ) -> bool {
         if paths.is_empty() {
             return false;
         }
         let paths = paths.to_vec();
-        let draft_owner = self.composer_draft_key();
+        let draft_owner = self.attachment_draft_key(surface);
         let daemon = draft_owner.and_then(|key| self.daemon_for_draft_key(key));
         let Some(daemon) = daemon else {
             self.show_toast(tr!("errors.daemon_disconnected"));
             cx.notify();
             return false;
         };
+        let surface = surface.clone();
         cx.spawn(async move |waku, cx| {
             let result = cx
                 .background_executor()
@@ -3497,12 +3549,13 @@ impl Waku {
                 .await;
             let _ = waku.update(cx, |waku, cx| match result {
                 Ok(stored) => {
-                    if waku.composer_draft_key() != draft_owner {
+                    if waku.attachment_draft_key(&surface) != draft_owner {
                         return;
                     }
                     let mut changed = false;
                     for (attachment, preview_image, is_image) in stored {
                         changed |= waku.stage_daemon_attachment(
+                            &surface,
                             attachment.path,
                             attachment.name,
                             attachment.is_dir,
@@ -3513,8 +3566,7 @@ impl Waku {
                         );
                     }
                     if changed {
-                        waku.schedule_composer_draft_save(cx);
-                        cx.notify();
+                        waku.composer_attachments_edited(&surface, cx);
                     }
                 }
                 Err(error) => {
@@ -3529,6 +3581,7 @@ impl Waku {
 
     fn stage_daemon_attachment(
         &mut self,
+        surface: &ComposerCard,
         path: PathBuf,
         name: String,
         is_dir: bool,
@@ -3537,7 +3590,10 @@ impl Waku {
         client_preview_image: Option<Arc<gpui::Image>>,
         pasted_text_preview: Option<String>,
     ) -> bool {
-        if self.composer_attachments.iter().any(|attachment| {
+        let Some(attachments) = self.composer_attachments_mut(surface) else {
+            return false;
+        };
+        if attachments.iter().any(|attachment| {
             attachment.path == path
                 || attachment.blob_reference.as_deref() == Some(reference.as_str())
         }) {
@@ -3547,7 +3603,7 @@ impl Waku {
         if is_dir && !mention.ends_with('/') {
             mention.push('/');
         }
-        self.composer_attachments.push(ComposerAttachment {
+        attachments.push(ComposerAttachment {
             path,
             client_preview_image,
             mention,
@@ -3566,6 +3622,7 @@ impl Waku {
     /// durable blob store on the background executor before their chip appears.
     pub(super) fn stage_pasted_attachments(
         &mut self,
+        surface: &ComposerCard,
         entries: Vec<ClipboardEntry>,
         cx: &mut Context<Self>,
     ) {
@@ -3580,18 +3637,19 @@ impl Waku {
                 ClipboardEntry::String(_) | ClipboardEntry::Image(_) => {}
             }
         }
-        self.stage_attachment_paths(&paths, cx);
+        self.stage_attachment_paths(surface, &paths, cx);
         if images.is_empty() {
             return;
         }
 
-        let draft_owner = self.composer_draft_key();
+        let draft_owner = self.attachment_draft_key(surface);
         let daemon = draft_owner.and_then(|key| self.daemon_for_draft_key(key));
         let Some(daemon) = daemon else {
             self.show_toast(tr!("errors.daemon_disconnected"));
             cx.notify();
             return;
         };
+        let surface = surface.clone();
         cx.spawn(async move |waku, cx| {
             let stored = cx
                 .background_executor()
@@ -3635,12 +3693,13 @@ impl Waku {
                 .await;
             let _ = waku.update(cx, |waku, cx| match stored {
                 Ok(stored) => {
-                    if waku.composer_draft_key() != draft_owner {
+                    if waku.attachment_draft_key(&surface) != draft_owner {
                         return;
                     }
                     let mut staged = false;
                     for (path, name, reference, preview_image) in stored {
                         staged |= waku.stage_daemon_attachment(
+                            &surface,
                             path,
                             name,
                             false,
@@ -3651,8 +3710,7 @@ impl Waku {
                         );
                     }
                     if staged {
-                        waku.schedule_composer_draft_save(cx);
-                        cx.notify();
+                        waku.composer_attachments_edited(&surface, cx);
                     }
                 }
                 Err(error) => {
@@ -3724,6 +3782,7 @@ impl Waku {
                         return;
                     }
                     if waku.stage_daemon_attachment(
+                        &ComposerCard::Main,
                         path,
                         "paste.txt".to_owned(),
                         false,
@@ -4338,7 +4397,7 @@ impl Waku {
     /// A side chat prompt's routing: `/side` stays reserved since a lane
     /// cannot nest one, session-scoped Waku commands execute against the
     /// chat's own session, and the rest becomes a submission carrying the
-    /// lane's atoms and annotations. Both of the composer's submit routes
+    /// lane's attachments, atoms, and annotations. Both submit routes
     /// (Enter and the card's send button) funnel through here.
     pub(super) fn submit_side_chat_prompt(
         &mut self,
@@ -4387,12 +4446,17 @@ impl Waku {
             let (text, inline_atoms) = composer_draft_content(&prompt, &chat.atoms);
             crate::persistence::ComposerDraft {
                 text,
-                attachments: Vec::new(),
+                attachments: chat.attachments.iter().map(Into::into).collect(),
                 annotations: Vec::new(),
                 inline_atoms,
             }
         });
         let atoms = std::mem::take(&mut chat.atoms);
+        let attachments = chat
+            .attachments
+            .drain(..)
+            .map(MessageAttachment::from)
+            .collect::<Vec<_>>();
         let commands = chat.commands.clone();
         chat.composer
             .update(cx, |composer, cx| composer.set_inline_atoms(Vec::new(), cx));
@@ -4400,12 +4464,17 @@ impl Waku {
         // Markers splice back to their atoms in place — pasted text and
         // session tokens.
         let body = splice_inline_atoms(&prompt, &atoms);
-        let submission = if !body.trim().is_empty() {
+        let provider_body = if attachments.is_empty() {
+            (!body.trim().is_empty()).then(|| body.clone())
+        } else {
+            merged_submission(&body, &attachments)
+        };
+        let submission = if let Some(body) = provider_body {
             // Resolve command syntax while the body's leading `/` is still
             // visible — the annotation header would hide it from the
             // transport-boundary resolver.
             if annotations.is_empty() {
-                format!("{}{}", annotation_prompt_prefix(&annotations), body)
+                body
             } else {
                 let resolved = crate::composer_complete::resolved_submission(
                     session.provider,
@@ -4438,18 +4507,19 @@ impl Waku {
                 typed.to_owned()
             }
         });
-        let display_content = (!annotations.is_empty() || !atoms.is_empty()).then(|| {
-            let typed = if atoms.is_empty() {
-                body.clone()
-            } else {
-                atom_display_content(&prompt, &atoms)
-            };
-            if annotations.is_empty() {
-                typed
-            } else {
-                annotation_bubble_content(&annotations, &typed)
-            }
-        });
+        let display_content =
+            (!attachments.is_empty() || !annotations.is_empty() || !atoms.is_empty()).then(|| {
+                let typed = if atoms.is_empty() {
+                    body.clone()
+                } else {
+                    atom_display_content(&prompt, &atoms)
+                };
+                if annotations.is_empty() {
+                    typed
+                } else {
+                    annotation_bubble_content(&annotations, &typed)
+                }
+            });
         if let Some(draft) = history_draft {
             self.record_recent_prompt(draft);
         }
@@ -4461,13 +4531,20 @@ impl Waku {
             prompt: submission,
             display_content,
             human_content,
-            attachments: Vec::new(),
+            attachments,
             message_atoms: atoms.iter().map(ComposerInlineAtom::message_atom).collect(),
             atoms,
             annotations,
             queued_id: None,
             hidden: false,
         })
+    }
+
+    pub(super) fn side_chat_has_staged_content(&self, session_id: Uuid) -> bool {
+        self.side_chat_composers
+            .get(&session_id)
+            .is_some_and(|chat| !chat.atoms.is_empty() || !chat.attachments.is_empty())
+            || self.side_chat_has_annotations(session_id)
     }
 
     /// The lane's reserved-command executor: session-scoped commands
@@ -5015,7 +5092,7 @@ impl Waku {
         cx.notify();
     }
 
-    /// The lane's restore: the chat's field, atoms, and annotation store get
+    /// The lane's restore: the chat's field, attachments, atoms, and annotation store get
     /// their draft back. Called only when the lane's composer still exists.
     fn restore_side_chat_submission(
         &mut self,
@@ -5061,6 +5138,15 @@ impl Waku {
         let Some(chat) = self.side_chat_composers.get_mut(&session_id) else {
             return;
         };
+        for attachment in submission.attachments {
+            if !chat
+                .attachments
+                .iter()
+                .any(|existing| existing.path == attachment.path)
+            {
+                chat.attachments.push(attachment.into());
+            }
+        }
         if !seated_atoms.is_empty() {
             chat.atoms = seated_atoms;
         }
@@ -5157,7 +5243,13 @@ impl Waku {
     /// The staged-attachment chips above the input: a thumbnail tile per
     /// image and a one-line file chip for everything else, each with a remove
     /// button — T3 Code's attachment row in graphite.
-    pub(super) fn render_composer_attachments(&self, cx: &mut Context<Self>) -> Div {
+    fn render_composer_attachments(
+        &self,
+        surface: &ComposerCard,
+        attachments: &[ComposerAttachment],
+        controls: &ComposerControls,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let theme = Theme::current(cx);
         let mut row = div()
             .px(px(14.0))
@@ -5166,13 +5258,16 @@ impl Waku {
             .flex()
             .flex_wrap()
             .gap(px(8.0));
-        for (index, attachment) in self.composer_attachments.iter().enumerate() {
+        for (index, attachment) in attachments.iter().enumerate() {
             if let Some(session_id) = attachment.session_id {
                 row = row
                     .child(self.render_session_attachment_chip(index, session_id, attachment, cx));
                 continue;
             }
-            let menu = self.menu_handle(format!("composer-attachment-{index}-menu"), cx);
+            let menu = self.menu_handle(
+                controls.chip_id(&format!("composer-attachment-{index}-menu")),
+                cx,
+            );
             if attachment.pasted_text_preview.is_some() {
                 row = row
                     .child(self.render_pasted_text_attachment_chip(index, attachment, &menu, cx));
@@ -5184,7 +5279,7 @@ impl Waku {
                 super::right_panel::file_icon_for_path(&attachment.mention)
             };
             let mut tile = div()
-                .id(SharedString::from(format!("composer-attachment-{index}")))
+                .id(controls.chip_id(&format!("composer-attachment-{index}")))
                 .relative()
                 .rounded(px(10.0))
                 .overflow_hidden()
@@ -5319,11 +5414,11 @@ impl Waku {
                     cx.stop_propagation();
                 }
             }));
+            let click_surface = surface.clone();
+            let key_surface = surface.clone();
             let tile = tile.child(
                 div()
-                    .id(SharedString::from(format!(
-                        "composer-attachment-remove-{index}"
-                    )))
+                    .id(controls.chip_id(&format!("composer-attachment-remove-{index}")))
                     .absolute()
                     .when(attachment.is_image, |button| button.top(px(3.0)))
                     .when(!attachment.is_image, |button| button.top(px(6.0)))
@@ -5343,19 +5438,11 @@ impl Waku {
                     .child(icon("icons/x.svg", 9.0, theme.text_secondary))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         cx.stop_propagation();
-                        if index < this.composer_attachments.len() {
-                            this.composer_attachments.remove(index);
-                            this.schedule_composer_draft_save(cx);
-                            cx.notify();
-                        }
+                        this.remove_composer_attachment(&click_surface, index, cx);
                     }))
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                         if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            if index < this.composer_attachments.len() {
-                                this.composer_attachments.remove(index);
-                                this.schedule_composer_draft_save(cx);
-                                cx.notify();
-                            }
+                            this.remove_composer_attachment(&key_surface, index, cx);
                             cx.stop_propagation();
                         }
                     })),
@@ -5363,12 +5450,26 @@ impl Waku {
             let reveal_path = attachment.path.clone();
             row = row.child(context_menu(
                 tile,
-                SharedString::from(format!("composer-attachment-{index}-context-menu")),
+                controls.chip_id(&format!("composer-attachment-{index}-context-menu")),
                 &menu,
                 move |_| image_preview::attachment_menu_items(reveal_path.clone(), can_reveal),
             ));
         }
         row
+    }
+
+    fn remove_composer_attachment(
+        &mut self,
+        surface: &ComposerCard,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(attachments) = self.composer_attachments_mut(surface)
+            && index < attachments.len()
+        {
+            attachments.remove(index);
+            self.composer_attachments_edited(surface, cx);
+        }
     }
 
     /// A paste too large to stay inline, stored as a durable `.txt` blob: the
@@ -6483,9 +6584,7 @@ impl Waku {
     /// shared by the session column and a side chat's panel copy.
     /// `surface` decides which session the card reports and where its
     /// submit goes: a side chat's copy leaves out the affordances that
-    /// stage into the main draft (attachments, annotations, autocomplete,
-    /// drops) and renders its pickers disabled, so the chips are the
-    /// chat's inherited context rather than controls.
+    /// belong to the main draft and gives each side chat its own attachments.
     pub(super) fn render_composer_card(
         &self,
         surface: &ComposerCard,
@@ -6530,23 +6629,22 @@ impl Waku {
         // Stop — while a response fork has no abandon path at all.
         let preparing = session
             .is_some_and(|session| self.response_fork_preparations.contains_key(&session.id));
-        // Atoms and staged annotations count as draft on either surface —
-        // attachments stay main-only.
-        let (atom_count, annotation_count) = match surface {
-            ComposerCard::Main => (self.composer_inline_atoms.len(), self.annotation_count()),
-            ComposerCard::SideChat { session_id, .. } => (
-                self.side_chat_composers
-                    .get(session_id)
-                    .map_or(0, |chat| chat.atoms.len()),
-                self.side_chat_views
-                    .get(session_id)
-                    .map_or(0, |view| view.selection.annotations.borrow().items.len()),
+        let (has_staged_content, attachments) = match surface {
+            ComposerCard::Main => (
+                !self.composer_inline_atoms.is_empty() || self.annotation_count() != 0,
+                self.composer_attachments.as_slice(),
             ),
+            ComposerCard::SideChat { session_id, .. } => {
+                let chat = self.side_chat_composers.get(session_id);
+                (
+                    self.side_chat_has_staged_content(*session_id),
+                    chat.map(|chat| chat.attachments.as_slice()).unwrap_or_default(),
+                )
+            }
         };
         let has_draft = !composer.read(cx).content(cx).trim().is_empty()
-            || atom_count != 0
-            || annotation_count != 0
-            || (interactive && !self.composer_attachments.is_empty())
+            || has_staged_content
+            || !attachments.is_empty()
             // A scratchpad holding speech counts as draft — its send is
             // the same one Enter performs while the panel is up.
             || (interactive && self.voice_scratchpad_sendable());
@@ -6644,13 +6742,19 @@ impl Waku {
                     this.stage_deliverable_reference_for(&surface, drag, window, cx);
                 })
             })
-            .when(interactive, |card| {
-                card.drag_over::<ExternalPaths>(move |style, _, _, _| {
-                    style.bg(drop_wash).border_color(drop_ring)
+            .drag_over::<ExternalPaths>(move |style, _, _, _| {
+                style.bg(drop_wash).border_color(drop_ring)
+            })
+            .on_drop({
+                let surface = surface.clone();
+                cx.listener(move |this, paths: &ExternalPaths, window, cx| {
+                    this.stage_dropped_files_for(&surface, paths, window, cx);
                 })
+            })
+            .when(interactive, |card| {
                 // The same highlight when the drag is anywhere over the
                 // session column — the card is where the chips will land.
-                .group_drag_over::<ExternalPaths>(SESSION_DROP_GROUP, move |style| {
+                card.group_drag_over::<ExternalPaths>(SESSION_DROP_GROUP, move |style| {
                     style.bg(drop_wash).border_color(drop_ring)
                 })
                 .group_drag_over::<SidebarSessionDrag>(SESSION_DROP_GROUP, move |style| {
@@ -6659,11 +6763,6 @@ impl Waku {
                 .group_drag_over::<SidebarDeliverableDrag>(SESSION_DROP_GROUP, move |style| {
                     style.bg(drop_wash).border_color(drop_ring)
                 })
-                .on_drop(cx.listener(
-                    |this, paths: &ExternalPaths, window, cx| {
-                        this.stage_dropped_files(paths, window, cx);
-                    },
-                ))
             })
             // Anchor for the bounds probe the autocomplete popup aligns to.
             .relative()
@@ -6711,9 +6810,9 @@ impl Waku {
             .when(interactive, |card| {
                 // Big Picture's "replying to" chip; absent everywhere else.
                 card.children(self.render_big_picture_target_chip(cx))
-                    .when(!self.composer_attachments.is_empty(), |card| {
-                        card.child(self.render_composer_attachments(cx))
-                    })
+            })
+            .when(!attachments.is_empty(), |card| {
+                card.child(self.render_composer_attachments(surface, attachments, &controls, cx))
             })
             .children(self.render_annotation_chip_for(surface, cx))
             // The `Voicepad · N lines` pill — and the clear's explicit
@@ -7164,8 +7263,7 @@ impl Waku {
     }
 
     /// Where a card's send button routes its draft. The session column's
-    /// send stages attachments and honors Big Picture's targeting; a side
-    /// chat's is a plain prompt to the chat's own session.
+    /// honors Big Picture's targeting; a side chat sends to its own session.
     fn submit_composer_card_draft(&mut self, surface: &ComposerCard, cx: &mut Context<Self>) {
         let session_id = match surface {
             ComposerCard::Main => self.composer_session().map(|session| session.id),
@@ -7200,13 +7298,7 @@ impl Waku {
                 composer,
             } => {
                 let prompt = composer.read(cx).content(cx).to_owned();
-                if prompt.trim().is_empty()
-                    && self
-                        .side_chat_composers
-                        .get(session_id)
-                        .is_none_or(|chat| chat.atoms.is_empty())
-                    && !self.side_chat_has_annotations(*session_id)
-                {
+                if prompt.trim().is_empty() && !self.side_chat_has_staged_content(*session_id) {
                     return;
                 }
                 composer.update(cx, |input, cx| input.clear(cx));

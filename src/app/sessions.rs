@@ -5637,8 +5637,7 @@ impl Waku {
             && let Some(chat) = self.side_chat_composers.get(&session_id)
         {
             let has_draft = !chat.composer.read(cx).content(cx).trim().is_empty()
-                || !chat.atoms.is_empty()
-                || self.side_chat_has_annotations(session_id);
+                || self.side_chat_has_staged_content(session_id);
             if has_draft || self.last_sent_composer == Some(session_id) {
                 if has_draft {
                     let prompt = chat.composer.read(cx).content(cx).trim().to_owned();

@@ -9602,6 +9602,101 @@ mod live_employee_approvals {
         assert!(lower_grid.size.height > px(40.0));
     }
 
+    #[gpui::test]
+    fn file_drop_stages_and_restores_an_attachment_in_the_side_chat(cx: &mut gpui::TestAppContext) {
+        let (_env, dir) = isolated_env();
+        let project = Project::from_path(dir.clone());
+        let mut parent = AgentSession::new(project.id, ProviderKind::Codex);
+        parent.detail_loaded = true;
+        let parent_id = parent.id;
+        let source_path = dir.join("reference.txt");
+        std::fs::write(&source_path, "side chat file").unwrap();
+        let stored_path = dir.join("attachments/reference.txt");
+        let daemon = FakeDaemon::start(
+            dir,
+            project.clone(),
+            vec![parent.clone()],
+            boss_state(None, Vec::new()),
+        );
+        *daemon.response_hook.lock() = Some(Arc::new({
+            let stored_path = stored_path.clone();
+            move |_, command| match command {
+                Command::ImportAttachment { name, .. } if name == "reference.txt" => {
+                    Some(ResponseOutcome::Ok {
+                        payload: ResponsePayload::AttachmentStored {
+                            attachment: waku_protocol::attachments::StoredAttachment {
+                                reference: "attachment://reference.txt".into(),
+                                path: stored_path.clone(),
+                                name: name.clone(),
+                                is_dir: false,
+                            },
+                        },
+                    })
+                }
+                _ => None,
+            }
+        }));
+        let supervisor = DaemonSupervisor::connect(&daemon.address, "test-token".into()).unwrap();
+        let (view, vcx) = test_app(cx, supervisor);
+        let side_chat_id = update_app(vcx, &view, |waku, _, cx| {
+            cx.set_reduce_motion(true);
+            waku.state.selected_project = Some(project.id);
+            waku.state.selected_session = Some(parent_id);
+            waku.state.projects = vec![project];
+            waku.state.sessions = vec![parent];
+            waku.sync_right_panel_owner(cx);
+            let side_chat_id = waku.create_side_chat(parent_id, cx).unwrap();
+            waku.open_right_panel_surface(
+                super::super::RightPanelSurface::SideChat(side_chat_id),
+                cx,
+            );
+            waku.right_panel_slide = None;
+            side_chat_id
+        });
+        vcx.run_until_parked();
+        let position = read_app(vcx, &view, |waku| {
+            waku.side_chat_composers[&side_chat_id]
+                .autocomplete
+                .card_bounds_cell()
+                .get()
+                .expect("side chat composer")
+                .center()
+        });
+        vcx.update(|window, app| {
+            window.dispatch_event(
+                gpui::PlatformInput::FileDrop(gpui::FileDropEvent::Entered {
+                    position,
+                    paths: gpui::ExternalPaths(vec![source_path].into()),
+                }),
+                app,
+            );
+            window.dispatch_event(
+                gpui::PlatformInput::FileDrop(gpui::FileDropEvent::Submit { position }),
+                app,
+            );
+        });
+        wait_for(vcx, &view, |waku| {
+            waku.side_chat_has_staged_content(side_chat_id)
+        });
+        update_app(vcx, &view, |waku, _, cx| {
+            assert!(waku.composer_attachments.is_empty());
+            let submission = waku
+                .side_chat_submission(side_chat_id, String::new(), cx)
+                .expect("an attachment is sufficient to submit");
+            assert_eq!(submission.attachments.len(), 1);
+            assert_eq!(submission.attachments[0].path, stored_path);
+            assert_eq!(submission.prompt, format!("@{}", stored_path.display()));
+            assert_eq!(submission.display_content.as_deref(), Some(""));
+            assert!(!waku.side_chat_has_staged_content(side_chat_id));
+            waku.restore_composer_submission(side_chat_id, submission, cx);
+            assert!(waku.composer_attachments.is_empty());
+            assert_eq!(
+                waku.side_chat_composers[&side_chat_id].attachments[0].path,
+                stored_path
+            );
+        });
+    }
+
     // Exercises actual clipboard/key dispatch and task draft switching, without screenshots.
     #[gpui::test]
     fn composer_chips_copy_between_tasks_and_survive_undo(cx: &mut gpui::TestAppContext) {

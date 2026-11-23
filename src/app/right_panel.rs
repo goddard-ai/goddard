@@ -7500,12 +7500,8 @@ impl Waku {
             &composer,
             move |this: &mut Self, _, event: &ComposerEvent, cx| match event {
                 ComposerEvent::Submit(prompt) => {
-                    let empty_draft = prompt.trim().is_empty()
-                        && this
-                            .side_chat_composers
-                            .get(&session_id)
-                            .is_none_or(|chat| chat.atoms.is_empty())
-                        && !this.side_chat_has_annotations(session_id);
+                    let empty_draft =
+                        prompt.trim().is_empty() && !this.side_chat_has_staged_content(session_id);
                     if empty_draft {
                         // Same affordance as the session column's empty
                         // Enter over a stopped turn.
@@ -7515,12 +7511,8 @@ impl Waku {
                     }
                 }
                 ComposerEvent::SubmitSteer(prompt) => {
-                    let empty_draft = prompt.trim().is_empty()
-                        && this
-                            .side_chat_composers
-                            .get(&session_id)
-                            .is_none_or(|chat| chat.atoms.is_empty())
-                        && !this.side_chat_has_annotations(session_id);
+                    let empty_draft =
+                        prompt.trim().is_empty() && !this.side_chat_has_staged_content(session_id);
                     if !empty_draft
                         && let Some(submission) =
                             this.side_chat_submission(session_id, prompt.clone(), cx)
@@ -7533,12 +7525,13 @@ impl Waku {
                     this.last_focused_side_chat_composer = Some(session_id);
                 }
                 ComposerEvent::BackspaceOnEmpty => {
-                    // Chat idiom: pop the last staged atom, the way the
-                    // session column pops attachments and atoms.
-                    if let Some(chat) = this.side_chat_composers.get_mut(&session_id)
-                        && chat.atoms.pop().is_some()
-                    {
+                    let Some(chat) = this.side_chat_composers.get_mut(&session_id) else {
+                        return;
+                    };
+                    if chat.atoms.pop().is_some() {
                         this.sync_side_chat_atoms(session_id, cx);
+                        cx.notify();
+                    } else if chat.attachments.pop().is_some() {
                         cx.notify();
                     }
                 }
@@ -7570,12 +7563,27 @@ impl Waku {
             },
         )
         .detach();
+        cx.subscribe(
+            &composer,
+            move |this: &mut Self, composer, event: &ComposerAttachmentPaste, cx| {
+                this.stage_pasted_attachments(
+                    &composer::ComposerCard::SideChat {
+                        session_id,
+                        composer,
+                    },
+                    event.0.clone(),
+                    cx,
+                );
+            },
+        )
+        .detach();
         self.side_chat_composers.insert(
             session_id,
             SideChatComposer {
                 composer: composer.clone(),
                 autocomplete: autocomplete::AutocompleteUi::new(),
                 atoms: Vec::new(),
+                attachments: Vec::new(),
                 commands: Rc::new(Vec::new()),
                 command_key: None,
                 commands_loading: false,

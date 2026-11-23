@@ -1,0 +1,1 @@
+- Drag files from Finder into a right-panel side chat to attach them to that chat.
