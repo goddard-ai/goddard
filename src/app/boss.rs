@@ -1698,13 +1698,9 @@ fn is_retired_boss_chat(session: &AgentSession, identities: &HashSet<Uuid>) -> b
         && identities.contains(&session.project_id)
 }
 
-/// The chat a boss-row `Open` may activate locally while another request
-/// holds the pipe: the document's pointer resolved through the recorded
-/// swaps and the catalog. `None` parks the request — a pointer naming a
-/// retired chat, or a session the catalog has not received yet, is stale
-/// state only the daemon's reply can heal; activating it would strand the
-/// click on the archived predecessor or do nothing at all.
-fn pending_boss_open_session<'a>(
+/// The chat an `Open` can activate from the catalog. An unresolved pointer
+/// still needs the daemon to create or recover the chat.
+fn cataloged_boss_open_session<'a>(
     sessions: &'a [AgentSession],
     identities: &HashSet<Uuid>,
     rotated: &HashMap<Uuid, Uuid>,
@@ -2549,50 +2545,46 @@ impl Waku {
         if !self.state.boss_experiment_enabled {
             return;
         }
+        let opens_chat =
+            reply == BossReply::Open && matches!(operation, BossOperation::Open { .. });
+        // Open a known chat directly. Deliverables normally wait for the
+        // daemon to confirm the pointer their preview is tied to.
+        if opens_chat && (self.boss_ui.pending || self.boss_ui.pending_deliverable.is_none()) {
+            let identities = self
+                .boss_ui
+                .states
+                .values()
+                .map(|state| state.identity.id)
+                .collect();
+            let state = self.boss_ui.states.get(&key);
+            let recorded = state.and_then(|state| state.session_id);
+            if let Some(session) = cataloged_boss_open_session(
+                &self.state.sessions,
+                &identities,
+                &self.boss_ui.rotated_chat_drafts,
+                recorded,
+            )
+            .filter(|session| {
+                self.boss_ui.pending
+                    || state.is_some_and(|state| {
+                        session.project_id == state.identity.id
+                            && self.boss_ui.projects.contains_key(&session.project_id)
+                            && session.workspace == SessionWorkspace::default()
+                    })
+            }) {
+                self.boss_ui.queued_open = None;
+                self.request_session_activation(session.id, SessionActivationTransition::Visit, cx);
+                return;
+            }
+        }
         if self.boss_ui.pending {
             // Passive pseudo-project recovery can wait for the next state
             // arrival; it must never use the click's activation shortcut.
             if reply == BossReply::List && matches!(operation, BossOperation::Open { .. }) {
                 return;
             }
-            // A boss-chat click while a request is in flight must not die —
-            // under exactly the slowness an Open suffers, a dropped click
-            // reads as a broken sidebar. A live session the app already
-            // holds activates straight from its copy; anything else (first
-            // open, a session the catalog lost, a pointer still naming the
-            // chat a rotation retired) parks the operation so the
-            // completion re-issues it against the daemon — only the
-            // daemon's reply can heal a stale pointer. Last click wins.
-            if let BossOperation::Open { .. } = operation {
-                let identities: HashSet<Uuid> = self
-                    .boss_ui
-                    .states
-                    .values()
-                    .map(|state| state.identity.id)
-                    .collect();
-                // The document pointer trails the catalog across a
-                // rotation — resolve it through the recorded swaps, and
-                // treat a retired or missing target as stale state only a
-                // real Open can heal.
-                let session_id = pending_boss_open_session(
-                    &self.state.sessions,
-                    &identities,
-                    &self.boss_ui.rotated_chat_drafts,
-                    self.boss_ui
-                        .states
-                        .get(&key)
-                        .and_then(|state| state.session_id),
-                )
-                .map(|session| session.id);
-                if let Some(session_id) = session_id {
-                    self.request_session_activation(
-                        session_id,
-                        SessionActivationTransition::Visit,
-                        cx,
-                    );
-                } else {
-                    self.boss_ui.queued_open = Some((key, operation, self.state.selected_session));
-                }
+            if opens_chat {
+                self.boss_ui.queued_open = Some((key, operation, self.state.selected_session));
             } else if let BossOperation::HistorySearch { .. } = operation {
                 // A lookup submitted mid-flight parks instead of dropping —
                 // the next completion re-issues the freshest one.
@@ -14656,7 +14648,7 @@ mod tests {
     }
 
     #[test]
-    fn pending_boss_open_activates_the_live_chat() {
+    fn cataloged_boss_open_activates_the_live_chat() {
         let project = Uuid::new_v4();
         let old = Uuid::new_v4();
         let next = Uuid::new_v4();
@@ -14664,7 +14656,7 @@ mod tests {
         // A live pointer activates straight from the client's copy.
         let sessions = vec![boss_chat_session(project, old, false)];
         assert_eq!(
-            pending_boss_open_session(&sessions, &identities, &HashMap::new(), Some(old))
+            cataloged_boss_open_session(&sessions, &identities, &HashMap::new(), Some(old))
                 .map(|session| session.id),
             Some(old)
         );
@@ -14675,14 +14667,14 @@ mod tests {
             boss_chat_session(project, next, false),
         ];
         assert_eq!(
-            pending_boss_open_session(&sessions, &identities, &HashMap::new(), Some(old))
+            cataloged_boss_open_session(&sessions, &identities, &HashMap::new(), Some(old))
                 .map(|session| session.id),
             Some(next)
         );
     }
 
     #[test]
-    fn pending_boss_open_parks_on_a_stale_pointer() {
+    fn cataloged_boss_open_rejects_a_stale_pointer() {
         let project = Uuid::new_v4();
         let old = Uuid::new_v4();
         let next = Uuid::new_v4();
@@ -14691,12 +14683,13 @@ mod tests {
         // pointer — activating it would land the click on the archive.
         let sessions = vec![boss_chat_session(project, old, true)];
         assert!(
-            pending_boss_open_session(&sessions, &identities, &HashMap::new(), Some(old)).is_none()
+            cataloged_boss_open_session(&sessions, &identities, &HashMap::new(), Some(old))
+                .is_none()
         );
         // A recorded swap alone cannot make the retired pointer safe: the
         // replacement's row must be in the catalog first.
         assert!(
-            pending_boss_open_session(
+            cataloged_boss_open_session(
                 &sessions,
                 &identities,
                 &HashMap::from([(old, next)]),
@@ -14707,10 +14700,10 @@ mod tests {
         // A pointer naming a session the catalog has not received — and no
         // pointer at all — park the same way.
         assert!(
-            pending_boss_open_session(&sessions, &identities, &HashMap::new(), Some(next))
+            cataloged_boss_open_session(&sessions, &identities, &HashMap::new(), Some(next))
                 .is_none()
         );
-        assert!(pending_boss_open_session(&sessions, &identities, &HashMap::new(), None).is_none());
+        assert!(cataloged_boss_open_session(&sessions, &identities, &HashMap::new(), None).is_none());
     }
 
     #[test]

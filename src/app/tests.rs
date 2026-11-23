@@ -10121,6 +10121,51 @@ mod live_employee_approvals {
         });
     }
 
+    #[gpui::test]
+    fn boss_chat_navigation_switches_before_daemon_replies(cx: &mut gpui::TestAppContext) {
+        cx.skip_drawing();
+        let (_env, dir) = isolated_env();
+        let project = Project::from_path(dir.clone());
+        let mut boss_chat = AgentSession::new(project.id, ProviderKind::Codex);
+        boss_chat.boss_managed = true;
+        boss_chat.detail_loaded = true;
+        let mut task = AgentSession::new(project.id, ProviderKind::Codex);
+        task.begin_turn("A task outside Boss chat");
+        task.finish_active_turn(TurnStatus::Completed);
+        task.detail_loaded = true;
+        let (boss_id, task_id) = (boss_chat.id, task.id);
+        let mut boss = boss_state(Some(boss_id), Vec::new());
+        boss.identity.id = project.id;
+        let daemon = FakeDaemon::start(
+            dir,
+            project.clone(),
+            vec![boss_chat.clone(), task.clone()],
+            boss.clone(),
+        );
+        let supervisor = DaemonSupervisor::connect(&daemon.address, "test-token".into()).unwrap();
+        let (view, vcx) = test_app(cx, supervisor);
+        update_app(vcx, &view, |waku, _, cx| {
+            let key = waku_client::DaemonKey::Local;
+            waku.boss_ui.projects.insert(project.id, project.clone());
+            waku.state.projects = vec![project];
+            waku.state.sessions = vec![boss_chat, task.list_projection()];
+            waku.state.selected_session = Some(task_id);
+            waku.state.boss_experiment_enabled = true;
+            waku.boss_ui.states.insert(key, boss);
+
+            waku.chat_with_boss(key, cx);
+            assert_eq!(waku.state.selected_session, Some(boss_id));
+
+            waku.select_session(task_id, cx);
+            assert_eq!(waku.state.selected_session, Some(task_id));
+            assert!(!waku.selected_session().unwrap().detail_loaded);
+        });
+        wait_for(vcx, &view, |waku| {
+            waku.state.selected_session == Some(task_id)
+                && waku.selected_session().unwrap().detail_loaded
+        });
+    }
+
     // Headless state/navigation regression; no screenshots or visual assertions.
     #[gpui::test]
     fn empty_enter_resumes_idle_counsel(cx: &mut gpui::TestAppContext) {

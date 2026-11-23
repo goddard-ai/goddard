@@ -1,0 +1,1 @@
+- Reopening Boss chat switches immediately when the chat is already known. Leaving it for a task switches to that task while its transcript loads.

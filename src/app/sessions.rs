@@ -959,7 +959,12 @@ impl Waku {
                 .qa_window
                 .as_ref()
                 .is_none_or(|qa| qa.record.session_id == session_id);
-        if !can_wait {
+        // Leave the Boss chat at once and let the destination own its load.
+        let hold_outgoing = can_wait
+            && !(self.session_surface_active()
+                && self.live_deliverable_page().is_none()
+                && self.boss_chat_key().is_some());
+        if !hold_outgoing {
             self.request_session_activation(session_id, transition, cx);
             return;
         }
