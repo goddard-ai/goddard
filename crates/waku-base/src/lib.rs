@@ -65,6 +65,8 @@ pub mod identity;
 pub mod issue_templates;
 pub mod lan;
 pub mod pairing;
+pub mod persistence_metrics;
+pub mod request_timing;
 pub mod power;
 pub mod pressure;
 pub mod process_identity;

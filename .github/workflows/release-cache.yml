@@ -37,6 +37,7 @@ jobs:
     timeout-minutes: 90
     env:
       CARGO_TERM_COLOR: always
+      _CL_: ${{ startsWith(matrix.runner, 'windows-') && format('/FI"{0}/scripts/msvc-espeak-compat.h"', github.workspace) || '' }}
       RUSTC_WRAPPER: sccache
       # sccache storage lives in the goddard-ci-cache R2 bucket: GitHub's
       # 10 GiB Actions cache cap was evicting entries between runs.

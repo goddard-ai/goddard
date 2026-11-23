@@ -1,5 +1,83 @@
 use super::*;
 
+/// Fresh submissions stay separate from a possibly retired transcript while
+/// ownership is checked. The token prevents a cancelled check settling a later one.
+pub(super) struct RuntimeSubmissionCheck {
+    token: Uuid,
+    runtime_id: Option<Uuid>,
+    options_generation: Option<Uuid>,
+    options: SessionOptions,
+    provider: ProviderKind,
+    history_generation: u64,
+    project_id: Uuid,
+    cwd: Option<PathBuf>,
+    submissions: VecDeque<ComposerSubmission>,
+    pub(super) previews: Vec<Message>,
+}
+
+impl RuntimeSubmissionCheck {
+    fn push(&mut self, mut submission: ComposerSubmission) {
+        if let Some(preview) = submission.transcript_preview() {
+            self.previews.push(preview);
+        }
+        self.submissions.push_back(submission);
+    }
+}
+
+impl ComposerSubmission {
+    /// Give the provisional bubble and the admitted message the same identity.
+    fn transcript_preview(&mut self) -> Option<Message> {
+        if self.hidden {
+            return None;
+        }
+        let mut message = Message::new(MessageRole::User, self.prompt.clone()).with_presentation(
+            self.display_content.clone(),
+            self.attachments.clone(),
+            self.message_atoms.clone(),
+        );
+        message.id = *self.queued_id.get_or_insert(message.id);
+        Some(message)
+    }
+}
+
+enum SubmissionRuntime {
+    Current,
+    Retired {
+        session: Option<AgentSession>,
+        has_runtime: bool,
+    },
+}
+
+fn check_submission_runtime(
+    daemon: waku_client::DaemonSupervisor,
+    session_id: Uuid,
+    expected: Option<Uuid>,
+    incognito: bool,
+) -> anyhow::Result<SubmissionRuntime> {
+    let client = daemon.client();
+    let response = client.request(session_id, Uuid::nil(), waku_client::Command::AttachSession)?;
+    let waku_client::ResponsePayload::SessionRuntime { runtime_id, .. } = response else {
+        anyhow::bail!("Goddard daemon returned an invalid runtime attachment response");
+    };
+    if expected.is_some() && runtime_id == expected {
+        return Ok(SubmissionRuntime::Current);
+    }
+    let session = waku_client::persistence::hydrate_session(&daemon, session_id)?;
+    anyhow::ensure!(
+        session.is_some() || (incognito && runtime_id.is_none()),
+        "the task is no longer available"
+    );
+    Ok(SubmissionRuntime::Retired {
+        session,
+        has_runtime: runtime_id.is_some(),
+    })
+}
+
+pub(super) enum PendingRuntimeOperation {
+    Goal(crate::model::GoalOperation),
+    Compact,
+}
+
 /// Consecutive automatic resumptions one session gets across daemon
 /// restarts. The count clears when a turn completes, so a daemon that keeps
 /// dying on the resumed prompt is what stops the loop — not steady work.
@@ -12,8 +90,14 @@ const MAX_RUNTIME_AUTO_RESUMES: u8 = 3;
 /// mailbox) otherwise leaves the persisted turn `Running` forever.
 const UNSTARTED_TURN_TIMEOUT: Duration = Duration::from_secs(60);
 
-fn interrupted_planning_turn_has_no_file_changes(session: &AgentSession, turn_id: Uuid) -> bool {
-    session.phase == Some(waku_protocol::routing::SessionPhase::Planning)
+fn interrupted_planning_turn_has_no_file_changes(
+    session: &AgentSession,
+    turn_id: Uuid,
+    detail_current: bool,
+) -> bool {
+    detail_current
+        && session.detail_loaded
+        && session.phase == Some(waku_protocol::routing::SessionPhase::Planning)
         && !session.transcript_blocks.iter().any(|block| {
             block.turn_id == Some(turn_id)
                 && block
@@ -141,6 +225,7 @@ const PROVIDER_BINARY_WAIT_POLL: Duration = Duration::from_millis(250);
 pub(super) fn start_driver(
     request: DriverStartRequest,
     cwd: PathBuf,
+    task_registration: Option<(Project, AgentSession)>,
 ) -> anyhow::Result<PreparedDriver> {
     let DriverStartRequest {
         session_id,
@@ -164,12 +249,48 @@ pub(super) fn start_driver(
         settings.computer_use_enabled,
         settings.computer_use_experiment_enabled,
     );
+    // A first prompt has only an optimistic desktop row. Register its real
+    // workspace before starting the runtime: connect_remote immediately asks
+    // for a task-view snapshot, which requires a daemon-owned row. Await the
+    // save response here; the ordinary queued UI save cannot order this.
+    let registered_session = if let Some((project, mut session)) = task_registration {
+        session.provider = provider;
+        session.antigravity_acp |= provider == ProviderKind::Antigravity;
+        session.model.clone_from(&options.model);
+        session
+            .reasoning_effort
+            .clone_from(&options.reasoning_effort);
+        session.service_tier.clone_from(&options.service_tier);
+        session.context_window.clone_from(&options.context_window);
+        let registered = match daemon.client().request(
+            Uuid::nil(),
+            Uuid::nil(),
+            waku_client::Command::SaveTaskState {
+                projects: vec![project],
+                live_session_ids: vec![session.id],
+                sessions: vec![session],
+                session_tails: Vec::new(),
+            },
+        )? {
+            waku_client::ResponsePayload::TaskStateSaved { sessions } => sessions
+                .into_iter()
+                .find(|session| session.id == session_id),
+            _ => None,
+        }
+        .ok_or_else(|| anyhow::anyhow!("the daemon did not register the task before startup"))?;
+        Some(Box::new(registered.list_projection()))
+    } else {
+        None
+    };
+
     let (event_tx, events) = driver::event_channel(event_wake);
     let handle = driver::start_remote(daemon, session_id, provider, options, event_tx)?;
     Ok(PreparedDriver {
         handle,
         events,
+        registered_session,
         hydrated_session: None,
+        transcript_window: None,
     })
 }
 
@@ -327,18 +448,20 @@ fn attach_driver(
     hydrate: bool,
     event_wake: smol::channel::Sender<()>,
 ) -> anyhow::Result<Option<PreparedDriver>> {
-    let hydrated_session = if hydrate {
+    let client = daemon.client();
+    // A transcript window cannot replace session hydration: its skeleton
+    // carries placeholder permissions and omits the saved provider settings.
+    let hydrated_session = if hydrate || !client.task_views_available() {
         waku_client::persistence::hydrate_session(&daemon, session_id)?
     } else {
         None
     };
-    // The hydrated detail's stored cursor supersedes the skeleton's: it is
-    // the baseline the arriving events will actually extend.
+    // Stored cursor beats the skeleton's list cursor: it is the baseline the
+    // arriving events will actually extend.
     let replay_cursor = hydrated_session
         .as_ref()
         .and_then(|session| session.runtime_event_cursor)
         .or(replay_cursor);
-    let client = daemon.client();
     let response = client.request(session_id, Uuid::nil(), waku_client::Command::AttachSession)?;
     let waku_client::ResponsePayload::SessionRuntime {
         runtime_id,
@@ -365,7 +488,9 @@ fn attach_driver(
     Ok(Some(PreparedDriver {
         handle,
         events,
+        registered_session: None,
         hydrated_session,
+        transcript_window: None,
     }))
 }
 
@@ -503,6 +628,7 @@ pub(super) fn merge_remote_session_catalog(
     owns: impl Fn(Uuid) -> bool,
     has_local_runtime: impl Fn(Uuid) -> bool,
     fresh: bool,
+    preparing: &HashSet<Uuid>,
 ) -> Vec<Uuid> {
     let remote_ids = remote
         .iter()
@@ -511,6 +637,8 @@ pub(super) fn merge_remote_session_catalog(
     // Re-registration needs the transcript, so only detail-loaded copies
     // survive; an incognito skeleton learned from another client comes back
     // through the catalog when its owner re-pushes it.
+    // First turns also exist locally before provider preparation registers
+    // them with the daemon; an older snapshot cannot retire them yet.
     let survives_restart =
         |session: &AgentSession| fresh && session.incognito && session.detail_loaded;
     let removed = local
@@ -520,6 +648,7 @@ pub(super) fn merge_remote_session_catalog(
                 && owns(session.id)
                 && !remote_ids.contains(&session.id)
                 && !survives_restart(session)
+                && !preparing.contains(&session.id)
         })
         .map(|session| session.id)
         .collect::<Vec<_>>();
@@ -528,6 +657,7 @@ pub(super) fn merge_remote_session_catalog(
             || !owns(session.id)
             || remote_ids.contains(&session.id)
             || survives_restart(session)
+            || preparing.contains(&session.id)
     });
 
     for remote in remote {
@@ -570,11 +700,14 @@ pub(super) fn merge_remote_project_catalog(
 }
 
 /// Preserve newer resident detail and list edits while installing a stored baseline.
+/// Only explicitly stale detail may be replaced while still visible. A live
+/// detail snapshot clears staleness, so a late read cannot overwrite that snapshot.
 pub(super) fn merge_hydrated_session(
     existing: &mut AgentSession,
     mut hydrated: AgentSession,
+    refresh_stale: bool,
 ) -> bool {
-    if existing.detail_loaded {
+    if existing.detail_loaded && !refresh_stale {
         return false;
     }
     let columns = existing.list_projection();
@@ -583,7 +716,7 @@ pub(super) fn merge_hydrated_session(
     true
 }
 
-fn merge_session_catalog_row(
+pub(super) fn merge_session_catalog_row(
     local: &mut AgentSession,
     remote: AgentSession,
     has_local_runtime: bool,
@@ -593,21 +726,22 @@ fn merge_session_catalog_row(
         waku_protocol::task_metadata::TaskMetadata::capture(local).apply(&mut remote);
         remote.updated_at = remote.updated_at.max(local.updated_at);
     }
+    let configuration = waku_protocol::task_metadata::TaskMetadataEdit::capture(
+        waku_protocol::task_metadata::TaskMetadataField::Configuration,
+        &remote,
+    );
     local.metadata_revision = local.metadata_revision.max(remote.metadata_revision);
+    local.antigravity_acp |= remote.antigravity_acp;
     local.agent_rename_allowed = remote.agent_rename_allowed;
     local.title = remote.title;
+    local.auto_title_is_prompt = if remote.detail_loaded {
+        remote.auto_title_is_prompt
+    } else {
+        local.auto_title == remote.auto_title
+            && (local.auto_title_is_prompt || remote.auto_title_is_prompt)
+    };
     local.auto_title = remote.auto_title;
     local.project_id = remote.project_id;
-    // A snapshot that predates the confirmed activation cannot own
-    // the effective fields — its provider/model/effort are
-    // pre-activation requested state. The mark itself merges
-    // forward only, so the snapshot cannot lower the local
-    // high-water and reopen stale redeliveries either.
-    if remote.config_activation >= local.config_activation {
-        local.provider = remote.provider;
-        local.model = remote.model;
-        local.reasoning_effort = remote.reasoning_effort;
-    }
     local.config_activation = local.config_activation.max(remote.config_activation);
     local.created_at = remote.created_at;
     local.last_reply_at = remote.last_reply_at;
@@ -626,26 +760,60 @@ fn merge_session_catalog_row(
         local.status = remote.status;
         local.updated_at = remote.updated_at;
     }
+    configuration.apply(local);
 }
 
-/// Perform every blocking operation between accepting a submission and
-/// starting its provider. This function is called only from the background
-/// executor; the UI thread owns applying the returned workspace afterward.
+#[derive(Debug)]
+pub(super) struct WorkspaceRecoveryRequired;
+
+impl std::fmt::Display for WorkspaceRecoveryRequired {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&tr!("session.workspace_recovery_needed"))
+    }
+}
+
+impl std::error::Error for WorkspaceRecoveryRequired {}
+
+/// Perform blocking submission preparation on the background executor.
+/// Creation eligibility is captured before the optimistic turn begins.
 pub(super) fn prepare_submission(
     workspace_client: waku_client::WorkspaceClient,
     project: Project,
     workspace: SessionWorkspace,
+    allow_worktree_creation: bool,
     driver_start: Option<routing::SessionStartPlan>,
     turn_route: Option<routing::TurnRoutePlan>,
+    task_registration: Option<AgentSession>,
     session_id: Uuid,
     turn_count: usize,
+    history_generation: u64,
     sync_default_branch: bool,
     sync_branches: Vec<String>,
-    incognito: bool,
+    capture_checkpoints: bool,
     stage: StageReporter,
 ) -> anyhow::Result<PreparedSubmission> {
     let mut worktree_restored = false;
     let mut lfs_warning = None;
+    // Draft intent is only permission to create a checkout for a fresh task.
+    // Recover the daemon's assignment before any checkpoint or provider work.
+    let workspace =
+        if matches!(workspace, SessionWorkspace::NewWorktree { .. }) && !allow_worktree_creation {
+            match workspace_client
+                .request(waku_client::WorkspaceOperation::RecoverTaskWorkspace {
+                    session_id,
+                    path: None,
+                    restore: false,
+                })
+                .map_err(|error| error.context(WorkspaceRecoveryRequired))?
+            {
+                waku_client::WorkspaceResult::TaskWorkspace {
+                    workspace: Some(recovered),
+                } if !matches!(recovered, SessionWorkspace::NewWorktree { .. }) => recovered,
+                _ => return Err(WorkspaceRecoveryRequired.into()),
+            }
+        } else {
+            workspace
+        };
     let workspace = match workspace {
         SessionWorkspace::NewWorktree { base_branch } => {
             if project.is_projectless() {
@@ -759,24 +927,30 @@ pub(super) fn prepare_submission(
     };
     let project_path = workspace.path().unwrap_or(&project.path);
 
-    SubmissionStage::Checkpoint.report(&stage);
+    let task_registration = task_registration.map(|mut session| {
+        session.workspace = workspace.clone();
+        (project.clone(), session)
+    });
+
     // Every turn gets its own immutable starting snapshot. Reusing the prior
     // response's ending ref would attribute branch switches or terminal edits
-    // made between turns to the next response. Incognito sessions skip the
-    // capture — a checkpoint ref outlives a session that must leave no trace.
-    let checkpoint_warning = if incognito {
-        None
-    } else {
+    // made between turns to the next response. Boss chat and incognito
+    // sessions skip Git checkpoints entirely.
+    let checkpoint_warning = if capture_checkpoints {
+        SubmissionStage::Checkpoint.report(&stage);
         workspace_ack(
             &workspace_client,
             waku_client::WorkspaceOperation::CaptureTurnStart {
                 cwd: project_path.to_path_buf(),
                 session_id,
                 turn_count,
+                history_generation: Some(history_generation),
             },
         )
         .err()
         .map(|error| tr!("errors.capture_pre_turn_checkpoint", error = error))
+    } else {
+        None
     };
 
     // Batch Auto effort and optional model handoff judgments in one bounded
@@ -791,17 +965,19 @@ pub(super) fn prepare_submission(
     // boundary as Git work, otherwise the last spinner frame visibly freezes
     // just before Stop appears. A routed start prepends the evaluation call:
     // same boundary, one extra daemon round trip.
-    let mut route_decision = None;
+    let mut started_route = None;
     let driver = driver_start.map(|start| -> anyhow::Result<PreparedDriver> {
         match start {
             routing::SessionStartPlan::Direct(request) => {
                 SubmissionStage::Starting.report(&stage);
-                request.and_then(|request| start_driver(request, project_path.to_path_buf()))
+                request.and_then(|request| {
+                    start_driver(request, project_path.to_path_buf(), task_registration)
+                })
             }
             routing::SessionStartPlan::Routed(plan) => {
-                let (decision, driver) =
-                    plan.route_and_start(project_path.to_path_buf(), &stage)?;
-                route_decision = decision;
+                let (route, driver) =
+                    plan.route_and_start(project_path.to_path_buf(), &stage, task_registration)?;
+                started_route = Some(route);
                 Ok(driver)
             }
         }
@@ -813,7 +989,7 @@ pub(super) fn prepare_submission(
         lfs_warning,
         worktree_restored,
         driver,
-        route_decision,
+        started_route,
         turn_route,
     })
 }
@@ -1193,7 +1369,7 @@ fn perform_provider_rewind(
                         provider = provider.display_name()
                     ))
                 })?;
-                let prepared = start_driver(start, request.project_path.clone())?;
+                let prepared = start_driver(start, request.project_path.clone(), None)?;
                 let driver = prepared.handle.clone();
                 prepared_driver = Some(prepared);
                 driver
@@ -1324,7 +1500,7 @@ fn fork_response_with_driver(
                 provider = provider.display_name()
             ))
         })?;
-        let prepared = start_driver(start, request.source_workspace_path.clone())?;
+        let prepared = start_driver(start, request.source_workspace_path.clone(), None)?;
         let driver = prepared.handle.clone();
         prepared_driver = Some(prepared);
         driver
@@ -1716,6 +1892,9 @@ impl Waku {
                     while let Ok(newer) = clients.try_recv() {
                         client = newer;
                     }
+                    if client.task_views_available() {
+                        let _ = client.set_task_view(Uuid::nil(), Uuid::nil(), false);
+                    }
                     let revisions = client.subscribe_task_state();
                     let settings = client.subscribe_settings();
                     let friends = client.subscribe_friends();
@@ -1975,9 +2154,9 @@ impl Waku {
         true
     }
 
-    /// The local supervisor's reachability stream — the banner follows the
-    /// latest announced status.
-    fn drain_daemon_status_events(&mut self, _cx: &mut Context<Self>) -> bool {
+    /// Reachability changes update the local banner and release submissions
+    /// held while a remote supervisor reconnects.
+    fn drain_daemon_status_events(&mut self, cx: &mut Context<Self>) -> bool {
         let mut changed = false;
         while let Ok((key, status)) = self.daemon_status_events.try_recv() {
             changed |= daemon_status_change_repaints_sidebar(
@@ -1988,6 +2167,10 @@ impl Waku {
             );
             if key == waku_client::DaemonKey::Local {
                 self.local_daemon_status = status;
+            } else if let waku_client::DaemonKey::Remote(host) = key
+                && status == waku_client::DaemonStatus::Connected
+            {
+                self.resume_pending_remote_submissions(host, cx);
             }
         }
         changed
@@ -2605,12 +2788,15 @@ impl Waku {
             session_id,
             SessionRuntime {
                 driver: handle,
-                options_generation: 0,
+                options_generation: Uuid::nil(),
+                options_in_flight: None,
+                options_deferred: false,
                 events,
                 pending_events: VecDeque::new(),
                 pending_steers: VecDeque::new(),
                 deferred_steers: VecDeque::new(),
                 stream_phase: None,
+                detail_visible: None,
                 pending_reasoning_newlines: 0,
                 stream_remeasure_pending: false,
                 pending_permission: None,
@@ -2739,6 +2925,11 @@ impl Waku {
             .collect();
         self.daemon.note_remote_settings(settings.clone());
         self.state.apply_daemon_settings(settings);
+        if self.state.sync_auto_favorite() {
+            if let Err(error) = self.store.save_app_settings(&self.state) {
+                eprintln!("could not save Auto favorite state: {error}");
+            }
+        }
         if self.state.boss_experiment_enabled {
             // The settings write only queued with the daemon — this
             // broadcast is the first moment its Boss document is fetchable.
@@ -2784,9 +2975,25 @@ impl Waku {
                 .sessions
                 .retain(|session| remote_session_visible(session, boss_experiment_enabled));
         }
+        snapshot
+            .sessions
+            .retain(|session| !self.sidebar_intents.task_removed(session.id));
+        self.sidebar_intents.wake();
+        let intent_cleanups = self.sidebar_intents.cleanup_ids();
+        self.pending_workspace_cleanups.extend(
+            snapshot
+                .sessions
+                .iter()
+                .filter(|session| {
+                    session.archived_at.is_some() && intent_cleanups.contains(&session.id)
+                })
+                .map(|session| session.id),
+        );
         let runtime_ids = self.runtimes.keys().copied().collect::<HashSet<_>>();
         for session in &mut snapshot.sessions {
-            self.pending_task_metadata.observe(session);
+            self.pending_task_metadata.observe_raw(session);
+            self.sidebar_intents.observe_task(session);
+            self.pending_task_metadata.overlay(session);
         }
         for session in &snapshot.sessions {
             if session.archived_at.is_some() {
@@ -2817,6 +3024,7 @@ impl Waku {
             },
             |session_id| runtime_ids.contains(&session_id),
             fresh,
+            &self.submission_preparations,
         );
         // Incognito rows the restarted daemon forgot ride the next save back:
         // SaveTaskState adopts a detail-loaded started session it does not
@@ -2967,28 +3175,22 @@ impl Waku {
             .sessions
             .iter()
             .find(|session| session.id == session_id)
-            && session.provider == ProviderKind::Antigravity
+            && session.uses_antigravity_terminal()
         {
-            // Antigravity owns an app-local TUI, not a daemon runtime. Its
-            // saved provider cursor must arrive before the TUI can resume.
-            if session.detail_loaded && self.pending_session_cancels.remove(&session_id) {
+            // Legacy Antigravity tasks own an app-local terminal.
+            if self.pending_session_cancels.remove(&session_id) {
                 self.cancel_session_turn(session_id, cx);
                 return;
             }
             if self.state.selected_session == Some(session_id) {
-                if session.detail_loaded {
-                    self.ensure_agy_terminal(session_id, cx);
-                } else {
-                    self.ensure_session_loaded(session_id, cx);
-                }
+                self.ensure_agy_terminal(session_id, cx);
             }
             return;
         }
-        if self
-            .state
-            .sessions
-            .iter()
-            .any(|session| session.id == session_id && !session.detail_loaded && !session.incognito)
+        if self.task_detail_visible(session_id)
+            && self.state.sessions.iter().any(|session| {
+                session.id == session_id && !session.detail_loaded && !session.incognito
+            })
         {
             self.ensure_session_loaded(session_id, cx);
             return;
@@ -2998,6 +3200,7 @@ impl Waku {
             // runtime; an attach racing it would subscribe a second handle
             // to the same daemon runtime.
             || self.submission_preparations.contains(&session_id)
+            || self.runtime_submission_checks.contains_key(&session_id)
             || self.runtime_attach_pending.contains(&session_id)
         {
             return;
@@ -3024,7 +3227,9 @@ impl Waku {
                     session.runtime_event_cursor,
                     // An incognito row owns no stored detail to fetch — its
                     // transcript lives in this process only.
-                    !session.detail_loaded && !session.incognito,
+                    !session.detail_loaded
+                        && !session.incognito
+                        && self.task_detail_visible(session_id),
                 )
             })
             .unwrap_or((None, false));
@@ -3219,17 +3424,6 @@ impl Waku {
                 .unwrap_or(&self.state.disabled_providers),
             waku_client::DaemonKey::Local => &self.state.disabled_providers,
         }
-    }
-
-    /// Whether a daemon cannot host a local PTY — a remote host's supervisor,
-    /// or a remote-attached primary daemon in whole-app remote mode. A
-    /// disconnected remote still counts: its sessions stay remote.
-    pub(super) fn daemon_key_is_remote(&self, key: waku_client::DaemonKey) -> bool {
-        key.is_remote()
-            || self
-                .daemons
-                .supervisor(key)
-                .is_some_and(|daemon| daemon.is_remote())
     }
 
     /// The daemon the model picker's reads and writes describe — the target
@@ -3444,14 +3638,17 @@ impl Waku {
         cx.notify();
     }
 
-    /// Whether any of the host's sessions is selected or working — the bar
-    /// the transport watcher applies before it may spawn a repair.
+    /// Pending submissions and selected or working sessions keep the host's
+    /// transport eligible for repair.
     #[cfg(unix)]
     fn remote_host_in_use(&self, host: Uuid) -> bool {
-        self.state.sessions.iter().any(|session| {
-            self.daemons.session_owner(session.id) == waku_client::DaemonKey::Remote(host)
-                && (self.state.selected_session == Some(session.id) || session.status.is_busy())
-        })
+        self.pending_remote_submissions
+            .get(&host)
+            .is_some_and(|pending| !pending.is_empty())
+            || self.state.sessions.iter().any(|session| {
+                self.daemons.session_owner(session.id) == waku_client::DaemonKey::Remote(host)
+                    && (self.state.selected_session == Some(session.id) || session.status.is_busy())
+            })
     }
 
     /// A remote supervisor answered: register it so routing, task-state sync,
@@ -3501,12 +3698,6 @@ impl Waku {
         self.remote_connect_triggers.remove(&host);
         #[cfg(unix)]
         self.ssh_repair_requests.remove(&host);
-        // Submissions held on this host's connect run through the normal
-        // path now that the supervisor routes.
-        let pending_submissions = self
-            .pending_remote_submissions
-            .remove(&host)
-            .unwrap_or_default();
         self.start_task_state_sync(waku_client::DaemonKey::Remote(host), supervisor);
         let drafts = self.composer_draft_store.clone();
         let daemons = self.daemons.clone();
@@ -3541,10 +3732,71 @@ impl Waku {
             });
         })
         .detach();
-        for (session_id, submission) in pending_submissions {
+        self.resume_pending_remote_submissions(host, cx);
+        cx.notify();
+    }
+
+    fn resume_pending_remote_submissions(&mut self, host: Uuid, cx: &mut Context<Self>) {
+        // Status notifications can lag another disconnect. Leave submissions
+        // held until the supervisor's current connection is actually usable.
+        if !self.remote_host_connected(host) {
+            return;
+        }
+        for (session_id, submission) in self
+            .pending_remote_submissions
+            .remove(&host)
+            .unwrap_or_default()
+        {
             self.submit_submission_for_session(session_id, submission, cx);
         }
-        cx.notify();
+    }
+
+    fn checkpoint_remote_submission(
+        &mut self,
+        session_id: Uuid,
+        submission: &mut ComposerSubmission,
+    ) -> Result<(), (std::io::Error, crate::persistence::SavedDraft)> {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return Ok(());
+        };
+        // Incognito and internal prompts retain their in-memory lifetime.
+        if session.incognito || submission.hidden {
+            return Ok(());
+        }
+        let id = submission.queued_id.unwrap_or_else(Uuid::new_v4);
+        if self
+            .state
+            .remote_submission_drafts
+            .iter()
+            .any(|draft| draft.id == id)
+        {
+            return Ok(());
+        }
+        let recovery = crate::persistence::SavedDraft {
+            id,
+            target: crate::persistence::ComposerDraftTarget::Session { session_id },
+            project_id: session.project_id,
+            draft: submission.recovery_draft(),
+            created_at: unix_time(),
+            hidden: false,
+        };
+        self.state.remote_submission_drafts.push(recovery.clone());
+        // This one-shot checkpoint is local only: the owning host is offline.
+        if let Err(error) = self.store.save_app_state(&self.state) {
+            self.state
+                .remote_submission_drafts
+                .retain(|draft| draft.id != id);
+            return Err((error, recovery));
+        }
+        // The optimistic message and eventual provider event use this identity
+        // so an acknowledged start can retire exactly its recovery copy.
+        submission.queued_id = Some(id);
+        Ok(())
     }
 
     /// An interactive connect attempt failed — the user asked for this, so
@@ -3591,35 +3843,7 @@ impl Waku {
             if submission.hidden {
                 continue;
             }
-            // A saved draft holds payloads like an edit does: atom spans
-            // splice back, never the chip markup.
-            let source = submission.human_content.unwrap_or_else(|| {
-                submission
-                    .display_content
-                    .map(|display| {
-                        super::composer::atom_payload_content(&display, &submission.message_atoms)
-                    })
-                    .unwrap_or(submission.prompt)
-            });
-            let (text, inline_atoms) =
-                super::composer::composer_draft_content(&source, &submission.atoms);
-            let draft = crate::persistence::ComposerDraft {
-                text,
-                attachments: submission
-                    .attachments
-                    .into_iter()
-                    .map(ComposerAttachment::from)
-                    .map(|attachment| {
-                        crate::persistence::ComposerDraftAttachment::from(&attachment)
-                    })
-                    .collect(),
-                annotations: submission
-                    .annotations
-                    .iter()
-                    .map(crate::persistence::ComposerDraftAnnotation::from)
-                    .collect(),
-                inline_atoms,
-            };
+            let draft = submission.recovery_draft();
             if !draft.is_empty() {
                 self.composer_drafts.set(
                     crate::persistence::ComposerDraftKey::Session(session_id),
@@ -3836,7 +4060,7 @@ impl Waku {
     pub(super) fn remote_host_connected(&self, host: Uuid) -> bool {
         self.daemons
             .supervisor(waku_client::DaemonKey::Remote(host))
-            .is_some_and(|supervisor| supervisor.status() == waku_client::DaemonStatus::Connected)
+            .is_some_and(|supervisor| supervisor.is_connected())
     }
 
     /// Whether the host's tasks belong in the sidebar: while it is
@@ -3929,6 +4153,9 @@ impl Waku {
                             let current = waku.ssh_transports.contains_key(&host_id);
                             if current {
                                 waku.remote_errors.insert(host_id, format!("{error:#}"));
+                                if interactive {
+                                    waku.fail_interactive_remote_connect(host_id, &error, cx);
+                                }
                                 cx.notify();
                             }
                             current
@@ -4092,11 +4319,12 @@ impl Waku {
                             turn.status == TurnStatus::Running && !turn.provider_turn_started
                         })
                         .map(|turn| turn.id);
-                    let boss_rows = (self.boss_chat_key().is_some()
-                        && self.state.selected_session == Some(session_id))
+                    let boss_rows = (self.transcript_boss_chat_key().is_some()
+                        && self.transcript_session_id() == Some(session_id))
                     .then(|| self.transcript_row_kinds.borrow().clone());
                     let detail_arrived = !self.state.sessions[index].detail_loaded
-                        && prepared.hydrated_session.is_some();
+                        && (prepared.hydrated_session.is_some()
+                            || prepared.transcript_window.is_some());
                     self.install_prepared_driver(session_id, prepared);
                     if self.pending_session_cancels.remove(&session_id) {
                         self.cancel_session_turn(session_id, cx);
@@ -4105,7 +4333,7 @@ impl Waku {
                     let selected_before_refresh = self.state.selected_session;
                     self.reconcile_boss_chat_refresh(cx);
                     let refreshed = selected_before_refresh != self.state.selected_session;
-                    if !refreshed && self.state.selected_session == Some(session_id) {
+                    if !refreshed && self.transcript_session_id() == Some(session_id) {
                         if let Some(previous) = boss_rows {
                             // Attaching the successor's runtime is data arrival,
                             // not a second landing after an in-place refresh.
@@ -4168,6 +4396,9 @@ impl Waku {
             .iter()
             .map(|project| (project.id, project.path.clone()))
             .collect::<HashMap<_, _>>();
+        let detail_current = !self.stale_task_details.contains(&session_id);
+        let capture_checkpoints = self.session_captures_git_checkpoints(session_id);
+
         let mut checkpoint = None;
         if let Some(session) = self.state.session_mut(session_id) {
             if !session.status.is_busy() {
@@ -4186,19 +4417,24 @@ impl Waku {
                 });
             if let Some(turn_count) = interrupted_turn_count {
                 let skip_checkpoint = session.turns.last().is_some_and(|turn| {
-                    interrupted_planning_turn_has_no_file_changes(session, turn.id)
+                    interrupted_planning_turn_has_no_file_changes(session, turn.id, detail_current)
                 });
-                if !skip_checkpoint {
+                if capture_checkpoints && !skip_checkpoint {
                     let project_path = session
                         .workspace
                         .path()
                         .map(Path::to_path_buf)
                         .or_else(|| project_paths.get(&session.project_id).cloned());
-                    checkpoint = project_path.map(|project_path| PendingCheckpointCapture {
-                        session_id,
-                        turn_count,
-                        project_path,
-                        untouched: false,
+                    checkpoint = project_path.and_then(|project_path| {
+                        waku_protocol::TurnCheckpointIdentity::for_turn(session, turn_count).map(
+                            |identity| PendingCheckpointCapture {
+                                session_id,
+                                identity,
+                                turn_count,
+                                project_path,
+                                untouched: false,
+                            },
+                        )
                     });
                 }
             }
@@ -4224,7 +4460,7 @@ impl Waku {
             self.pending_checkpoint_captures.push(checkpoint);
             self.start_pending_checkpoint_captures(cx);
         }
-        if self.state.selected_session == Some(session_id) {
+        if self.transcript_session_id() == Some(session_id) {
             self.reset_visible_state();
             self.reset_transcript_rows(self.transcript_row_count());
             self.reapply_transcript_landing(session_id, cx);
@@ -4245,6 +4481,16 @@ impl Waku {
         let Some(turn_id) = turn_id else {
             return;
         };
+        // Devin owns separate startup and post-dispatch deadlines in its ACP
+        // driver. Absence of TurnStarted alone does not prove non-delivery.
+        if self
+            .state
+            .sessions
+            .iter()
+            .any(|session| session.id == session_id && session.provider == ProviderKind::Devin)
+        {
+            return;
+        }
         cx.spawn(async move |waku, cx| {
             cx.background_executor().timer(UNSTARTED_TURN_TIMEOUT).await;
             let _ = waku.update(cx, move |waku, cx| {
@@ -4279,12 +4525,37 @@ impl Waku {
         if let Some(runtime) = self.runtimes.get(&session_id) {
             runtime.driver.cancel();
         }
+        self.fail_unstarted_turn(session_id, turn_id, tr!("session.prompt_not_delivered"), cx);
+    }
+
+    fn fail_unstarted_turn(
+        &mut self,
+        session_id: Uuid,
+        turn_id: Uuid,
+        message: String,
+        cx: &mut Context<Self>,
+    ) {
+        if !self
+            .state
+            .sessions
+            .iter()
+            .find(|s| s.id == session_id)
+            .is_some_and(|session| {
+                session.turns.last().is_some_and(|turn| {
+                    turn.id == turn_id
+                        && turn.status == TurnStatus::Running
+                        && !turn.provider_turn_started
+                })
+            })
+        {
+            return;
+        }
         // The notice lands while the turn is still active so it reads as the
         // turn's answer — the message it was opened for never arrived.
         if let Some(session) = self.state.session_mut(session_id) {
             session.push_notice_message(
                 MessageRole::Assistant,
-                tr!("session.prompt_not_delivered"),
+                message,
                 TranscriptNotice::Status {
                     kind: TranscriptNoticeStatus::Error,
                 },
@@ -4306,7 +4577,7 @@ impl Waku {
         }
         self.state.mark_session_dirty(session_id);
         signal_event_pump(&self.event_wake_tx);
-        if self.state.selected_session == Some(session_id) {
+        if self.transcript_session_id() == Some(session_id) {
             self.reset_visible_state();
             self.reset_transcript_rows(self.transcript_row_count());
             self.reapply_transcript_landing(session_id, cx);
@@ -4336,9 +4607,10 @@ impl Waku {
             .find(|session| session.id == session_id)
             .is_some_and(session_resume_eligible);
         if !eligible
+            || self.runtime_submission_checks.contains_key(&session_id)
             || self.runtime_attach_pending.contains(&session_id)
             || self.submission_preparations.contains(&session_id)
-            || self.goal_runtime_starts.contains(&session_id)
+            || self.control_runtime_starts.contains(&session_id)
             || self.worktree_move_pending.contains(&session_id)
             || self.response_fork_preparations.contains_key(&session_id)
         {
@@ -4768,6 +5040,11 @@ impl Waku {
     /// model discovery and version probes for whatever the detection finds
     /// installed.
     pub(super) fn refresh_provider_detection(&mut self, scope: Option<ProviderKind>) {
+        // Headless fixtures cannot wake the test scheduler from the
+        // detection thread this spawns.
+        if cfg!(test) {
+            return;
+        }
         self.refresh_provider_detection_on(waku_client::DaemonKey::Local, scope);
     }
 
@@ -5033,14 +5310,14 @@ impl Waku {
                 .find(|session| session.id == session_id)
                 .filter(|session| session.provider_locked())
                 .map(|session| session.provider),
-            model_picker::ModelPickerTarget::AutomationEditor => None,
+            model_picker::ModelPickerTarget::AutomationEditor
+            | model_picker::ModelPickerTarget::QaSetup => None,
         };
         let key = self.model_picker_daemon_key();
         super::model_picker::picker_has_no_providers(
             Self::probes_on(&self.probes, key),
             self.disabled_providers_on(key),
             locked_provider,
-            self.daemon_key_is_remote(key),
             self.provider_detection_checked_at.contains_key(&key),
         )
     }
@@ -5126,12 +5403,13 @@ impl Waku {
     }
 
     pub(super) fn selected_transcript_blocks(&self) -> &[TranscriptBlock] {
-        self.selected_session()
+        self.transcript_session()
             .map(|session| session.transcript_blocks.as_slice())
             .unwrap_or(&[])
     }
 
     pub(super) fn save(&mut self) -> bool {
+        self.state.sync_auto_favorite();
         self.capture_ui_state();
         self.last_stream_save = Instant::now();
         let daemon_error = if self.store.is_auxiliary() {
@@ -5142,6 +5420,28 @@ impl Waku {
                 .err()
                 .map(|error| error.to_string())
         };
+        // A windowed session holds a slice, not the transcript — persisting
+        // it as detail would truncate the store's copy and its index. Such
+        // rows save as skeletons: the previous full detail stays on disk and
+        // the in-memory flag restores immediately after the synchronous
+        // write.
+        let windowed: Vec<Uuid> = self
+            .state
+            .sessions
+            .iter()
+            .filter(|session| {
+                session.detail_loaded && self.session_transcript_is_partial(session.id)
+            })
+            .map(|session| session.id)
+            .collect();
+        for session_id in &windowed {
+            if let Some(session) = self.state.session_mut(*session_id) {
+                session.detail_loaded = false;
+            }
+        }
+        let pending_metadata = self
+            .sidebar_intents
+            .strip_pending_task_metadata(&mut self.state);
         let app_error = if self.friend_sessions.is_empty() {
             self.store
                 .save(&mut self.state)
@@ -5164,6 +5464,16 @@ impl Waku {
             self.state.sessions.extend(watched);
             result
         };
+        for (id, edit) in pending_metadata {
+            if let Some(session) = self.state.session_mut(id) {
+                edit.apply(session);
+            }
+        }
+        for session_id in &windowed {
+            if let Some(session) = self.state.session_mut(*session_id) {
+                session.detail_loaded = true;
+            }
+        }
         let app_saved = app_error.is_none();
         if let Some(error) = daemon_error.or(app_error) {
             eprintln!("could not save local state: {error}");
@@ -5173,18 +5483,38 @@ impl Waku {
         app_saved
     }
 
+    /// Boss chat has no task worktree to rewind; incognito sessions leave no refs.
+    pub(super) fn session_captures_git_checkpoints(&self, session_id: Uuid) -> bool {
+        !self.session_incognito(session_id)
+            && !self.managed_session_is_boss(self.daemons.session_owner(session_id), session_id)
+    }
+
     fn checkpoint_capture_pending(&self, session_id: Uuid, turn_count: usize) -> bool {
+        let Some(identity) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .and_then(|session| {
+                waku_protocol::TurnCheckpointIdentity::for_turn(session, turn_count)
+            })
+        else {
+            return false;
+        };
         self.checkpoint_captures_in_flight
-            .contains(&(session_id, turn_count))
+            .contains(&(session_id, identity))
             || self
                 .pending_checkpoint_captures
                 .iter()
-                .any(|capture| capture.session_id == session_id && capture.turn_count == turn_count)
+                .any(|capture| capture.session_id == session_id && capture.identity == identity)
     }
 
     /// The settled last turn whose checkpoint capture is still queued or in
     /// flight.
     pub(super) fn pending_checkpoint_turn(&self, session_id: Uuid) -> Option<Uuid> {
+        if !self.session_captures_git_checkpoints(session_id) {
+            return None;
+        }
         self.state
             .sessions
             .iter()
@@ -5251,6 +5581,9 @@ impl Waku {
     /// [`Self::start_pending_checkpoint_captures`], which every caller that
     /// holds a `Context` runs straight after queueing.
     pub(super) fn capture_latest_turn_checkpoint_for(&mut self, session_id: Uuid) {
+        if !self.session_captures_git_checkpoints(session_id) {
+            return;
+        }
         let Some((session, turn)) = self
             .state
             .sessions
@@ -5269,13 +5602,12 @@ impl Waku {
         let turn_count = turn.turn_count;
         // Read-only planning turns have nothing for Git to capture.
         if turn.status == TurnStatus::Interrupted
-            && interrupted_planning_turn_has_no_file_changes(session, turn.id)
+            && interrupted_planning_turn_has_no_file_changes(
+                session,
+                turn.id,
+                !self.stale_task_details.contains(&session_id),
+            )
         {
-            return;
-        }
-        // Incognito sessions leave no artifacts behind — a checkpoint is a
-        // git ref that outlives the session.
-        if session.incognito {
             return;
         }
         if self.checkpoint_capture_pending(session_id, turn_count) {
@@ -5290,9 +5622,15 @@ impl Waku {
         self.pending_checkpoint_captures
             .push(PendingCheckpointCapture {
                 session_id,
+                identity: waku_protocol::TurnCheckpointIdentity {
+                    turn_id: turn.id,
+                    history_generation: session.history_generation,
+                },
                 turn_count,
                 project_path,
-                untouched: turn.status == TurnStatus::Interrupted
+                untouched: session.detail_loaded
+                    && !self.stale_task_details.contains(&session_id)
+                    && turn.status == TurnStatus::Interrupted
                     && !session.transcript_blocks.iter().any(|block| {
                         block.turn_id == Some(turn.id)
                             && block.activities.iter().any(|activity| {
@@ -5311,24 +5649,28 @@ impl Waku {
     /// Runs queued turn checkpoints on the background executor.
     ///
     /// A capture lands a frame or many later, and the turn it belongs to may be
-    /// gone by then, so the result is matched back by turn count rather than
-    /// position. Only a queued send waits on it: the transcript's rewind
+    /// gone by then, so the result is matched by turn UUID and history
+    /// generation. Only a queued send waits on it: the transcript's rewind
     /// affordance appears when `invalidate_checkpoint_refs` prompts the next
     /// prefetch to notice the new ref.
     pub(super) fn start_pending_checkpoint_captures(&mut self, cx: &mut Context<Self>) {
         for request in std::mem::take(&mut self.pending_checkpoint_captures) {
             let PendingCheckpointCapture {
                 session_id,
+                identity,
                 turn_count,
                 project_path,
                 untouched,
             } = request;
+            if !self.session_captures_git_checkpoints(session_id) {
+                continue;
+            }
             let Some(workspace) = self.workspace_client_for_session(session_id) else {
                 continue;
             };
             if !self
                 .checkpoint_captures_in_flight
-                .insert((session_id, turn_count))
+                .insert((session_id, identity))
             {
                 continue;
             }
@@ -5344,6 +5686,7 @@ impl Waku {
                                     session_id,
                                     turn_count,
                                     untouched,
+                                    identity: Some(identity),
                                 },
                             )? {
                                 waku_client::WorkspaceResult::Checkpoint { checkpoint } => {
@@ -5358,7 +5701,22 @@ impl Waku {
                     .await;
                 waku.update(cx, |waku, cx| {
                     waku.checkpoint_captures_in_flight
-                        .remove(&(session_id, turn_count));
+                        .remove(&(session_id, identity));
+                    if waku
+                        .state
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == session_id)
+                        .and_then(|session| {
+                            waku_protocol::TurnCheckpointIdentity::for_turn(session, turn_count)
+                        })
+                        != Some(identity)
+                    {
+                        // An old result must not attach even an Error card to a reused turn.
+                        waku.drain_pending_workspace_cleanups(cx);
+                        cx.notify();
+                        return;
+                    }
                     let selected = waku.state.selected_session == Some(session_id);
                     if selected {
                         waku.sync_transcript_rows();
@@ -5389,7 +5747,7 @@ impl Waku {
                         && let Some(turn) = session
                             .turns
                             .iter_mut()
-                            .find(|turn| turn.turn_count == turn_count)
+                            .find(|turn| turn.id == identity.turn_id)
                     {
                         turn.checkpoint = Some(checkpoint);
                         attached_turn_id = Some(turn.id);
@@ -5808,6 +6166,7 @@ impl Waku {
         self.start_message_rewind(
             edit.clone(),
             ComposerSubmission {
+                configuration: None,
                 prompt: provider_prompt,
                 display_content,
                 human_content: None,
@@ -6283,6 +6642,45 @@ impl Waku {
         }
     }
 
+    fn prompt_configuration(&self, session: &AgentSession) -> waku_client::PromptConfiguration {
+        let mut options = self.session_options(session);
+        if session.reasoning_effort.is_some() {
+            options
+                .reasoning_effort
+                .clone_from(&session.reasoning_effort);
+        }
+        if session.service_tier.is_some() {
+            options.service_tier.clone_from(&session.service_tier);
+        }
+        if session.context_window.is_some() {
+            options.context_window.clone_from(&session.context_window);
+        }
+        waku_client::PromptConfiguration {
+            provider: session.provider,
+            options,
+        }
+    }
+
+    pub(super) fn record_selected_configuration(&mut self, session_id: Uuid) {
+        self.record_task_metadata(
+            session_id,
+            waku_protocol::task_metadata::TaskMetadataField::Configuration,
+        );
+    }
+
+    fn capture_submission_configuration(
+        &self,
+        session_id: Uuid,
+        submission: &mut ComposerSubmission,
+    ) {
+        if submission.configuration.is_none()
+            && let Some(session) = self.state.sessions.iter().find(|s| s.id == session_id)
+            && !routing::pending_auto_route(session)
+        {
+            submission.configuration = Some(self.prompt_configuration(session));
+        }
+    }
+
     pub(super) fn agent_preset_for_session(&self, session: &AgentSession) -> Option<String> {
         if session.provider != ProviderKind::DeepSeek {
             return None;
@@ -6349,6 +6747,18 @@ impl Waku {
     /// that carry these per turn absorb the change and keep running; the rest
     /// are torn down so the next prompt starts with the new options.
     pub(super) fn apply_session_options(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        self.record_selected_configuration(session_id);
+        let resume = self.pending_rush_resume(session_id);
+        self.apply_session_options_with_rush_resume(session_id, resume, cx);
+    }
+
+    /// Rush resumes only after the provider has received the new tier.
+    pub(super) fn apply_session_options_with_rush_resume(
+        &mut self,
+        session_id: Uuid,
+        resume: Option<Uuid>,
+        cx: &mut Context<Self>,
+    ) {
         let Some(options) = self
             .state
             .sessions
@@ -6359,10 +6769,27 @@ impl Waku {
             return;
         };
         let Some(runtime) = self.runtimes.get_mut(&session_id) else {
+            if let Some(resume) = resume
+                && self.take_rush_resume(session_id, resume)
+            {
+                self.resume_rushed_session(session_id, cx);
+            }
             return;
         };
-        runtime.options_generation = runtime.options_generation.wrapping_add(1);
+        runtime.options_generation = Uuid::new_v4();
         let generation = runtime.options_generation;
+        runtime.options_deferred = true;
+        if runtime.options_in_flight.is_some()
+            || self
+                .state
+                .sessions
+                .iter()
+                .any(|s| s.id == session_id && s.status.is_busy())
+        {
+            return;
+        }
+        runtime.options_in_flight = Some(generation);
+        runtime.options_deferred = false;
         let driver = runtime.driver.clone();
         cx.spawn(async move |waku, cx| {
             let applied = cx
@@ -6370,14 +6797,29 @@ impl Waku {
                 .spawn(async move { driver.apply_options(options) })
                 .await;
             let _ = waku.update(cx, |waku, cx| {
-                let is_current = waku
+                let Some(runtime) = waku
                     .runtimes
-                    .get(&session_id)
-                    .is_some_and(|runtime| runtime.options_generation == generation);
-                if is_current && !applied {
+                    .get_mut(&session_id)
+                    .filter(|runtime| runtime.options_in_flight == Some(generation))
+                else {
+                    return;
+                };
+                runtime.options_in_flight = None;
+                if runtime.options_generation != generation {
+                    let resume = waku.pending_rush_resume(session_id);
+                    waku.apply_session_options_with_rush_resume(session_id, resume, cx);
+                    return;
+                }
+                if !applied {
                     waku.reset_session_runtime(session_id);
                     cx.notify();
                 }
+                if let Some(resume) = resume
+                    && waku.take_rush_resume(session_id, resume)
+                {
+                    waku.resume_rushed_session(session_id, cx);
+                }
+                waku.drain_queued_message(session_id, cx);
             });
         })
         .detach();
@@ -6477,19 +6919,47 @@ impl Waku {
         })
     }
 
-    /// Start the session's provider runtime for a goal operation, without a
+    /// Flush operations accepted before the runtime existed. Called after
+    /// any runtime install so controls land on the thread that was started
+    /// for them, including when a submission starts it.
+    pub(super) fn drain_pending_runtime_operations(&mut self, session_id: Uuid) {
+        let Some(operations) = self.pending_runtime_operations.remove(&session_id) else {
+            return;
+        };
+        if let Some(runtime) = self.runtimes.get(&session_id) {
+            for operation in operations {
+                match operation {
+                    runtime::PendingRuntimeOperation::Goal(operation) => {
+                        runtime.driver.goal(operation)
+                    }
+                    runtime::PendingRuntimeOperation::Compact => {
+                        if self
+                            .state
+                            .sessions
+                            .iter()
+                            .any(|session| session.id == session_id && !session.is_busy())
+                        {
+                            runtime.driver.compact();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Start the session's provider runtime for a thread control, without a
     /// prompt or a turn. Goals live on the provider thread itself, so this
     /// mirrors the Codex CLI, whose thread starts at launch: prepare the
-    /// workspace, spawn the provider, and let the queued goal operations
+    /// workspace, spawn the provider, and let the queued controls
     /// drain once the runtime installs. The session stays `Idle` throughout —
     /// no turn begins and nothing lands in the transcript.
-    pub(super) fn start_goal_runtime(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+    pub(super) fn start_control_runtime(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         if self.runtimes.contains_key(&session_id)
-            || self.goal_runtime_starts.contains(&session_id)
+            || self.control_runtime_starts.contains(&session_id)
             || self.submission_preparations.contains(&session_id)
         {
             // An installed or installing runtime picks the queue up when the
-            // install path drains pending goal operations.
+            // install path drains pending controls.
             return;
         }
         let Some(session) = self
@@ -6498,11 +6968,12 @@ impl Waku {
             .iter()
             .find(|session| session.id == session_id)
         else {
-            self.pending_goal_operations.remove(&session_id);
+            self.pending_runtime_operations.remove(&session_id);
             return;
         };
         let project_id = session.project_id;
         let workspace = session.workspace.clone();
+        let allow_worktree_creation = !session.has_started();
         let next_turn_count = session.turns.len() + 1;
         let provisional_cwd = self
             .workspace_path_for_session(session)
@@ -6517,21 +6988,28 @@ impl Waku {
             .or_else(|| self.boss_ui.projects.get(&project_id))
             .cloned()
         else {
-            self.pending_goal_operations.remove(&session_id);
+            self.pending_runtime_operations.remove(&session_id);
             self.show_toast(tr!("errors.prepare_task_project_not_found"));
             cx.notify();
             return;
         };
         let Some(workspace_client) = self.workspace_client_for_session(session_id) else {
+            self.pending_runtime_operations.remove(&session_id);
             self.show_toast(tr!("errors.daemon_disconnected"));
             cx.notify();
             return;
         };
-        self.goal_runtime_starts.insert(session_id);
+        self.control_runtime_starts.insert(session_id);
         cx.notify();
         let sync_default_branch = self.state.new_worktree_sync_default_branch;
         let sync_branches = self.state.new_worktree_sync_branches.clone();
-        let incognito = self.session_incognito(session_id);
+        let capture_checkpoints = self.session_captures_git_checkpoints(session_id);
+        let checkpoint_generation = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .map_or(0, |session| session.history_generation);
         cx.spawn(async move |waku, cx| {
             let prepared = cx
                 .background_executor()
@@ -6540,43 +7018,50 @@ impl Waku {
                         workspace_client,
                         project,
                         workspace,
+                        allow_worktree_creation,
                         Some(routing::SessionStartPlan::Direct(driver_start)),
+                        None,
                         None,
                         session_id,
                         next_turn_count,
+                        checkpoint_generation,
                         sync_default_branch,
                         sync_branches,
-                        incognito,
+                        capture_checkpoints,
                         None,
                     )
                 })
                 .await;
             let _ = waku.update(cx, move |waku, cx| {
-                waku.finish_goal_runtime_start(session_id, prepared, cx);
+                waku.finish_control_runtime_start(session_id, prepared, cx);
             });
         })
         .detach();
     }
 
-    fn finish_goal_runtime_start(
+    fn finish_control_runtime_start(
         &mut self,
         session_id: Uuid,
         prepared: anyhow::Result<PreparedSubmission>,
         cx: &mut Context<Self>,
     ) {
-        if !self.goal_runtime_starts.remove(&session_id) {
+        if !self.control_runtime_starts.remove(&session_id) {
             return;
         }
         let prepared = match prepared {
             Ok(prepared) => prepared,
             Err(error) => {
-                // The goal is lost but nothing else is: messages queued
+                // The control is lost but nothing else is: messages queued
                 // behind this start resubmit through the ordinary path,
                 // which starts its own runtime.
-                self.pending_goal_operations.remove(&session_id);
+                self.pending_runtime_operations.remove(&session_id);
                 self.unwind_unconfirmed_pursuit_turn(session_id);
-                self.show_toast(error.to_string());
-                self.drain_queued_message(session_id, cx);
+                if error.downcast_ref::<WorkspaceRecoveryRequired>().is_some() {
+                    self.show_workspace_recovery_notice(session_id);
+                } else {
+                    self.show_toast(error.to_string());
+                    self.drain_queued_message(session_id, cx);
+                }
                 cx.notify();
                 return;
             }
@@ -6587,7 +7072,7 @@ impl Waku {
             lfs_warning: _,
             worktree_restored,
             driver,
-            route_decision: _,
+            started_route: _,
             turn_route: _,
         } = prepared;
         if !self
@@ -6597,7 +7082,7 @@ impl Waku {
             .any(|session| session.id == session_id)
         {
             // The task was removed while its provider was starting.
-            self.pending_goal_operations.remove(&session_id);
+            self.pending_runtime_operations.remove(&session_id);
             if let Some(Ok(prepared)) = driver {
                 prepared.handle.close();
             }
@@ -6621,17 +7106,17 @@ impl Waku {
             Some(Ok(prepared)) => {
                 if self.runtimes.contains_key(&session_id) {
                     // Another path installed a runtime meanwhile; that thread
-                    // is the session's, so the goal routes there instead.
+                    // is the session's, so the control routes there instead.
                     prepared.handle.close();
-                    self.drain_pending_goal_operations(session_id);
+                    self.drain_pending_runtime_operations(session_id);
                 } else {
                     // Install drains the pending operations itself.
                     self.install_prepared_driver(session_id, prepared);
                 }
             }
-            None => self.drain_pending_goal_operations(session_id),
+            None => self.drain_pending_runtime_operations(session_id),
             Some(Err(error)) => {
-                self.pending_goal_operations.remove(&session_id);
+                self.pending_runtime_operations.remove(&session_id);
                 self.unwind_unconfirmed_pursuit_turn(session_id);
                 self.show_toast(error.to_string());
                 self.drain_queued_message(session_id, cx);
@@ -6662,18 +7147,29 @@ impl Waku {
             && !existing.detail_loaded
         {
             *existing = hydrated;
+            self.transcript_views.remove(&session_id);
+        }
+        if let Some(window) = prepared.transcript_window
+            && let Some(existing) = self.state.session_mut(session_id)
+            && !existing.detail_loaded
+        {
+            let view = transcript_window::materialize_session(existing, &window);
+            self.transcript_views.insert(session_id, view);
         }
         let handle = prepared.handle.clone();
         self.runtimes.insert(
             session_id,
             SessionRuntime {
                 driver: prepared.handle,
-                options_generation: 0,
+                options_generation: Uuid::nil(),
+                options_in_flight: None,
+                options_deferred: false,
                 events: prepared.events,
                 pending_events: VecDeque::new(),
                 pending_steers: VecDeque::new(),
                 deferred_steers: VecDeque::new(),
                 stream_phase: None,
+                detail_visible: None,
                 pending_reasoning_newlines: 0,
                 stream_remeasure_pending: false,
                 pending_permission: None,
@@ -6694,10 +7190,10 @@ impl Waku {
         // the runtime map. Wake once after installation so those buffered
         // events cannot be stranded behind an already-consumed edge.
         signal_event_pump(&self.event_wake_tx);
-        // Goal operations accepted while no runtime existed ride the first
+        // Controls accepted while no runtime existed ride the first
         // install, whichever path performed it. The driver applies them once
         // its thread opens, before any queued prompt.
-        self.drain_pending_goal_operations(session_id);
+        self.drain_pending_runtime_operations(session_id);
         handle
     }
 
@@ -6749,8 +7245,7 @@ impl Waku {
 
     /// The submission a Continue sends on `session_id`: the dead turn's
     /// own prompt when it never reached the provider, else the hidden
-    /// continue. `None` when the session is missing, its last turn
-    /// settled, or no provider could run the retry.
+    /// continue. Idle Counsel receives a review request.
     fn interrupted_session_continue_submission(
         &mut self,
         session_id: Uuid,
@@ -6763,10 +7258,14 @@ impl Waku {
             .sessions
             .iter()
             .find(|session| session.id == session_id)?;
-        if !self.session_awaits_continue(session) {
+        let interrupted = self.session_awaits_continue(session);
+        let counsel = self.counsel_can_continue(session);
+        if !interrupted && !counsel {
             return None;
         }
-        let resend = composer::undelivered_turn_resend(session);
+        let resend = interrupted
+            .then(|| composer::undelivered_turn_resend(session))
+            .flatten();
         // A client-owned entry already queued resumes the session on its
         // own — a hidden nudge behind it would fire a redundant invisible
         // turn once the queue drains.
@@ -6790,6 +7289,9 @@ impl Waku {
                 submission
             }
             None if nudge_covered => return None,
+            None if counsel && !interrupted => ComposerSubmission::hidden_prompt(
+                waku_protocol::counsel::COUNSEL_REVIEW_PROMPT.to_owned(),
+            ),
             None => ComposerSubmission::hidden_continue(),
         })
     }
@@ -6829,7 +7331,7 @@ impl Waku {
         }
         if let Some(session_id) = self
             .selected_session()
-            .filter(|session| !session.detail_loaded)
+            .filter(|session| !self.session_detail_is_ready(session))
             .map(|session| session.id)
         {
             self.restore_composer_submission(session_id, submission, cx);
@@ -6950,7 +7452,7 @@ impl Waku {
             .state
             .sessions
             .iter()
-            .any(|session| session.id == session_id && !session.detail_loaded)
+            .any(|session| session.id == session_id && !self.session_detail_is_ready(session))
         {
             self.restore_composer_submission(session_id, submission, cx);
             self.ensure_session_loaded(session_id, cx);
@@ -6994,7 +7496,18 @@ impl Waku {
             return;
         }
         if session.is_busy() || self.provider_switch_in_flight.contains(&session.id) {
-            self.enqueue_follow_up_submission(session.id, submission, cx);
+            if !session.boss_managed
+                && !self.provider_switch_in_flight.contains(&session.id)
+                && self
+                    .runtimes
+                    .get(&session.id)
+                    .and_then(|runtime| runtime.driver.daemon_runtime_id())
+                    .is_some()
+            {
+                self.submit_submission_for_session(session.id, submission, cx);
+            } else {
+                self.enqueue_follow_up_submission(session.id, submission, cx);
+            }
             return;
         }
         self.submit_submission_for_session(session.id, submission, cx);
@@ -7124,27 +7637,16 @@ impl Waku {
             self.enqueue_steer_follow_up_submission(session.id, submission, cx);
             return;
         }
-        let queued_message = if session.boss_managed {
-            if submission.queued_id.is_none() {
-                submission.queued_id = Some(Uuid::new_v4());
-            }
-            let queued = submission.clone().into_queued_message();
-            // The daemon also writes this same id before it calls the
-            // provider. The local mirror makes the pending steer visible
-            // immediately and gives rejection handling a stable row to keep.
-            self.enqueue_steer_follow_up_submission(session.id, submission.clone(), cx);
-            Some(queued)
-        } else {
-            None
-        };
+        // Keep every steer visible while the provider acknowledges it. The
+        // queued identity also lets acceptance replace the preview in place
+        // and rejection leave the same prompt available for the next turn.
+        submission.queued_id.get_or_insert_with(Uuid::new_v4);
+        let queued_message = submission.clone().into_queued_message();
+        self.enqueue_steer_follow_up_submission(session.id, submission.clone(), cx);
         if let Some(runtime) = self.runtimes.get_mut(&session.id) {
-            if let Some(queued_message) = queued_message {
-                runtime
-                    .driver
-                    .steer_with_submission(provider_prompt, queued_message);
-            } else {
-                runtime.driver.steer(provider_prompt, false);
-            }
+            runtime
+                .driver
+                .steer_with_submission(provider_prompt, queued_message);
             runtime.pending_steers.push_back(submission);
         }
         cx.notify();
@@ -7191,7 +7693,7 @@ impl Waku {
         &mut self,
         command: boss::BossCommand,
         target: boss::ComposerTarget,
-        submission: ComposerSubmission,
+        mut submission: ComposerSubmission,
         delivery: waku_client::AgentPromptDelivery,
         cx: &mut Context<Self>,
     ) {
@@ -7207,6 +7709,15 @@ impl Waku {
             // Both callers only hand employee-targeted sends here.
             boss::ComposerTarget::Boss => return,
         };
+        if let Some(reason) = self
+            .direct_employee_prompt_control()
+            .and_then(|control| control.reason)
+        {
+            self.restore_composer_submission(restore_session, submission, cx);
+            self.show_toast(reason);
+            cx.notify();
+            return;
+        }
         let interaction = boss::employee_composer_interaction(
             &command.context,
             self.state.selected_session,
@@ -7256,6 +7767,30 @@ impl Waku {
                 .employee_composer_submission(session_id, &prompt, delivery)
         });
         let request = if let Some(submission_id) = submission_id {
+            if self.transcript_session_id() == Some(session_id)
+                && !was_expired
+                && self.selected_queued_employee().is_none()
+                && self
+                    .state
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == session_id)
+                    .is_some_and(|session| {
+                        !session.is_busy()
+                            || ((delivery == waku_client::AgentPromptDelivery::Interrupt
+                                || session.status == SessionStatus::Background)
+                                && session.active_turn_id().is_some()
+                                && self
+                                    .runtimes
+                                    .get(&session_id)
+                                    .is_some_and(|runtime| runtime.driver.supports_steer()))
+                    })
+            {
+                submission.queued_id = Some(submission_id);
+                if let Some(preview) = submission.transcript_preview() {
+                    self.show_employee_prompt_preview(session_id, preview, cx);
+                }
+            }
             waku_client::Command::EmployeeComposerPrompt {
                 viewed_employee_id: session_id,
                 submission_id,
@@ -7284,6 +7819,15 @@ impl Waku {
                         if let Some(id) = submission_id {
                             waku.boss_ui
                                 .accept_employee_composer_submission(session_id, id);
+                            if submission.queued_id == Some(id)
+                                && waku.employee_prompt_previews.get(&session_id).is_some_and(
+                                    |previews| previews.iter().any(|preview| preview.id == id),
+                                )
+                            {
+                                waku.wait_for_employee_prompt_confirmation(
+                                    session_id, id, submission, delivery, cx,
+                                );
+                            }
                         }
                         if was_expired && !interaction {
                             let name = waku
@@ -7300,6 +7844,8 @@ impl Waku {
                     }
                     Err(error) => {
                         if let Some(id) = submission_id {
+                            waku.take_employee_prompt_preview(session_id, id);
+                            waku.refresh_runtime_submission_indicator(session_id, cx);
                             waku.boss_ui.restore_employee_composer_submission(
                                 session_id,
                                 id,
@@ -7315,6 +7861,78 @@ impl Waku {
             });
         })
         .detach();
+    }
+
+    fn show_employee_prompt_preview(
+        &mut self,
+        session_id: Uuid,
+        preview: Message,
+        cx: &mut Context<Self>,
+    ) {
+        let id = preview.id;
+        let previews = self.employee_prompt_previews.entry(session_id).or_default();
+        if previews.iter().any(|preview| preview.id == id) {
+            return;
+        }
+        previews.push(preview);
+        self.refresh_runtime_submission_indicator(session_id, cx);
+    }
+
+    fn wait_for_employee_prompt_confirmation(
+        &self,
+        session_id: Uuid,
+        id: Uuid,
+        submission: ComposerSubmission,
+        delivery: waku_client::AgentPromptDelivery,
+        cx: &mut Context<Self>,
+    ) {
+        let project_id = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .map(|session| session.project_id);
+        cx.spawn(async move |waku, cx| {
+            cx.background_executor().timer(UNSTARTED_TURN_TIMEOUT).await;
+            let _ = waku.update(cx, |waku, cx| {
+                if waku.take_employee_prompt_preview(session_id, id).is_none() {
+                    return;
+                }
+                if let Some(project_id) = project_id {
+                    waku.boss_ui.restore_employee_composer_submission(
+                        session_id,
+                        id,
+                        submission.prompt.clone(),
+                        delivery,
+                    );
+                    waku.recover_runtime_submissions(
+                        session_id,
+                        project_id,
+                        VecDeque::from([submission]),
+                        cx,
+                    );
+                }
+                if waku.transcript_session_id() == Some(session_id) {
+                    waku.show_toast(tr!("transcript.employee_prompt_unconfirmed"));
+                }
+                waku.refresh_runtime_submission_indicator(session_id, cx);
+            });
+        })
+        .detach();
+    }
+
+    pub(super) fn take_employee_prompt_preview(
+        &mut self,
+        session_id: Uuid,
+        id: Uuid,
+    ) -> Option<Message> {
+        let previews = self.employee_prompt_previews.get_mut(&session_id)?;
+        let index = previews.iter().position(|preview| preview.id == id)?;
+        let preview = previews.remove(index);
+        if previews.is_empty() {
+            self.employee_prompt_previews.remove(&session_id);
+        }
+        Some(preview)
     }
 
     /// A prompt, steer, or nudge aimed at an expired employee takes the
@@ -7436,6 +8054,7 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         let session_id = self.resolve_boss_chat_session(session_id);
+        self.capture_submission_configuration(session_id, &mut submission);
         submission.prompt = submission.prompt.trim().to_owned();
         if submission.prompt.is_empty() {
             return;
@@ -7684,7 +8303,22 @@ impl Waku {
     /// Start the next queued follow-up as a fresh turn. Only called once a
     /// settled turn has been fully closed, so the session is Idle.
     pub(super) fn drain_queued_message(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        if self.response_fork_preparations.contains_key(&session_id) {
+        if self.response_fork_preparations.contains_key(&session_id)
+            || self.provider_switch_in_flight.contains(&session_id)
+        {
+            return;
+        }
+        if self
+            .runtimes
+            .get(&session_id)
+            .is_some_and(|runtime| runtime.options_deferred)
+            && self
+                .state
+                .sessions
+                .iter()
+                .any(|s| s.id == session_id && !s.status.is_busy())
+        {
+            self.apply_session_options(session_id, cx);
             return;
         }
         let Some(session) = self
@@ -7704,7 +8338,7 @@ impl Waku {
         // are parked — they land with the session detail (a rotation's
         // carried chips only exist there). Fetch it and stay armed; the
         // hydration completion re-runs this drain.
-        if !session.detail_loaded {
+        if !self.session_detail_is_ready(session) {
             self.ensure_session_loaded(session_id, cx);
             self.defer_queue_drain(session_id);
             return;
@@ -7712,9 +8346,10 @@ impl Waku {
         if session.is_busy()
             || session.queued_messages.is_empty()
             || self.ending_checkpoint_pending(session_id)
-            // Messages parked behind a goal-initiated provider start stay
+            // Messages parked behind a control-initiated provider start stay
             // queued until that runtime installs.
-            || self.goal_runtime_starts.contains(&session_id)
+            || self.control_runtime_starts.contains(&session_id)
+            || self.runtimes.get(&session_id).is_some_and(|runtime| runtime.options_in_flight.is_some())
             // Messages submitted while the session moved into a worktree
             // wait for the rebind, then start in the new directory.
             || self.worktree_move_pending.contains(&session_id)
@@ -7755,35 +8390,336 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         let session_id = self.resolve_boss_chat_session(session_id);
+        // This intent supersedes the older one held by a sign-in terminal.
+        self.sandbox_pending_submissions.remove(&session_id);
+        if let Some(check) = self.runtime_submission_checks.get_mut(&session_id) {
+            check.push(submission);
+            self.refresh_runtime_submission_indicator(session_id, cx);
+            return;
+        }
+        let session = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id);
+        let runtime = self.runtimes.get(&session_id);
+        let remote_runtime = runtime.and_then(|runtime| runtime.driver.daemon_runtime_id());
+        let eligible = session.is_some_and(|session| {
+            session.detail_loaded
+                // Private tasks have no durable detail to reload. Preserve
+                // their existing in-memory send and recovery path.
+                && !session.incognito
+                && !session.boss_managed
+                && !session.uses_antigravity_terminal()
+                && (remote_runtime.is_some() || (runtime.is_none() && session.has_started()))
+                && !self.submission_preparations.contains(&session_id)
+                && !self.control_runtime_starts.contains(&session_id)
+                && !self.runtime_attach_pending.contains(&session_id)
+        });
+        let offline = matches!(self.daemons.session_owner(session_id),
+            waku_client::DaemonKey::Remote(host) if !self.remote_host_connected(host));
+        let daemon = (!offline)
+            .then(|| self.daemons.daemon_for_session(session_id))
+            .flatten();
+        if !eligible || daemon.is_none() {
+            self.submit_validated_submission_for_session(session_id, submission, cx);
+            return;
+        }
+        let session = session.expect("eligible submission has a session");
+        let token = Uuid::new_v4();
+        let incognito = session.incognito;
+        let mut check = RuntimeSubmissionCheck {
+            token,
+            runtime_id: remote_runtime,
+            options_generation: runtime.map(|runtime| runtime.options_generation),
+            options: self.session_options(session),
+            provider: session.provider,
+            history_generation: session.history_generation,
+            project_id: session.project_id,
+            cwd: self
+                .workspace_path_for_session(session)
+                .map(Path::to_path_buf),
+            submissions: VecDeque::new(),
+            previews: Vec::new(),
+        };
+        check.push(submission);
+        let reveal_preview = !check.previews.is_empty()
+            && self.transcript_session_id() == Some(session_id)
+            && !send_holds_transcript_position(
+                self.state.transcript_keep_scroll_on_send,
+                self.transcript_rests_at_tail_now(),
+                self.transcript_is_scrolled.get() && !self.transcript_anchor_following.get(),
+                self.transcript_watches_latest_turn(),
+            );
+        let preview_id = check.previews.first().map(|preview| preview.id);
+        self.runtime_submission_checks.insert(session_id, check);
+        self.refresh_runtime_submission_indicator(session_id, cx);
+        if reveal_preview
+            && let Some(row) = self.transcript_row_kinds.borrow().iter().position(|row| {
+                matches!(row, TranscriptRowKind::PendingPrompt(id) if Some(*id) == preview_id)
+            })
+        {
+            self.active_transcript_rows().scroll_to_reveal_item(row);
+            // The send has already moved the viewport. A snapshot arriving
+            // before or after admission must not replay the activation landing.
+            if self
+                .transcript_landing
+                .as_ref()
+                .is_some_and(|(id, _)| *id == session_id)
+            {
+                self.transcript_landing = None;
+            }
+        }
+        let daemon = daemon.expect("eligible submission has a connected daemon");
+        cx.spawn(async move |waku, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    check_submission_runtime(daemon, session_id, remote_runtime, incognito)
+                })
+                .await;
+            let _ = waku.update(cx, |waku, cx| {
+                waku.finish_runtime_submission_check(session_id, token, result, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn refresh_runtime_submission_indicator(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        if self.transcript_session_id() == Some(session_id) {
+            let previous_kinds = self.transcript_row_kinds.borrow().clone();
+            if previous_kinds.len() == self.active_transcript_rows().item_count() {
+                self.splice_active_transcript_rows_after_visibility_change(&previous_kinds);
+            } else {
+                self.sync_transcript_rows();
+            }
+        }
+        cx.notify();
+    }
+
+    fn recover_runtime_submissions(
+        &mut self,
+        session_id: Uuid,
+        project_id: Uuid,
+        submissions: VecDeque<ComposerSubmission>,
+        cx: &mut Context<Self>,
+    ) {
+        // A delayed failure must not replace text or attachments typed since
+        // the send, nor the composer belonging to a newly selected task.
+        let restore_here = submissions.len() == 1
+            && self.state.selected_session == Some(session_id)
+            && !self.side_chat_composers.contains_key(&session_id)
+            && self.composer.read(cx).content(cx).is_empty()
+            && self.composer_attachments.is_empty()
+            && self.composer_inline_atoms.is_empty();
+        for submission in submissions.into_iter().rev() {
+            if submission.hidden {
+                continue;
+            }
+            if restore_here {
+                self.restore_composer_submission(session_id, submission, cx);
+            } else {
+                let id = submission.queued_id.unwrap_or_else(Uuid::new_v4);
+                self.state
+                    .remote_submission_drafts
+                    .retain(|draft| draft.id != id);
+                self.state.saved_drafts.insert(
+                    0,
+                    crate::persistence::SavedDraft {
+                        id,
+                        target: crate::persistence::ComposerDraftTarget::Session { session_id },
+                        project_id,
+                        draft: submission.recovery_draft(),
+                        created_at: unix_time(),
+                        hidden: false,
+                    },
+                );
+            }
+        }
+        self.save();
+    }
+
+    pub(super) fn cancel_session_turn(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        // Invalidate the lookup before Stop so its late response cannot send.
+        // Signal the provider before restoring drafts or saving local state.
+        let check = self.runtime_submission_checks.remove(&session_id);
+        self.cancel_session_turn_inner(session_id, cx);
+        if let Some(check) = check {
+            self.recover_runtime_submissions(session_id, check.project_id, check.submissions, cx);
+            self.refresh_runtime_submission_indicator(session_id, cx);
+        }
+    }
+
+    fn finish_runtime_submission_check(
+        &mut self,
+        session_id: Uuid,
+        token: Uuid,
+        result: anyhow::Result<SubmissionRuntime>,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .runtime_submission_checks
+            .get(&session_id)
+            .map(|check| check.token)
+            != Some(token)
+        {
+            return;
+        }
+        let check = self
+            .runtime_submission_checks
+            .remove(&session_id)
+            .expect("matching check");
+        let session = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id);
+        let runtime = self.runtimes.get(&session_id);
+        let unchanged = session.is_some_and(|session| {
+            session.provider == check.provider
+                && session.history_generation == check.history_generation
+                && session.project_id == check.project_id
+                && self
+                    .workspace_path_for_session(session)
+                    .map(Path::to_path_buf)
+                    == check.cwd
+                && self.session_options(session) == check.options
+        }) && runtime.and_then(|runtime| runtime.driver.daemon_runtime_id())
+            == check.runtime_id
+            && runtime.map(|runtime| runtime.options_generation) == check.options_generation;
+        let result = result.and_then(|result| {
+            anyhow::ensure!(
+                unchanged,
+                "the task settings or runtime changed before the message was sent"
+            );
+            Ok(result)
+        });
+        let mut submissions = check.submissions;
+        match result {
+            Ok(SubmissionRuntime::Current) => {}
+            Ok(SubmissionRuntime::Retired {
+                mut session,
+                has_runtime,
+            }) => {
+                if let Some(session) = session.as_mut() {
+                    self.pending_task_metadata.overlay(session);
+                    if session.provider != check.provider
+                        || self.session_options(session) != check.options
+                    {
+                        self.recover_runtime_submissions(
+                            session_id,
+                            check.project_id,
+                            submissions,
+                            cx,
+                        );
+                        self.show_toast(
+                            "The task settings changed. Your message was kept; send it again.",
+                        );
+                        self.refresh_runtime_submission_indicator(session_id, cx);
+                        return;
+                    }
+                }
+                // Dropping an attachment must not close a replacement runtime
+                // controlled by another client. Old stream buffers leave with it.
+                self.runtimes.remove(&session_id);
+                self.transcript_views.remove(&session_id);
+                self.cancel_drains.remove(&session_id);
+                self.mark_background_work_lost(session_id);
+                if let Some(session) = session {
+                    let index = self
+                        .state
+                        .sessions
+                        .iter()
+                        .position(|session| session.id == session_id)
+                        .expect("unchanged task exists");
+                    self.state.sessions[index] = session;
+                    self.stale_task_details.remove(&session_id);
+                }
+                self.invalidate_checkpoint_refs();
+                if self.state.selected_session == Some(session_id) {
+                    self.reset_visible_state();
+                    self.reset_transcript_rows(self.transcript_row_count());
+                }
+                if has_runtime {
+                    // The existing attachment path serializes subscription
+                    // creation. Preserve user order while it binds the new owner.
+                    for submission in submissions {
+                        self.enqueue_follow_up_submission(session_id, submission, cx);
+                    }
+                    self.start_runtime_attachment(session_id, cx);
+                    self.defer_queue_drain(session_id);
+                    self.refresh_runtime_submission_indicator(session_id, cx);
+                    return;
+                }
+            }
+            Err(error) => {
+                self.recover_runtime_submissions(session_id, check.project_id, submissions, cx);
+                self.show_toast(format!(
+                    "Could not send this message: {error}. Your message was kept."
+                ));
+                self.refresh_runtime_submission_indicator(session_id, cx);
+                return;
+            }
+        }
+        while let Some(submission) = submissions.pop_front() {
+            self.submit_validated_submission_for_session(session_id, submission, cx);
+        }
+        self.refresh_runtime_submission_indicator(session_id, cx);
+    }
+
+    fn submit_validated_submission_for_session(
+        &mut self,
+        session_id: Uuid,
+        mut submission: ComposerSubmission,
+        cx: &mut Context<Self>,
+    ) {
+        let session_id = self.resolve_boss_chat_session(session_id);
         if self
             .state
             .sessions
             .iter()
-            .any(|session| session.id == session_id && !session.detail_loaded)
+            .any(|session| session.id == session_id && !self.session_detail_is_ready(session))
         {
             self.restore_composer_submission(session_id, submission, cx);
             self.ensure_session_loaded(session_id, cx);
             cx.notify();
             return;
         }
+        self.capture_submission_configuration(session_id, &mut submission);
         if self.response_fork_preparations.contains_key(&session_id) {
             return;
         }
         // A fresh send supersedes whatever the sign-in gate parked — the
         // exit path must not resurrect the older prompt on top of this one.
         self.sandbox_pending_submissions.remove(&session_id);
-        let selected = self.state.selected_session == Some(session_id);
+        let selected = self.transcript_session_id() == Some(session_id);
         // Submitting to an offline remote is use: hold the submission, run
         // the interactive connect, and send when the daemon lands. A failed
         // or cancelled attempt restores the composer.
         if let waku_client::DaemonKey::Remote(host) = self.daemons.session_owner(session_id)
-            && self.daemons.daemon_for_session(session_id).is_none()
+            && !self.remote_host_connected(host)
             && self
                 .state
                 .sessions
                 .iter()
                 .any(|session| session.id == session_id)
         {
+            if let Err((error, recovery)) =
+                self.checkpoint_remote_submission(session_id, &mut submission)
+            {
+                if self.state.selected_session == Some(session_id)
+                    || self.side_chat_composers.contains_key(&session_id)
+                {
+                    self.restore_composer_submission(session_id, submission, cx);
+                } else {
+                    // A background queue drain must not overwrite the current
+                    // composer's unrelated input when its checkpoint fails.
+                    self.state.saved_drafts.insert(0, recovery);
+                }
+                self.show_toast(format!("Could not save waiting prompt: {error}"));
+                cx.notify();
+                return;
+            }
             self.pending_remote_submissions
                 .entry(host)
                 .or_default()
@@ -7863,10 +8799,12 @@ impl Waku {
             self.defer_queue_drain(session_id);
             return;
         }
-        // A goal operation is already starting this session's provider.
-        // Queue the message so it lands on that thread — after the goal —
+        // A thread control is already starting this session's provider.
+        // Queue the message so it lands on that thread — after the control —
         // instead of racing a second provider process into existence.
-        if self.goal_runtime_starts.contains(&session_id) {
+        if self.control_runtime_starts.contains(&session_id)
+            || self.runtime_attach_pending.contains(&session_id)
+        {
             self.enqueue_follow_up_submission(session_id, submission, cx);
             self.defer_queue_drain(session_id);
             return;
@@ -7888,14 +8826,20 @@ impl Waku {
             self.defer_queue_drain(session_id);
             return;
         }
+        if self
+            .runtimes
+            .get(&session_id)
+            .is_some_and(|runtime| runtime.options_in_flight.is_some() || runtime.options_deferred)
+        {
+            self.enqueue_follow_up_submission(session_id, submission, cx);
+            self.defer_queue_drain(session_id);
+            return;
+        }
         if session.status.is_busy() {
             self.enqueue_follow_up_submission(session_id, submission, cx);
             return;
         }
-        // Antigravity sessions have no driver: the prompt launches the
-        // CLI's own TUI in the session's terminal instead.
-        if session.provider == ProviderKind::Antigravity {
-            self.submit_agy_submission(session_id, submission, cx);
+        if session.uses_antigravity_terminal() {
             return;
         }
         let prompt = submission.prompt.clone();
@@ -7922,6 +8866,8 @@ impl Waku {
         let attachment_count = submission.attachments.len();
         let project_id = session.project_id;
         let workspace = session.workspace.clone();
+        let allow_worktree_creation =
+            !session.has_started() && !self.runtimes.contains_key(&session_id);
         let Some(project) = self
             .state
             .projects
@@ -7971,7 +8917,7 @@ impl Waku {
                 .workspace_path_for_session(session)
                 .map(std::path::Path::to_path_buf)
                 .unwrap_or_default();
-            if session.auto_route
+            if routing::pending_auto_route(session)
                 && !self.managed_session_is_boss(self.daemons.session_owner(session.id), session.id)
             {
                 self.route_start_plan_for_session(
@@ -7988,7 +8934,31 @@ impl Waku {
                 })
             } else {
                 routing::SessionStartPlan::Direct(
-                    self.driver_start_request_for_session(session, provisional_cwd),
+                    self.driver_start_request_for_session(session, provisional_cwd)
+                        .and_then(|mut request| {
+                            if let Some(configuration) = &submission.configuration {
+                                anyhow::ensure!(
+                                    request.provider == configuration.provider,
+                                    "the prompt's selected provider changed before startup"
+                                );
+                                let options = &configuration.options;
+                                request.options.mode = options.mode;
+                                request.options.model.clone_from(&options.model);
+                                request
+                                    .options
+                                    .reasoning_effort
+                                    .clone_from(&options.reasoning_effort);
+                                request
+                                    .options
+                                    .service_tier
+                                    .clone_from(&options.service_tier);
+                                request
+                                    .options
+                                    .context_window
+                                    .clone_from(&options.context_window);
+                            }
+                            Ok(request)
+                        }),
                 )
             }
         });
@@ -8128,6 +9098,17 @@ impl Waku {
                 self.splice_transcript_rows_after_visibility_change(&previous_kinds);
             } else {
                 let compact = self.state.transcript_compact_on_send;
+                // A late snapshot or runtime attach can reset the rows and
+                // reapply the session's activation landing. The send's jump
+                // supersedes that old position, including for future resets.
+                self.transcript_landing = Some((
+                    session_id,
+                    if hidden || compact {
+                        TranscriptLanding::Tail
+                    } else {
+                        TranscriptLanding::LastTurn
+                    },
+                ));
                 let was_anchored = self.transcript_anchor.get().is_some();
                 self.transcript_anchor
                     .set(if compact { None } else { transcript_anchor });
@@ -8171,7 +9152,24 @@ impl Waku {
         };
         let sync_default_branch = self.state.new_worktree_sync_default_branch;
         let sync_branches = self.state.new_worktree_sync_branches.clone();
-        let incognito = self.session_incognito(session_id);
+        let capture_checkpoints = self.session_captures_git_checkpoints(session_id);
+        let checkpoint_generation = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .map_or(0, |session| session.history_generation);
+        // Incognito transcripts have no durable row after a daemon restart.
+        // Existing persisted tasks already have a view baseline; only first
+        // turns and incognito restarts need this startup registration.
+        let task_registration = session_start.as_ref().and_then(|_| {
+            self.state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .filter(|session| session.turns.len() == 1 || session.incognito)
+                .cloned()
+        });
         cx.spawn(async move |waku, cx| {
             let prepared = cx
                 .background_executor()
@@ -8180,13 +9178,16 @@ impl Waku {
                         workspace_client,
                         project,
                         workspace,
+                        allow_worktree_creation,
                         session_start,
                         turn_route,
+                        task_registration,
                         session_id,
                         next_turn_count,
+                        checkpoint_generation,
                         sync_default_branch,
                         sync_branches,
-                        incognito,
+                        capture_checkpoints,
                         Some(stage_slot),
                     )
                 })
@@ -8232,7 +9233,7 @@ impl Waku {
             }
             return;
         }
-        let selected = self.state.selected_session == Some(session_id);
+        let selected = self.transcript_session_id() == Some(session_id);
         let prepared = match prepared {
             Ok(prepared) => prepared,
             Err(error) => {
@@ -8283,9 +9284,19 @@ impl Waku {
                     }
                     self.splice_transcript_rows_after_visibility_change(&previous_kinds);
                 }
-                if selected || boss_send {
-                    self.restore_composer_submission(session_id, submission, cx);
-                    self.show_toast(tr!("errors.create_worktree", error = error));
+                eprintln!("could not prepare the workspace for task {session_id}: {error:#}");
+                let needs_recovery = error.downcast_ref::<WorkspaceRecoveryRequired>().is_some();
+                if selected || boss_send || needs_recovery {
+                    if needs_recovery && !selected && !boss_send {
+                        self.enqueue_follow_up_submission(session_id, submission, cx);
+                    } else {
+                        self.restore_composer_submission(session_id, submission, cx);
+                    }
+                    if needs_recovery {
+                        self.show_workspace_recovery_notice(session_id);
+                    } else {
+                        self.show_toast(tr!("errors.send_workspace_preparation"));
+                    }
                 }
                 cx.notify();
                 return;
@@ -8297,7 +9308,7 @@ impl Waku {
             lfs_warning,
             worktree_restored,
             driver: prepared_driver,
-            route_decision,
+            started_route,
             turn_route,
         } = prepared;
         // The turn began at accept time; it must still be the untouched one
@@ -8340,37 +9351,31 @@ impl Waku {
             return;
         }
 
-        // An Auto submission's decision lands ahead of the provider start:
-        // the session adopts the routed provider, model, and remembered
-        // traits so transcript, chip, and session options all agree with what
-        // is about to run — the same fields `choose_model` maintains, plus
-        // the decision record itself.
-        if let Some(decision) = route_decision {
+        // Persist the configuration that startup actually used, including
+        // provider defaults and fallback requests.
+        if let Some(routing::StartedRoute {
+            decision,
+            service_tier,
+            context_window,
+        }) = started_route
+        {
             let target = decision.target.clone();
-            let (remembered_effort, tier, window) = target
-                .model
-                .as_deref()
-                .map(|model| self.state.model_traits_for(target.provider, model))
-                .unwrap_or_default();
-            // The route's own effort wins; the remembered triple is the
-            // fallback for targets that name none — same rule the start
-            // request applied.
-            let effort = target.effort.clone().or(remembered_effort);
             let provider_changed = self
                 .state
                 .session_mut(session_id)
                 .map(|session| {
                     let provider_changed = session.provider != target.provider;
                     session.provider = target.provider;
+                    session.antigravity_acp |= target.provider == ProviderKind::Antigravity;
                     session.model.clone_from(&target.model);
                     session.route_decision = Some(decision);
                     session.auto_route = false;
                     if provider_changed {
                         session.agent_preset = None;
                     }
-                    session.reasoning_effort.clone_from(&effort);
-                    session.service_tier.clone_from(&tier);
-                    session.context_window.clone_from(&window);
+                    session.reasoning_effort.clone_from(&target.effort);
+                    session.service_tier.clone_from(&service_tier);
+                    session.context_window.clone_from(&context_window);
                     session.updated_at = unix_time();
                     provider_changed
                 })
@@ -8380,9 +9385,9 @@ impl Waku {
             // next draft re-arms routing instead of the resolved model.
             self.state.last_auto_route = true;
             self.state.last_model.clone_from(&target.model);
-            self.state.last_reasoning_effort.clone_from(&effort);
-            self.state.last_service_tier.clone_from(&tier);
-            self.state.last_context_window.clone_from(&window);
+            self.state.last_reasoning_effort = target.effort;
+            self.state.last_service_tier = service_tier;
+            self.state.last_context_window = context_window;
             // Recency belongs to the combo that actually ran — the draft's
             // carryover was only a hint, so the routed selection records here.
             let routed_use = self
@@ -8398,6 +9403,14 @@ impl Waku {
                 self.state
                     .record_model_use(provider, &model_id, effort, fast);
             }
+            // Base the outcome on the daemon's registration. The edit can
+            // advance the metadata revision without undoing concurrent edits.
+            if let Some(Ok(prepared)) = prepared_driver.as_ref()
+                && let Some(registered) = prepared.registered_session.as_deref()
+            {
+                self.sidebar_intents.remember_task(registered);
+            }
+            self.record_selected_configuration(session_id);
             if provider_changed {
                 self.refresh_composer_sources(cx);
             }
@@ -8491,8 +9504,24 @@ impl Waku {
         let mut failed_to_start = false;
         match driver {
             Ok(driver) => {
+                let mut configuration = submission.configuration.clone();
                 if let Some(decision) = turn_route {
-                    self.apply_turn_route_decision(session_id, decision, &driver, cx);
+                    let previous = self
+                        .state
+                        .sessions
+                        .iter()
+                        .find(|s| s.id == session_id)
+                        .map(|session| self.session_options(session));
+                    self.apply_turn_route_decision(session_id, decision, cx);
+                    let routed = self
+                        .state
+                        .sessions
+                        .iter()
+                        .find(|s| s.id == session_id)
+                        .map(|session| self.session_options(session));
+                    if previous != routed {
+                        configuration = None;
+                    }
                 }
                 // A provider switch stages the compacted context the new
                 // provider needs; it precedes every other one-shot note so
@@ -8553,14 +9582,125 @@ impl Waku {
                     Some(intro) => format!("{intro}\n\n{driver_prompt}"),
                     None => driver_prompt,
                 };
-                driver.prompt(
-                    driver_prompt,
-                    turn_id,
-                    message_id,
-                    submission.hidden,
-                    submission.attachments.clone(),
-                );
-                self.watch_unstarted_turn(session_id, turn_id, cx);
+                let configuration = configuration.map(Ok).unwrap_or_else(|| {
+                    self.state
+                        .sessions
+                        .iter()
+                        .find(|s| s.id == session_id)
+                        .ok_or_else(|| anyhow::anyhow!("the submitted task no longer exists"))
+                        .map(|session| self.prompt_configuration(session))
+                });
+                let sent_configuration = configuration.as_ref().ok().cloned();
+                let hidden = submission.hidden;
+                let attachments = submission.attachments.clone();
+                let presentation = (!hidden
+                    && (driver_prompt != submission.prompt
+                        || submission.display_content.is_some()
+                        || !submission.message_atoms.is_empty()))
+                .then(|| waku_client::PromptPresentation {
+                    content: (driver_prompt != submission.prompt)
+                        .then(|| submission.prompt.clone()),
+                    display_content: submission.display_content.clone(),
+                    atoms: submission.message_atoms.clone(),
+                });
+                let owner = driver.clone();
+                // Enqueue on the caller's turn so a later Stop or Close
+                // cannot be overtaken by a delayed background send.
+                let admitted = configuration.and_then(|configuration| {
+                    driver.prompt_with_configuration(
+                        driver_prompt,
+                        configuration,
+                        turn_id,
+                        message_id,
+                        hidden,
+                        attachments,
+                        presentation,
+                    )
+                });
+                cx.spawn(async move |waku, cx| {
+                    let delivered = cx
+                        .background_executor()
+                        .spawn(async move {
+                            match admitted?.wait()? {
+                                waku_client::ResponsePayload::Ack => Ok(()),
+                                _ => anyhow::bail!(
+                                    "Goddard daemon returned an invalid prompt response"
+                                ),
+                            }
+                        })
+                        .await;
+                    let _ = waku.update(cx, |waku, cx| {
+                        if !waku
+                            .runtimes
+                            .get(&session_id)
+                            .is_some_and(|runtime| runtime.driver.same_control(&owner))
+                        {
+                            return;
+                        }
+                        let current_turn = waku
+                            .state
+                            .sessions
+                            .iter()
+                            .find(|s| s.id == session_id)
+                            .is_some_and(|session| session.active_turn_id() == turn_id);
+                        match delivered {
+                            Ok(()) => {
+                                let desired = waku
+                                    .state
+                                    .sessions
+                                    .iter()
+                                    .find(|s| s.id == session_id)
+                                    .map(|session| waku.prompt_configuration(session));
+                                if sent_configuration != desired
+                                    && let Some(runtime) = waku.runtimes.get_mut(&session_id)
+                                {
+                                    runtime.options_deferred = true;
+                                }
+                                if current_turn {
+                                    waku.watch_unstarted_turn(session_id, turn_id, cx);
+                                }
+                            }
+                            Err(error) if current_turn => {
+                                let refused = error
+                                    .downcast_ref::<waku_client::RpcError>()
+                                    .is_some_and(|rpc| {
+                                        rpc.code
+                                            == Some(
+                                                waku_client::RpcErrorCode::ConfigurationRejected,
+                                            )
+                                    });
+                                if refused && let Some(turn_id) = turn_id {
+                                    waku.fail_unstarted_turn(
+                                        session_id,
+                                        turn_id,
+                                        error.to_string(),
+                                        cx,
+                                    );
+                                } else if let Some(runtime) = waku.runtimes.get_mut(&session_id) {
+                                    runtime.pending_events.push_back(DriverEvent::Error(format!(
+                                        "Could not confirm prompt delivery: {error}"
+                                    )));
+                                    signal_event_pump(&waku.event_wake_tx);
+                                    waku.watch_unstarted_turn(session_id, turn_id, cx);
+                                }
+                            }
+                            Err(_) => {}
+                        }
+                        if waku
+                            .runtimes
+                            .get(&session_id)
+                            .is_some_and(|runtime| runtime.options_deferred)
+                            && waku
+                                .state
+                                .sessions
+                                .iter()
+                                .any(|s| s.id == session_id && !s.status.is_busy())
+                        {
+                            waku.apply_session_options(session_id, cx);
+                        }
+                    });
+                })
+                .detach();
             }
             Err(error) => {
                 // The sandbox sign-in gate: the provider's shared guest
@@ -8662,7 +9802,38 @@ impl Waku {
         }
     }
 
+    pub(super) fn task_detail_visible(&self, session_id: Uuid) -> bool {
+        if let Some(rushed) = self.big_picture.rush_session_id() {
+            return session_id == rushed;
+        }
+        if self.big_picture_open() {
+            return self.big_picture_card_visible(session_id);
+        }
+        if self.settings_page.is_some() {
+            return false;
+        }
+        self.visible_side_chat_id() == Some(session_id)
+            || (self.main_screen(self.live_deliverable_page().is_some())
+                == render::MainScreen::Session
+                && (self.state.selected_session == Some(session_id)
+                    || self.summon_card_employees().contains(&session_id)))
+    }
+
+    /// Retained visits receive data without becoming visible render surfaces.
+    pub(super) fn task_detail_interested(&self, session_id: Uuid) -> bool {
+        self.task_detail_visible(session_id) || self.viewed_transcripts.contains(&session_id)
+    }
+
+    pub(super) fn sync_task_views(&self) {
+        for (id, runtime) in &self.runtimes {
+            runtime
+                .driver
+                .set_detail_visible(self.task_detail_interested(*id));
+        }
+    }
+
     pub(super) fn drain_event_pump(&mut self, cx: &mut Context<Self>) -> EventPumpSchedule {
+        self.sync_task_views();
         // `|` on purpose: a busy provider must not starve the other result
         // queues just because its own drain reported a change first.
         // Recovery reports drain first: they are the cause of the RuntimeLost
@@ -8679,7 +9850,7 @@ impl Waku {
             | self.drain_plan_usage_events()
             | self.drain_reset_credit_events()
             | self.drain_agy_poll_events()
-            | self.drain_task_metadata_results(cx)
+            | self.drain_sidebar_intents(cx)
             | self.drain_task_state_sync_events(cx)
             | self.drain_daemon_settings_events(cx)
             | self.drain_friends_events(cx)
@@ -8696,7 +9867,7 @@ impl Waku {
             | self.drain_press_to_talk_events(cx)
             | self.drain_review_events(cx)
             | self.drain_friend_session_closed_events(cx)
-            | self.drain_status_marker_events()
+            | self.drain_status_marker_events(cx)
             | self.drain_title_quality_events(cx)
             | self.drain_action_prediction_events(cx)
             | self.drain_inbox_suggestion_events(cx)
@@ -8823,6 +9994,7 @@ impl Waku {
         let mut persisted_state_changed = false;
         let mut force_save = false;
         let mut selected_changed = false;
+        let mut detail_released = false;
         while Instant::now() < deadline {
             let Some(session_id) = self.driver_event_round.pop_front() else {
                 break;
@@ -8861,6 +10033,8 @@ impl Waku {
                 let Some(event) = event else {
                     break;
                 };
+                detail_released |=
+                    matches!(event, DriverEvent::TaskViewSnapshot { detail: false, .. });
                 let background_event = matches!(event, DriverEvent::BackgroundWork(_));
                 let background_output_delta = matches!(
                     event,
@@ -8868,7 +10042,8 @@ impl Waku {
                 );
                 force_save |= matches!(
                     event,
-                    DriverEvent::Connected { .. }
+                    DriverEvent::TaskViewSnapshot { detail: false, .. }
+                        | DriverEvent::Connected { .. }
                         | DriverEvent::AgentPresetSelected(_)
                         | DriverEvent::AutoTitleUpdated(_)
                         | DriverEvent::Permission { .. }
@@ -8908,6 +10083,16 @@ impl Waku {
             runtime.stream_remeasure_pending = markdown_changed;
             if keep_runtime {
                 self.runtimes.insert(session_id, runtime);
+                if self.runtimes.get(&session_id).is_some_and(|runtime| {
+                    runtime.options_deferred && runtime.options_in_flight.is_none()
+                }) && self
+                    .state
+                    .sessions
+                    .iter()
+                    .any(|s| s.id == session_id && !s.status.is_busy())
+                {
+                    self.apply_session_options(session_id, cx);
+                }
                 if runtime_changed {
                     self.retry_deferred_steers(session_id, cx);
                 }
@@ -8949,6 +10134,11 @@ impl Waku {
             && (force_save || self.last_stream_save.elapsed() >= STREAM_SAVE_INTERVAL)
         {
             self.save();
+        }
+        if detail_released {
+            // Wait for the daemon's ordered hide snapshot before releasing data:
+            // detail events queued before the interest change still need a target.
+            self.trim_resident_transcripts();
         }
         changed || selected_changed
     }
@@ -9118,6 +10308,89 @@ mod computer_use_launch_tests {
     use waku_protocol::{ClientMessage, ResponseOutcome, ResponsePayload, ServerMessage};
 
     #[test]
+    fn attaching_a_window_capable_daemon_still_loads_saved_session_settings() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let mut stored = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        stored.runtime_mode = RuntimeMode::FullAccess;
+        let session_id = stored.id;
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut socket = tungstenite::accept(stream).unwrap();
+            let mut hydrated = false;
+            loop {
+                let tungstenite::Message::Text(text) = socket.read().unwrap() else {
+                    continue;
+                };
+                let mut attached = false;
+                let reply = match serde_json::from_str(&text).unwrap() {
+                    ClientMessage::Hello {
+                        protocol_version, ..
+                    } => ServerMessage::Hello {
+                        protocol_version,
+                        daemon_version: "test".into(),
+                        daemon_commit: None,
+                        agent_cli_available: false,
+                        task_views_available: true,
+                        transcript_windows_available: true,
+                        landing_queue_available: false,
+                    },
+                    ClientMessage::Request(request) => {
+                        let payload = match request.command {
+                            waku_protocol::Command::GetSettings => ResponsePayload::Settings {
+                                settings: waku_client::DaemonSettings::default(),
+                            },
+                            waku_protocol::Command::HydrateSession {
+                                session_id: requested,
+                            } => {
+                                assert_eq!(requested, session_id);
+                                hydrated = true;
+                                ResponsePayload::Session {
+                                    session: Some(stored.clone()),
+                                }
+                            }
+                            waku_protocol::Command::AttachSession => {
+                                assert!(hydrated, "permissions must load before attaching");
+                                attached = true;
+                                ResponsePayload::SessionRuntime {
+                                    runtime_id: None,
+                                    supports_steer: false,
+                                    supports_user_input_actions: false,
+                                }
+                            }
+                            other => panic!("unexpected command: {other:?}"),
+                        };
+                        ServerMessage::Response {
+                            request_id: request.request_id,
+                            outcome: ResponseOutcome::Ok { payload },
+                        }
+                    }
+                    other => panic!("unexpected client message: {other:?}"),
+                };
+                socket
+                    .send(tungstenite::Message::Text(
+                        serde_json::to_string(&reply).unwrap().into(),
+                    ))
+                    .unwrap();
+                if attached {
+                    break;
+                }
+            }
+        });
+        let daemon = waku_client::DaemonSupervisor::connect(&address, "test".into()).unwrap();
+        let (event_wake, _events) = smol::channel::bounded(1);
+        assert!(
+            attach_driver(daemon, session_id, None, true, event_wake)
+                .unwrap()
+                .is_none()
+        );
+        server.join().unwrap();
+    }
+
+    #[test]
     fn desktop_launch_uses_host_computer_use_settings() {
         // The request snapshot may come from a different desktop or predate a
         // settings update. Exercise the real launch boundary and wire payload.
@@ -9147,6 +10420,9 @@ mod computer_use_launch_tests {
                                 daemon_version: "test".into(),
                                 daemon_commit: None,
                                 agent_cli_available: false,
+                                task_views_available: false,
+                                transcript_windows_available: false,
+                                landing_queue_available: false,
                             },
                             None,
                         ),
@@ -9211,11 +10487,267 @@ mod computer_use_launch_tests {
                 event_wake,
                 daemon,
             };
-            let error = start_driver(request, PathBuf::from("controlled-workspace"))
+            let error = start_driver(request, PathBuf::from("controlled-workspace"), None)
                 .err()
                 .expect("the controlled peer does not start a provider");
             assert!(error.to_string().contains("invalid start response"));
             assert_eq!(server.join().unwrap(), expected);
         }
+    }
+}
+
+#[cfg(test)]
+mod task_view_checkpoint_tests {
+    use super::*;
+
+    #[test]
+    fn hidden_task_view_cannot_prove_a_planning_turn_left_the_worktree_untouched() {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.phase = Some(waku_protocol::routing::SessionPhase::Planning);
+        let turn = session.begin_turn("plan");
+        assert!(interrupted_planning_turn_has_no_file_changes(
+            &session, turn, true
+        ));
+        assert!(!interrupted_planning_turn_has_no_file_changes(
+            &session, turn, false
+        ));
+        session.detail_loaded = false;
+        assert!(!interrupted_planning_turn_has_no_file_changes(
+            &session, turn, true
+        ));
+    }
+}
+
+#[cfg(test)]
+mod task_registration_tests {
+    use super::*;
+    use waku_protocol::{ClientMessage, Command, ResponseOutcome, ResponsePayload, ServerMessage};
+
+    #[test]
+    fn first_task_view_follows_acknowledged_registration() {
+        for (provider, incognito, accept) in [
+            (ProviderKind::Codex, false, true),
+            (ProviderKind::Claude, true, true),
+            (ProviderKind::Codex, false, false),
+        ] {
+            let project = Project::from_path(PathBuf::from("controlled-workspace"));
+            let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+            session.incognito = incognito;
+            session.begin_turn("First prompt");
+            let session_id = session.id;
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap().to_string();
+            let server = std::thread::spawn(move || {
+                let (stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut socket = tungstenite::accept(stream).unwrap();
+                let mut registered = false;
+                loop {
+                    let tungstenite::Message::Text(text) = socket.read().unwrap() else {
+                        continue;
+                    };
+                    let mut viewed = false;
+                    let reply = match serde_json::from_str(&text).unwrap() {
+                        ClientMessage::Hello {
+                            protocol_version, ..
+                        } => ServerMessage::Hello {
+                            protocol_version,
+                            daemon_version: "test".into(),
+                            daemon_commit: None,
+                            agent_cli_available: false,
+                            task_views_available: true,
+                            transcript_windows_available: false,
+                            landing_queue_available: false,
+                        },
+                        ClientMessage::Request(request) => {
+                            let payload = match request.command {
+                                Command::GetSettings => ResponsePayload::Settings {
+                                    settings: Default::default(),
+                                },
+                                Command::SaveTaskState { sessions, .. } => {
+                                    assert_eq!(sessions.len(), 1);
+                                    assert_eq!(sessions[0].id, session_id);
+                                    assert!(sessions[0].has_started());
+                                    assert_eq!(sessions[0].provider, provider);
+                                    assert_eq!(sessions[0].incognito, incognito);
+                                    assert_eq!(
+                                        sessions[0].model.as_deref(),
+                                        Some("controlled-model")
+                                    );
+                                    registered = accept;
+                                    if accept {
+                                        ResponsePayload::TaskStateSaved { sessions }
+                                    } else {
+                                        viewed = true;
+                                        ResponsePayload::TaskStateSaved {
+                                            sessions: Vec::new(),
+                                        }
+                                    }
+                                }
+                                Command::Start { .. } => {
+                                    assert!(
+                                        registered,
+                                        "provider started before task registration"
+                                    );
+                                    ResponsePayload::Started {
+                                        supports_steer: false,
+                                        supports_user_input_actions: false,
+                                    }
+                                }
+                                Command::SetTaskView { .. } => {
+                                    assert!(registered, "task view has no registered task");
+                                    viewed = true;
+                                    ResponsePayload::Ack
+                                }
+                                other => panic!("unexpected command: {other:?}"),
+                            };
+                            ServerMessage::Response {
+                                request_id: request.request_id,
+                                outcome: ResponseOutcome::Ok { payload },
+                            }
+                        }
+                        other => panic!("unexpected client message: {other:?}"),
+                    };
+                    socket
+                        .send(tungstenite::Message::Text(
+                            serde_json::to_string(&reply).unwrap().into(),
+                        ))
+                        .unwrap();
+                    if viewed {
+                        return;
+                    }
+                }
+            });
+            let daemon = waku_client::DaemonSupervisor::connect(&address, "test".into()).unwrap();
+            let (event_wake, _) = smol::channel::bounded(1);
+            let request = DriverStartRequest {
+                session_id,
+                provider,
+                binary: ProviderBinary::Resolved("controlled-provider".into()),
+                options: DriverStartOptions {
+                    binary: PathBuf::new(),
+                    cwd: PathBuf::new(),
+                    mode: RuntimeMode::FullAccess,
+                    model: Some("controlled-model".into()),
+                    reasoning_effort: None,
+                    service_tier: None,
+                    context_window: None,
+                    agent_preset: None,
+                    computer_use_enabled: false,
+                    read_own_transcript: false,
+                    provider_cursor: None,
+                },
+                event_wake,
+                daemon,
+            };
+            let result = start_driver(request, project.path.clone(), Some((project, session)));
+            server.join().unwrap();
+            if accept {
+                result.unwrap().handle.close();
+            } else {
+                let error = result
+                    .err()
+                    .expect("a refused registration must prevent startup");
+                assert!(error.to_string().contains("did not register the task"));
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod workspace_recovery_tests {
+    use super::*;
+    use waku_protocol::{ClientMessage, ResponseOutcome, ResponsePayload, ServerMessage};
+
+    #[test]
+    fn follow_up_without_an_assignment_never_requests_a_new_checkout() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let session_id = Uuid::new_v4();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut socket = tungstenite::accept(stream).unwrap();
+            loop {
+                let tungstenite::Message::Text(text) = socket.read().unwrap() else {
+                    continue;
+                };
+                let mut done = false;
+                let response = match serde_json::from_str::<ClientMessage>(&text).unwrap() {
+                    ClientMessage::Hello {
+                        protocol_version, ..
+                    } => ServerMessage::Hello {
+                        protocol_version,
+                        daemon_version: "test".into(),
+                        daemon_commit: None,
+                        agent_cli_available: false,
+                        task_views_available: true,
+                        transcript_windows_available: false,
+                        landing_queue_available: false,
+                    },
+                    ClientMessage::Request(request) => {
+                        assert!(
+                            matches!(request.command,
+                            waku_client::Command::Workspace {
+                                operation: waku_client::WorkspaceOperation::RecoverTaskWorkspace {
+                                    session_id: id, path: None, restore: false,
+                                }
+                            } if id == session_id),
+                            "unexpected side effect: {:?}",
+                            request.command
+                        );
+                        done = true;
+                        ServerMessage::Response {
+                            request_id: request.request_id,
+                            outcome: ResponseOutcome::Ok {
+                                payload: ResponsePayload::Workspace {
+                                    result: waku_client::WorkspaceResult::TaskWorkspace {
+                                        workspace: None,
+                                    },
+                                },
+                            },
+                        }
+                    }
+                    other => panic!("unexpected message: {other:?}"),
+                };
+                socket
+                    .send(tungstenite::Message::Text(
+                        serde_json::to_string(&response).unwrap().into(),
+                    ))
+                    .unwrap();
+                if done {
+                    return;
+                }
+            }
+        });
+        let client = waku_client::DaemonClient::connect(&address, "test".into()).unwrap();
+        let result = prepare_submission(
+            waku_client::WorkspaceClient::new(client),
+            Project::from_path("/repo".into()),
+            SessionWorkspace::NewWorktree { base_branch: None },
+            false,
+            None,
+            None,
+            None,
+            session_id,
+            2,
+            0,
+            false,
+            Vec::new(),
+            false,
+            None,
+        );
+        server.join().unwrap();
+        assert!(
+            result
+                .err()
+                .unwrap()
+                .downcast_ref::<WorkspaceRecoveryRequired>()
+                .is_some()
+        );
     }
 }

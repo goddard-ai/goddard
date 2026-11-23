@@ -35,18 +35,22 @@ pub(super) fn friend_session_list_key(node_id: &str, origin_url: &str) -> String
 }
 
 impl Waku {
+    #[track_caller]
     fn friends_card(&self, theme: &Theme, children: impl IntoIterator<Item = AnyElement>) -> Div {
         div()
             .w_full()
-            .px(px(20.0))
-            .py(px(16.0))
-            .rounded(px(16.0))
-            .bg(theme.raised)
+            .px(px(16.0))
+            .py(px(12.0))
+            .rounded(px(10.0))
+            .border(hairline())
+            .border_color(theme.border_subtle)
+            .bg(theme.surface)
             .flex()
             .flex_col()
             .children(children)
     }
 
+    #[track_caller]
     fn friends_section_title(&self, theme: &Theme, label: String) -> Div {
         div()
             .text_size(sp(13.5))
@@ -55,6 +59,7 @@ impl Waku {
             .child(label)
     }
 
+    #[track_caller]
     fn friends_button(
         &self,
         id: impl Into<gpui::ElementId>,
@@ -68,9 +73,11 @@ impl Waku {
         div()
             .id(id)
             .tab_index(0)
-            .h(px(27.0))
+            .h(px(28.0))
+            .flex_none()
+            .gap(px(6.0))
             .px(px(9.0))
-            .rounded(px(8.0))
+            .rounded(px(6.0))
             .border(hairline())
             .border_color(theme.border_strong)
             .flex()
@@ -267,7 +274,7 @@ impl Waku {
                         .flex()
                         .items_center()
                         .gap(px(9.0))
-                        .child(settings_row_icon("icons/send.svg", theme))
+                        .child(settings_row_icon("icons/user-round-plus.svg", theme))
                         .child(settings_title_jump(
                             div()
                                 .text_size(sp(13.5))
@@ -460,7 +467,7 @@ impl Waku {
             if friend.nickname.is_some() {
                 meta = format!("{} · {meta}", friend.name);
             }
-            if let Some(last_seen_ms) = friend.last_seen_ms {
+            if let Some(last_seen_ms) = friend.last_seen_ms.filter(|_| !friend.online) {
                 let ago = format_time_ago(unix_time_millis().saturating_sub(last_seen_ms) / 1_000);
                 meta = format!("{meta} · {}", tr!("friends.last_seen", ago = ago));
             }
@@ -475,13 +482,35 @@ impl Waku {
             };
             let edit_id = node_id.clone();
             let remove_name = display.clone();
+            let menu_id = format!("friend-actions-{node_id}");
+            let handle = self.menu_handle(SharedString::from(menu_id.clone()), cx);
+            let weak = cx.entity().downgrade();
+            let initials: String = display
+                .split_whitespace()
+                .take(2)
+                .filter_map(|word| word.chars().find(|character| character.is_alphanumeric()))
+                .flat_map(char::to_uppercase)
+                .collect();
             let mut row = div()
                 .id(SharedString::from(format!("friend-row-{node_id}")))
-                .mt(px(10.0))
+                .py(px(10.0))
                 .flex()
                 .items_center()
-                .gap(px(8.0))
-                .child(div().size(px(8.0)).rounded_full().flex_none().bg(dot_color));
+                .gap(px(10.0))
+                .child(
+                    div()
+                        .size(px(34.0))
+                        .rounded(px(9.0))
+                        .flex_none()
+                        .bg(theme.overlay)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_size(sp(12.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text_secondary)
+                        .child(initials),
+                );
             if editing {
                 row = row
                     .child(
@@ -516,60 +545,106 @@ impl Waku {
                             .flex_1()
                             .min_w_0()
                             .child(settings_title_jump(
-                                div().text_size(sp(13.0)).text_color(theme.text).child(
-                                    settings_search_text(
+                                div()
+                                    .text_size(sp(13.0))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(settings_search_text(
                                         display.clone(),
                                         matched.title_ranges.clone(),
                                         theme,
-                                    ),
-                                ),
+                                    )),
                                 &matched,
                                 theme,
                             ))
                             .child(
                                 div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(5.0))
                                     .text_size(sp(11.5))
-                                    .text_color(theme.text_tertiary)
+                                    .text_color(theme.text_secondary)
+                                    .child(div().size(px(5.0)).rounded_full().bg(dot_color))
                                     .child(meta),
                             ),
                     )
-                    .child(self.friends_button(
-                        SharedString::from(format!("friend-nickname-{node_id}")),
-                        tr!("friends.nickname"),
-                        &theme,
-                        move |this, cx| this.begin_friend_nickname_edit(edit_id.clone(), cx),
-                        cx,
-                    ))
-                    .child(self.friends_button(
-                        SharedString::from(format!("friend-share-{node_id}")),
-                        tr!("friends.sharing"),
-                        &theme,
-                        move |this, cx| this.toggle_friend_share_panel(share_id.clone(), cx),
-                        cx,
-                    ))
-                    .child(self.friends_button(
-                        SharedString::from(format!("friend-send-{node_id}")),
-                        tr!("friends.send_file"),
-                        &theme,
-                        move |this, cx| this.pick_and_send_file(send_id.clone(), cx),
-                        cx,
-                    ))
-                    .child(self.friends_button(
-                        SharedString::from(format!("friend-remove-{node_id}")),
-                        tr!("friends.remove"),
-                        &theme,
-                        move |this, cx| {
-                            this.friends_confirm_command(
-                                tr!("friends.confirm_remove", name = remove_name.clone()),
-                                Some(tr!("friends.confirm_remove_detail")),
-                                tr!("common.remove"),
-                                waku_client::Command::RemoveFriend {
-                                    node_id: remove_id.clone(),
-                                },
-                                cx,
-                            );
+                    .child(
+                        self.friends_button(
+                            SharedString::from(format!("friend-send-{node_id}")),
+                            tr!("friends.send_file"),
+                            &theme,
+                            move |this, cx| this.pick_and_send_file(send_id.clone(), cx),
+                            cx,
+                        )
+                        .bg(theme.inverse)
+                        .border_color(theme.inverse)
+                        .text_color(theme.on_inverse)
+                        .hover(|style| style.bg(theme.inverse).opacity(0.9))
+                        .active(|style| style.bg(theme.inverse).opacity(0.8))
+                        .focus_visible(|style| style.bg(theme.inverse).border_color(theme.accent))
+                        .child(icon(
+                            "icons/upload.svg",
+                            13.0,
+                            theme.on_inverse,
+                        )),
+                    )
+                    .child(dropdown_menu(
+                        MenuChip::new(SharedString::from(menu_id.clone()))
+                            .icon("icons/ellipsis.svg", theme.text_secondary)
+                            .caret(false)
+                            .height(px(28.0))
+                            .tooltip(tr!("friends.actions"))
+                            .selected(handle.is_open()),
+                        SharedString::from(format!("{menu_id}-menu")),
+                        &handle,
+                        MenuAlign::BelowRight,
+                        move |_| {
+                            let edit_weak = weak.clone();
+                            let edit_id = edit_id.clone();
+                            let share_weak = weak.clone();
+                            let share_id = share_id.clone();
+                            let remove_weak = weak.clone();
+                            let remove_id = remove_id.clone();
+                            let remove_name = remove_name.clone();
+                            vec![
+                                MenuItem::new(tr!("friends.nickname"), move |_, cx| {
+                                    // Let the menu release the window and restore its
+                                    // trigger focus before focusing the nickname field.
+                                    let weak = edit_weak.clone();
+                                    let node_id = edit_id.clone();
+                                    cx.defer(move |cx| {
+                                        let _ = weak.update(cx, |this, cx| {
+                                            this.begin_friend_nickname_edit(node_id, cx);
+                                        });
+                                    });
+                                })
+                                .icon("icons/pencil.svg"),
+                                MenuItem::new(tr!("friends.sharing"), move |_, cx| {
+                                    let _ = share_weak.update(cx, |this, cx| {
+                                        this.toggle_friend_share_panel(share_id.clone(), cx);
+                                    });
+                                })
+                                .icon("icons/folder.svg"),
+                                MenuItem::Separator,
+                                MenuItem::new(tr!("friends.remove"), move |_, cx| {
+                                    let _ = remove_weak.update(cx, |this, cx| {
+                                        this.friends_confirm_command(
+                                            tr!(
+                                                "friends.confirm_remove",
+                                                name = remove_name.clone()
+                                            ),
+                                            Some(tr!("friends.confirm_remove_detail")),
+                                            tr!("common.remove"),
+                                            waku_client::Command::RemoveFriend {
+                                                node_id: remove_id.clone(),
+                                            },
+                                            cx,
+                                        );
+                                    });
+                                })
+                                .icon("icons/trash.svg"),
+                            ]
                         },
-                        cx,
                     ));
             }
             if self.expanded_share_friend.as_deref() == Some(node_id.as_str()) {
@@ -602,8 +677,11 @@ impl Waku {
                 self.friends_card(
                     &theme,
                     std::iter::once(
-                        self.friends_section_title(&theme, tr!("friends.list"))
-                            .into_any_element(),
+                        self.friends_section_title(
+                            &theme,
+                            format!("{} · {}", tr!("friends.list"), friends.friends.len()),
+                        )
+                        .into_any_element(),
                     )
                     .chain(friend_rows)
                     .collect::<Vec<_>>(),
@@ -621,7 +699,8 @@ impl Waku {
             })
             .map(|transfer| self.render_transfer_row(transfer, &theme, cx))
             .collect();
-        let transfers_title_matched = search.matched(&tr!("friends.transfers"), "").is_some();
+        let transfers_title_matched =
+            search.active() && search.matched(&tr!("friends.transfers"), "").is_some();
         let transfers_card = (!transfer_cards.is_empty() || transfers_title_matched).then(|| {
             self.friends_card(
                 &theme,
@@ -705,7 +784,8 @@ impl Waku {
                     .into_any_element(),
             );
         }
-        let pairing_title_matched = search.matched(&tr!("pairing.requests"), "").is_some();
+        let pairing_title_matched =
+            search.active() && search.matched(&tr!("pairing.requests"), "").is_some();
         let pairing_card = (!pair_rows.is_empty() || pairing_title_matched).then(|| {
             self.friends_card(
                 &theme,
@@ -764,35 +844,26 @@ impl Waku {
                     .into_any_element(),
             );
         }
-        if paired_rows.is_empty() && !search.active() {
-            paired_rows.push(
-                div()
-                    .mt(px(10.0))
-                    .text_size(sp(12.5))
-                    .text_color(theme.text_tertiary)
-                    .child(tr!("pairing.none"))
-                    .into_any_element(),
-            );
-        }
-        let paired_title_matched = search.matched(&tr!("pairing.paired"), "").is_some();
-        let paired_card = (paired_title_matched || !search.active() || !paired_rows.is_empty())
-            .then(|| {
-                self.friends_card(
-                    &theme,
-                    std::iter::once(
-                        self.friends_section_title(&theme, tr!("pairing.paired"))
-                            .into_any_element(),
-                    )
-                    .chain(paired_rows)
-                    .collect::<Vec<_>>(),
+        let paired_title_matched =
+            search.active() && search.matched(&tr!("pairing.paired"), "").is_some();
+        let paired_card = (paired_title_matched || !paired_rows.is_empty()).then(|| {
+            self.friends_card(
+                &theme,
+                std::iter::once(
+                    self.friends_section_title(&theme, tr!("pairing.paired"))
+                        .into_any_element(),
                 )
-            });
+                .chain(paired_rows)
+                .collect::<Vec<_>>(),
+            )
+        });
 
-        let requests_title_matched = search.matched(&tr!("friends.requests"), "").is_some();
+        let requests_title_matched =
+            search.active() && search.matched(&tr!("friends.requests"), "").is_some();
         // Sync alerts lead the page — a stopped rebase blocks sync until
         // someone picks a decision.
         let sync_alerts_card = (!friends.sync_alerts.is_empty()
-            || search.matched(&tr!("friends.sync_alerts"), "").is_some())
+            || (search.active() && search.matched(&tr!("friends.sync_alerts"), "").is_some()))
         .then(|| {
             self.friends_card(
                 &theme,
@@ -814,17 +885,102 @@ impl Waku {
                 .collect::<Vec<_>>(),
             )
         });
+        // Setup stays close at hand without pushing the roster below the fold.
+        let copy_code = friends.friend_code.clone();
+        let toolbar = div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(8.0))
+            .child(icon("icons/user-round.svg", 16.0, theme.text_secondary))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_size(sp(13.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .child(friends.display_name.clone()),
+            )
+            .child(
+                self.friends_button(
+                    "friend-profile-toggle",
+                    tr!("friends.edit_profile"),
+                    &theme,
+                    |this, cx| {
+                        this.friend_profile_open = !this.friend_profile_open;
+                        cx.notify();
+                    },
+                    cx,
+                )
+                .child(icon("icons/pencil.svg", 12.0, theme.text_secondary)),
+            )
+            .child(
+                self.friends_button(
+                    "friend-copy-code",
+                    if code_copied {
+                        tr!("common.copied")
+                    } else {
+                        tr!("friends.copy_code")
+                    },
+                    &theme,
+                    move |this, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(copy_code.clone()));
+                        this.show_control_copied(copy_feedback, cx);
+                    },
+                    cx,
+                )
+                .child(icon(
+                    if code_copied {
+                        "icons/check.svg"
+                    } else {
+                        "icons/copy.svg"
+                    },
+                    12.0,
+                    theme.text_secondary,
+                )),
+            )
+            .child(
+                self.friends_button(
+                    "friend-add-toggle",
+                    tr!("friends.add_friend"),
+                    &theme,
+                    |this, cx| {
+                        this.friend_add_open = !this.friend_add_open;
+                        cx.notify();
+                    },
+                    cx,
+                )
+                .child(icon(
+                    "icons/user-round-plus.svg",
+                    13.0,
+                    theme.text_secondary,
+                )),
+            );
         let mut column = div()
             .mt(px(15.0))
             .w_full()
+            .max_w(px(960.0))
             .flex()
             .flex_col()
-            .gap(px(12.0))
+            .gap(px(16.0))
             .children(sync_alerts_card)
-            .child(name_card)
-            .children(code_card)
-            .children(add_card)
-            .children(friends_card);
+            .when(!search.active(), |column| column.child(toolbar))
+            .when(
+                (!search.active() && self.friend_profile_open)
+                    || (search.active()
+                        && search
+                            .matched(
+                                &tr!("friends.display_name"),
+                                &tr!("friends.display_name_hint"),
+                            )
+                            .is_some()),
+                |column| column.child(name_card),
+            )
+            .when(search.active(), |column| column.children(code_card))
+            .when(self.friend_add_open || search.active(), |column| {
+                column.children(add_card)
+            });
         if !request_cards.is_empty() || requests_title_matched {
             column = column.child(
                 self.friends_card(
@@ -838,14 +994,12 @@ impl Waku {
                 ),
             );
         }
-        if let Some(pairing_card) = pairing_card {
-            column = column.child(pairing_card);
-        }
+        column = column
+            .children(pairing_card)
+            .children(friends_card)
+            .children(transfers_card);
         if let Some(paired_card) = paired_card {
             column = column.child(paired_card);
-        }
-        if let Some(transfers_card) = transfers_card {
-            column = column.child(transfers_card);
         }
         column.into_any_element()
     }
@@ -909,13 +1063,15 @@ impl Waku {
                         div()
                             .text_size(sp(13.0))
                             .text_color(theme.text)
-                            .child(format!("{} · {}", transfer.title, peer_name)),
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .child(transfer.title.clone()),
                     )
                     .child(
                         div()
                             .text_size(sp(11.5))
                             .text_color(theme.text_tertiary)
-                            .child(status),
+                            .child(format!("{peer_name} · {status}")),
                     ),
             )
             .when_some(session_id, |element, session_id| {

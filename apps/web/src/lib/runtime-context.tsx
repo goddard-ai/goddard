@@ -4,6 +4,7 @@ import type {
   DaemonSettings,
   GoalOperation,
   MessageAttachment,
+  PromptConfiguration,
   PlanUsage,
   Project,
   ProviderProbe,
@@ -22,6 +23,8 @@ import {
   MANAGED_GOAL_QUESTION,
   queuedMessageIsManagedGoal,
   sessionAcceptsImmediateSteer,
+  sameSessionRuntimeOptions,
+  promptConfigurationForSession,
 } from '@waku/client'
 import {
   createContext,
@@ -43,6 +46,7 @@ import {
   daemonKeys,
   loadDaemonSettings,
   loadTaskState,
+  hydrateSession,
   materializeWorktree,
   persistSession,
   probeProvider,
@@ -136,6 +140,7 @@ interface RuntimeContextValue {
     attachments?: MessageAttachment[],
     providerPromptOverride?: string,
     hidden?: boolean,
+    configuration?: PromptConfiguration,
   ) => Promise<void>
   steerPrompt: (
     session: AgentSession,
@@ -179,7 +184,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const entries = useRef(new Map<string, RuntimeEntry>())
   const attachRequests = useRef(new Map<string, Promise<boolean>>())
   const persistenceTails = useRef(new Map<string, Promise<AgentSession>>())
-  const checkpointCaptures = useRef(new Map<string, Promise<AgentSession>>())
+  const checkpointCaptures = useRef(new Map<string, {
+    turnId: string | null
+    historyGeneration: number
+    operation: Promise<AgentSession>
+  }>())
   const projectionPersistTimers = useRef(new Map<string, number>())
   const saveGenerations = useRef(new Map<string, number>())
   const sendPromptRef = useRef<RuntimeContextValue['sendPrompt'] | null>(null)
@@ -192,6 +201,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         displayContent: string
         attachments: MessageAttachment[]
         queuedId?: string
+        configuration: PromptConfiguration
       }>
     >(),
   )
@@ -363,8 +373,12 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         throw new Error(translate(localeRef.current, 'errors.daemon_disconnected'))
       }
 
+      const beforeSave = queryClient.getQueryData<AgentSession>(daemonKeys.session(config.address, settled.id))
       let saved = await persistOrdered(settled)
+      const current = queryClient.getQueryData<AgentSession>(daemonKeys.session(config.address, settled.id))
+      if (current && current !== beforeSave) saved = current
       cacheSession(saved)
+      if ((saved.history_generation ?? 0) !== (settled.history_generation ?? 0)) return saved
       const turn = [...saved.turns]
         .reverse()
         .find((candidate) => candidate.status !== 'running' && !candidate.checkpoint)
@@ -376,7 +390,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       const project = taskState.projects.find((candidate) => candidate.id === saved.project_id)
       if (!project) return saved
 
+      const identity = { turn_id: turn.id, history_generation: saved.history_generation ?? 0 }
       let checkpoint: NonNullable<AgentSession['turns'][number]['checkpoint']>
+      let captureError: unknown
       try {
         checkpoint = await captureTurnCheckpoint(
           client,
@@ -390,11 +406,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
               activity.kind === 'fileChange' || activity.kind === 'tool',
             ),
           ),
+          identity,
         )
       } catch (error) {
-        toast.error(translate(localeRef.current, 'errors.capture_turn_checkpoint', {
-          error: errorMessage(error),
-        }))
+        captureError = error
         checkpoint = {
           turn_count: turn.turn_count,
           git_ref: `refs/waku/session-${saved.id}-turn-${turn.turn_count}`,
@@ -409,12 +424,18 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       const latest = queryClient.getQueryData<AgentSession>(
         daemonKeys.session(config.address, saved.id),
       ) ?? saved
-      if (!latest.turns.some((candidate) => candidate.turn_count === turn.turn_count)) {
+      if ((latest.history_generation ?? 0) !== identity.history_generation
+        || !latest.turns.some((candidate) => candidate.id === identity.turn_id)) {
         return latest
+      }
+      if (captureError) {
+        toast.error(translate(localeRef.current, 'errors.capture_turn_checkpoint', {
+          error: errorMessage(captureError),
+        }))
       }
       saved = {
         ...latest,
-        turns: latest.turns.map((candidate) => candidate.turn_count === turn.turn_count
+        turns: latest.turns.map((candidate) => candidate.id === identity.turn_id
           ? { ...candidate, checkpoint }
           : candidate),
       }
@@ -426,12 +447,16 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
 
   const finishSettledTurn = useCallback(
     (settled: AgentSession) => {
-      if (checkpointCaptures.current.has(settled.id)) return
+      const turnId = [...settled.turns].reverse()
+        .find((turn) => turn.status !== 'running' && !turn.checkpoint)?.id ?? null
+      const historyGeneration = settled.history_generation ?? 0
+      const pending = checkpointCaptures.current.get(settled.id)
+      if (pending?.turnId === turnId && pending?.historyGeneration === historyGeneration) return
       const operation = finalizeSettledTurn(settled)
-      checkpointCaptures.current.set(settled.id, operation)
+      checkpointCaptures.current.set(settled.id, { turnId, historyGeneration, operation })
       void operation
         .then(async (saved) => {
-          if (checkpointCaptures.current.get(saved.id) !== operation) return
+          if (checkpointCaptures.current.get(saved.id)?.operation !== operation) return
           // Release the checkpoint gate before starting the queued turn. The
           // next send must become a real turn instead of queueing itself again.
           checkpointCaptures.current.delete(saved.id)
@@ -464,11 +489,12 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             nextQueued.attachments ?? [],
             nextQueued.content,
             nextQueued.hidden,
+            nextQueued.configuration ?? undefined,
           )
         })
         .catch((error) => toast.error(errorMessage(error)))
         .finally(() => {
-          if (checkpointCaptures.current.get(settled.id) === operation) {
+          if (checkpointCaptures.current.get(settled.id)?.operation === operation) {
             checkpointCaptures.current.delete(settled.id)
           }
         })
@@ -569,6 +595,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
                     pending.providerPrompt,
                     pending.attachments,
                     pending.queuedId,
+                    pending.configuration,
                   )
                 : queueSubmission(
                     current,
@@ -577,6 +604,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
                     pending.attachments,
                     false,
                     pending.queuedId,
+                    pending.configuration,
                   )
               cacheSession(current)
               if (!settledCleanly) {
@@ -724,6 +752,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       attachments: MessageAttachment[] = [],
       providerPromptOverride?: string,
       hidden = false,
+      submittedConfiguration?: PromptConfiguration,
     ) => {
       if (!client || !config || phase !== 'connected') {
         throw new Error(translate(localeRef.current, 'errors.daemon_disconnected'))
@@ -738,16 +767,57 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             .filter(Boolean)
             .join(' ')
         : providerPromptOverride.trim()
-      const currentSession = queryClient.getQueryData<AgentSession>(
+      let currentSession = queryClient.getQueryData<AgentSession>(
         daemonKeys.session(config.address, inputSession.id),
       ) ?? inputSession
+      const configuration = submittedConfiguration ?? promptConfigurationForSession(currentSession)
+      const cachedRuntime = entries.current.get(currentSession.id)
+      if (cachedRuntime) {
+        const previous = queryClient.getQueryData<AgentSession>(
+          daemonKeys.session(config.address, currentSession.id),
+        )
+        const attached = await attachDaemonSession(client, currentSession.id)
+        if (entries.current.get(currentSession.id) !== cachedRuntime) {
+          throw new Error(translate(localeRef.current, 'errors.task_changed_during_prompt'))
+        }
+        if (attached?.runtimeId === cachedRuntime.runtimeId) {
+          const latest = queryClient.getQueryData<AgentSession>(
+            daemonKeys.session(config.address, currentSession.id),
+          ) ?? currentSession
+          if (!sameSessionRuntimeOptions(currentSession, latest)) {
+            throw new Error(translate(localeRef.current, 'errors.task_changed_during_prompt'))
+          }
+          currentSession = latest
+        } else {
+          cachedRuntime.unsubscribe()
+          const timer = projectionPersistTimers.current.get(currentSession.id)
+          if (timer !== undefined) window.clearTimeout(timer)
+          projectionPersistTimers.current.delete(currentSession.id)
+          await persistenceTails.current.get(currentSession.id)
+          const fresh = await hydrateSession(client, currentSession.id)
+          if (!fresh) throw new Error(translate(localeRef.current, 'errors.task_not_found'))
+          // A picker edit or a newer event must not be replaced by this read.
+          if (entries.current.get(currentSession.id) !== cachedRuntime
+            || saveGenerations.current.has(currentSession.id)
+            || queryClient.getQueryData(daemonKeys.session(config.address, currentSession.id)) !== previous) {
+            throw new Error(translate(localeRef.current, 'errors.task_changed_during_prompt'))
+          }
+          const optionsChanged = !sameSessionRuntimeOptions(currentSession, fresh)
+          removeRuntime(currentSession.id)
+          currentSession = fresh
+          cacheSession(currentSession)
+          if (optionsChanged) {
+            throw new Error(translate(localeRef.current, 'errors.task_changed_during_prompt'))
+          }
+        }
+      }
       if (
         currentSession.status === 'connecting' ||
         currentSession.status === 'working' ||
         currentSession.status === 'waiting' ||
-        checkpointCaptures.current.has(currentSession.id)
+        checkpointCaptures.current.get(currentSession.id)?.historyGeneration === (currentSession.history_generation ?? 0)
       ) {
-        const queued = queueSubmission(currentSession, prompt, providerPrompt, attachments, hidden)
+        const queued = queueSubmission(currentSession, prompt, providerPrompt, attachments, hidden, undefined, configuration)
         cacheSession(queued)
         await persistOrdered(queued)
         return
@@ -769,6 +839,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       let project: Project
       let runtime = entries.current.get(currentSession.id)
       let startup: { probe: ProviderProbe; settings: DaemonSettings } | null = null
+      let acknowledgedIntentChanged = false
+      const optimisticSession = session
       try {
         const state = await loadTaskState(client)
         const foundProject = state.projects.find((item) => item.id === currentSession.project_id)
@@ -806,14 +878,15 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         }
 
         session = await materializeWorktree(client, session, project)
-        const turnCount = session.turns.at(-1)?.turn_count
-        if (turnCount !== undefined) {
+        const checkpointTurn = session.turns.at(-1)
+        if (checkpointTurn) {
           try {
             await captureTurnStart(
               client,
               sessionCwd(session, project),
               session.id,
-              turnCount,
+              checkpointTurn.turn_count,
+              session.history_generation ?? 0,
             )
           } catch (error) {
             toast.error(translate(localeRef.current, 'errors.capture_pre_turn_checkpoint', {
@@ -821,11 +894,28 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             }))
           }
         }
+        const prepared = session
+        const beforeSave = queryClient.getQueryData<AgentSession>(
+          daemonKeys.session(config.address, session.id),
+        )
         session = await persistOrdered(session)
-        cacheSession(session)
+        const latest = queryClient.getQueryData<AgentSession>(
+          daemonKeys.session(config.address, session.id),
+        ) ?? session
+        acknowledgedIntentChanged = (prepared.history_generation ?? 0) !== (session.history_generation ?? 0)
+          || !sameSessionRuntimeOptions(prepared, session)
+          || !sameSessionRuntimeOptions(prepared, latest)
+          || entries.current.get(session.id) !== runtime
+        if (latest === beforeSave && !saveGenerations.current.has(session.id)) cacheSession(session)
       } catch (error) {
-        cacheSession(currentSession)
+        if (queryClient.getQueryData(daemonKeys.session(config.address, currentSession.id)) === optimisticSession) {
+          cacheSession(currentSession)
+        }
         throw error
+      }
+      if (acknowledgedIntentChanged) {
+        if (entries.current.get(session.id) === runtime) removeRuntime(session.id)
+        throw new Error(translate(localeRef.current, 'errors.task_changed_during_prompt'))
       }
 
       try {
@@ -870,7 +960,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         }
         await client.request(
           {
-            type: 'prompt',
+            type: 'promptWithConfiguration',
+            configuration,
             prompt: providerPrompt,
             turnId: submittedTurn?.id ?? null,
             messageId: submittedMessage?.id ?? null,
@@ -881,9 +972,17 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           runtime.runtimeId,
         )
       } catch (error) {
+        const latest = queryClient.getQueryData<AgentSession>(
+          daemonKeys.session(config.address, session.id),
+        ) ?? session
+        // The old reply cannot settle a turn created after Stop or rewind.
+        if (entries.current.get(session.id) !== runtime
+          || (latest.history_generation ?? 0) !== (session.history_generation ?? 0)
+          || latest.turns.at(-1)?.id !== submittedTurn?.id
+          || latest.turns.at(-1)?.status !== 'running') throw error
         removeRuntime(session.id)
         const failed = reduceRuntimeEvent(
-          session,
+          latest,
           syntheticEvent(session.id, runtime?.runtimeId ?? '', 'turnFinished', {
             success: false,
             summary: errorMessage(error),
@@ -977,6 +1076,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             && !optimisticSession.messages.some((message) => message.role === 'user')
           ) {
             optimisticSession.auto_title = objective.split(/\s+/u).filter(Boolean).slice(0, 7).join(' ') || null
+            optimisticSession.auto_title_is_prompt = Boolean(optimisticSession.auto_title)
           }
           optimisticSession.messages.push({
             id: crypto.randomUUID(),
@@ -1240,7 +1340,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         ? queueSteerSubmission(current, prompt, providerPrompt, attachments, queuedId)
         : undefined
       if (queued) cacheSession(queued)
-      const submission = { providerPrompt, displayContent: prompt, attachments, queuedId }
+      const submission = { providerPrompt, displayContent: prompt, attachments, queuedId,
+        configuration: promptConfigurationForSession(current) }
       pending.push(submission)
       pendingSteers.current.set(session.id, pending)
       try {
@@ -1314,7 +1415,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       if (pendingPersistence) await pendingPersistence.catch(() => undefined)
       const pendingCheckpoint = checkpointCaptures.current.get(sessionId)
       checkpointCaptures.current.delete(sessionId)
-      if (pendingCheckpoint) await pendingCheckpoint.catch(() => undefined)
+      if (pendingCheckpoint) await pendingCheckpoint.operation.catch(() => undefined)
       persistenceTails.current.delete(sessionId)
       saveGenerations.current.delete(sessionId)
       pendingSteers.current.delete(sessionId)
@@ -1602,6 +1703,7 @@ function queueSubmission(
   attachments: MessageAttachment[],
   hidden = false,
   queuedId?: string,
+  configuration?: PromptConfiguration,
 ): AgentSession {
   return {
     ...session,
@@ -1616,6 +1718,7 @@ function queueSubmission(
       {
         id: queuedId ?? crypto.randomUUID(),
         content: providerPrompt,
+        configuration: configuration ?? promptConfigurationForSession(session),
         display_content: attachments.length || providerPrompt !== displayContent
           ? displayContent
           : null,
@@ -1637,8 +1740,9 @@ function queueSteerSubmission(
   providerPrompt: string,
   attachments: MessageAttachment[],
   queuedId?: string,
+  configuration?: PromptConfiguration,
 ): AgentSession {
-  const queued = queueSubmission(session, displayContent, providerPrompt, attachments, false, queuedId)
+  const queued = queueSubmission(session, displayContent, providerPrompt, attachments, false, queuedId, configuration)
   const entry = queued.queued_messages?.at(-1)
   return entry ? appendQueuedSteerPreview(queued, entry) : queued
 }

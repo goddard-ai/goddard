@@ -274,7 +274,7 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                 bound(
                     tr!("shortcuts.push_base"),
                     PushBaseBranch,
-                    Some("Workspace && !StandaloneTerminal"),
+                    Some("Workspace && !StandaloneTerminal && !(RightPanel > Terminal)"),
                 ),
                 bound(
                     tr!("shortcuts.copy_selection"),

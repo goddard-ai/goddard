@@ -15,6 +15,10 @@ export type DaemonStatsSample = {
  */
 at: number,
 /**
+ * The memory probe skipped a busy daemon lock; those fields are from an earlier sample.
+ */
+probeDeferred: boolean,
+/**
  * The daemon process's own resident size. `None` on platforms without
  * a sampler implementation, or before the first sample lands.
  */

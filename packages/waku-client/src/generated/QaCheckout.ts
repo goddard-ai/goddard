@@ -5,4 +5,4 @@ import type { CreatedWorktree } from "./CreatedWorktree";
 /**
  * Immutable identity of the checkout the human is testing.
  */
-export type QaCheckout = { baseBranch: string, baseSha: string, qaBranch: string, commit: CommitEntry, worktree: CreatedWorktree, };
+export type QaCheckout = { sessionId: string | null, originalHead: string | null, originalBranch: string | null, baseBranch: string, baseSha: string, qaBranch: string, commit: CommitEntry, worktree: CreatedWorktree, };

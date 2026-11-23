@@ -278,6 +278,7 @@ impl Session {
     fn inventory(&self) -> SessionInventory {
         let g = self.current();
         SessionInventory {
+            launch: self.launch.clone(),
             adapter: self.adapter_name.clone(),
             requested: self.requested.clone(),
             requested_revision: self.requested_revision,

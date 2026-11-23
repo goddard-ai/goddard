@@ -1,11 +1,152 @@
 use super::*;
+use std::sync::atomic::{AtomicBool, Ordering};
+use waku_protocol::TurnCheckpointIdentity;
+
+#[derive(Default)]
+pub(super) struct CheckpointCaptureLane {
+    serial: Mutex<()>,
+    cancellation: Mutex<Arc<AtomicBool>>,
+}
+
+pub(super) struct CheckpointMutation<'a> {
+    // Release serialization before letting a new background token escape.
+    _serial: parking_lot::MutexGuard<'a, ()>,
+    cancellation: parking_lot::MutexGuard<'a, Arc<AtomicBool>>,
+}
+
+impl Drop for CheckpointMutation<'_> {
+    fn drop(&mut self) {
+        *self.cancellation = Arc::new(AtomicBool::new(false));
+    }
+}
+
+impl CheckpointCaptureLane {
+    pub(super) fn preempt(&self) -> CheckpointMutation<'_> {
+        let cancellation = self.cancellation.lock();
+        cancellation.store(true, Ordering::Release);
+        // Existing captures hold no cancellation lock. They finish owned-child
+        // cleanup before releasing serial; new captures cannot obtain a token.
+        let serial = self.serial.lock();
+        CheckpointMutation {
+            _serial: serial,
+            cancellation,
+        }
+    }
+}
 
 impl WakuBackend {
+    pub(super) fn checkpoint_capture_lane(
+        &self,
+        cwd: &Path,
+    ) -> anyhow::Result<Arc<CheckpointCaptureLane>> {
+        crate::checkpoint::remaining_capture_time()?;
+        let cwd = dunce::canonicalize(cwd).context("could not resolve checkpoint worktree")?;
+        crate::checkpoint::remaining_capture_time()?;
+        let mut lanes = crate::checkpoint::lock_capture_mutex(&self.checkpoint_capture_locks)?;
+        Ok(lanes
+            .entry(cwd)
+            .or_insert_with(|| Arc::new(CheckpointCaptureLane::default()))
+            .clone())
+    }
+
+    fn checkpoint_target(
+        &self,
+        session_id: Uuid,
+        turn_count: usize,
+    ) -> anyhow::Result<Option<(u64, Option<Uuid>)>> {
+        let mut skeleton = {
+            let state = crate::checkpoint::lock_capture_mutex(&self.task_state)?;
+            let Some(session) = state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+            else {
+                return Ok(None);
+            };
+            if session.detail_loaded {
+                return Ok(Some((
+                    session.history_generation,
+                    session
+                        .turns
+                        .iter()
+                        .find(|turn| turn.turn_count == turn_count)
+                        .map(|turn| turn.id),
+                )));
+            }
+            session.clone()
+        };
+        self.task_store.hydrate(&mut skeleton)?;
+        Ok(Some((
+            skeleton.history_generation,
+            skeleton
+                .turns
+                .iter()
+                .find(|turn| turn.turn_count == turn_count)
+                .map(|turn| turn.id),
+        )))
+    }
+
+    fn resolve_checkpoint_identity(
+        &self,
+        session_id: Uuid,
+        turn_count: usize,
+        requested: Option<TurnCheckpointIdentity>,
+    ) -> anyhow::Result<TurnCheckpointIdentity> {
+        let (generation, turn_id) = self
+            .checkpoint_target(session_id, turn_count)?
+            .ok_or_else(|| anyhow!("checkpoint task is unavailable"))?;
+        let turn_id = turn_id.ok_or_else(|| anyhow!("checkpoint turn is unavailable"))?;
+        let current = TurnCheckpointIdentity {
+            turn_id,
+            history_generation: generation,
+        };
+        match requested {
+            Some(requested) => anyhow::ensure!(
+                requested == current,
+                "checkpoint belongs to obsolete task history"
+            ),
+            None => anyhow::ensure!(
+                generation == 0,
+                "checkpoint identity is required after rewind; refresh this client"
+            ),
+        }
+        Ok(current)
+    }
+
+    pub(super) fn capture_turn_start_checkpoint(
+        &self,
+        cwd: PathBuf,
+        session_id: Uuid,
+        turn_count: usize,
+        history_generation: Option<u64>,
+    ) -> anyhow::Result<()> {
+        crate::checkpoint::with_turn_capture_deadline(|| {
+            let lane = self.checkpoint_capture_lane(&cwd)?;
+            let cancellation = crate::checkpoint::lock_capture_mutex(&lane.cancellation)?.clone();
+            crate::checkpoint::with_capture_cancellation(cancellation, || {
+                let _serial = crate::checkpoint::lock_capture_mutex(&lane.serial)?;
+                let current_generation = crate::checkpoint::lock_capture_mutex(&self.task_state)?
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == session_id)
+                    .map_or(0, |session| session.history_generation);
+                anyhow::ensure!(
+                    history_generation.unwrap_or(0) == current_generation,
+                    "starting checkpoint belongs to obsolete task history; refresh this client"
+                );
+                crate::checkpoint::capture_turn_start(&cwd, session_id, turn_count)
+            })
+        })
+    }
+
     pub fn new(settings: DaemonSettingsStore, task_store: StateStore) -> anyhow::Result<Self> {
         let mut task_state = task_store
             .load()
             .context("could not load Goddard task database")?;
         migrate_projectless_state(&task_store, &mut task_state)?;
+        let sidebar_intents = Mutex::new(sidebar_intents::Receipts::open(
+            task_store.path().with_extension("sidebar-receipts.json"),
+        )?);
         let composer_drafts = ComposerDraftStore::for_state_path(task_store.path());
         let attachments = AttachmentStore::new(
             task_store
@@ -48,17 +189,26 @@ impl WakuBackend {
                 .context("could not load Goddard automations")?,
         );
         let boss = Arc::new(if settings.get().boss_experiment_enabled {
-            match crate::boss::BossService::open(data_dir.join("boss")) {
+            match crate::boss::BossService::open_database(
+                data_dir.join("boss"),
+                task_store.path().to_owned(),
+            ) {
                 Ok(boss) => boss,
                 Err(error) => {
                     // Keep the store intact and let Boss operations retry activation.
                     // An unavailable experiment must not take down ordinary tasks.
                     eprintln!("could not load Boss; continuing with Boss inactive: {error:#}");
-                    crate::boss::BossService::disabled(data_dir.join("boss"))
+                    crate::boss::BossService::disabled_database(
+                        data_dir.join("boss"),
+                        task_store.path().to_owned(),
+                    )
                 }
             }
         } else {
-            crate::boss::BossService::disabled(data_dir.join("boss"))
+            crate::boss::BossService::disabled_database(
+                data_dir.join("boss"),
+                task_store.path().to_owned(),
+            )
         });
         let auto_prompts = Arc::new(
             AutoPromptService::open(data_dir.join("auto-prompts.json"))
@@ -66,7 +216,11 @@ impl WakuBackend {
         );
         let task_state = Arc::new(Mutex::new(task_state));
         let task_store = Arc::new(task_store);
+        let idle_shutdown = Arc::new(crate::server::idle_shutdown::IdleShutdownGate::default());
         let backend = Self {
+            sidebar_intent_order: parking_lot::ReentrantMutex::new(()),
+            sidebar_intents,
+            idle_shutdown: idle_shutdown.clone(),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             managed_goal_claims: Mutex::new(HashMap::new()),
             repo_maps: Arc::new((Mutex::new(RepoMaps::default()), Condvar::new())),
@@ -79,6 +233,9 @@ impl WakuBackend {
             integrations,
             inference_secrets,
             task_store,
+            provider_timeline: driver::timeline::Timeline::start(
+                data_dir.join("diagnostics/devin-timeline"),
+            ),
             task_state,
             task_notifier: Mutex::new(None),
             removed_session_ids: Mutex::new(HashSet::new()),
@@ -90,7 +247,10 @@ impl WakuBackend {
             checkpoint_capture_locks: Mutex::new(HashMap::new()),
             checkout_history: checkout_history::CheckoutHistoryCache::default(),
             agent: Arc::new(crate::agent::AgentState::default()),
-            runtime_lifecycles: Arc::new(RuntimeLifecycles::default()),
+            runtime_lifecycles: Arc::new(RuntimeLifecycles {
+                admission: idle_shutdown,
+                ..RuntimeLifecycles::default()
+            }),
             #[cfg(test)]
             runtime_test_start: None,
             #[cfg(test)]
@@ -131,6 +291,9 @@ impl WakuBackend {
             #[cfg(test)]
             stable_test_root: None,
         };
+        backend
+            .share
+            .set_idle_shutdown_gate(backend.idle_shutdown.clone());
         // Sessions summoned before `boss_managed` existed carry no stamp;
         // the roster still names them, so mark them now — once an employee
         // retires its record is gone and the task would leak back into the
@@ -297,7 +460,13 @@ impl WakuBackend {
         // every executable-relative resolver then fails at once.
         if let Err(error) = std::thread::Builder::new()
             .name("goddard-runtime-stage".into())
-            .spawn(crate::computer_use::stage_runtime_resources)
+            .spawn({
+                let admission = backend.idle_shutdown.enter()?;
+                move || {
+                    let _admission = admission;
+                    crate::computer_use::stage_runtime_resources();
+                }
+            })
         {
             eprintln!("goddard-daemon: could not spawn runtime staging thread: {error:#}");
         }
@@ -350,6 +519,7 @@ impl WakuBackend {
         runtime_id: Uuid,
         settle: waku_protocol::boss::EmployeeSettle,
     ) -> anyhow::Result<()> {
+        let _admission = self.idle_shutdown.enter()?;
         let lifecycle = self.runtime_lifecycles.session(session_id);
         let owner = lifecycle.lock();
         if owner.get() != Some(runtime_id) {
@@ -476,6 +646,7 @@ impl WakuBackend {
         events: EventSink,
         command: Option<&waku_protocol::custom_commands::CustomCommand>,
     ) -> anyhow::Result<crate::terminal::DaemonTerminal> {
+        let _admission = self.idle_shutdown.enter()?;
         #[cfg(all(test, unix))]
         if command.is_none()
             && let Some(shell) = &self.terminal_shell
@@ -513,9 +684,27 @@ impl WakuBackend {
         session_id: Uuid,
         turn_count: usize,
         untouched: bool,
+        identity: Option<TurnCheckpointIdentity>,
     ) -> anyhow::Result<Checkpoint> {
         crate::checkpoint::with_turn_capture_deadline(|| {
-            self.capture_turn_checkpoint_inner(cwd, session_id, turn_count, untouched)
+            let lane = self.checkpoint_capture_lane(&cwd)?;
+            let cancellation = crate::checkpoint::lock_capture_mutex(&lane.cancellation)?.clone();
+            crate::checkpoint::with_capture_cancellation(cancellation, || {
+                let identity =
+                    self.resolve_checkpoint_identity(session_id, turn_count, identity)?;
+                let waiting = std::time::Instant::now();
+                let _serial = crate::checkpoint::lock_capture_mutex(&lane.serial)?;
+                let capture_lock_wait = waiting.elapsed();
+                self.resolve_checkpoint_identity(session_id, turn_count, Some(identity))?;
+                self.capture_turn_checkpoint_inner(
+                    cwd,
+                    session_id,
+                    turn_count,
+                    untouched,
+                    identity,
+                    capture_lock_wait,
+                )
+            })
         })
     }
 
@@ -525,17 +714,9 @@ impl WakuBackend {
         session_id: Uuid,
         turn_count: usize,
         untouched: bool,
+        identity: TurnCheckpointIdentity,
+        capture_lock_wait: std::time::Duration,
     ) -> anyhow::Result<Checkpoint> {
-        let capture_lock = self
-            .checkpoint_capture_locks
-            .lock()
-            .entry(cwd.clone())
-            .or_insert_with(|| Arc::new(Mutex::new(())))
-            .clone();
-        let capture_lock_started = std::time::Instant::now();
-        let _capture = crate::checkpoint::lock_capture_mutex(&capture_lock)?;
-        let capture_lock_wait = capture_lock_started.elapsed();
-
         let dedupe_started = std::time::Instant::now();
         let in_memory_checkpoint = {
             let state = crate::checkpoint::lock_capture_mutex(&self.task_state)?;
@@ -609,19 +790,25 @@ impl WakuBackend {
         let persist_started = std::time::Instant::now();
         let checkpoint = self
             .task_store
-            .save_turn_checkpoint(session_id, turn_count, &checkpoint)?
+            .save_turn_checkpoint(session_id, turn_count, &identity, &checkpoint)?
             .unwrap_or(checkpoint);
         let mut state = crate::checkpoint::lock_capture_mutex(&self.task_state)?;
-        if let Some(session) = state
-            .sessions
-            .iter_mut()
-            .find(|session| session.id == session_id)
         {
-            if let Some(turn) = session
-                .turns
+            let session = state
+                .sessions
                 .iter_mut()
-                .find(|turn| turn.turn_count == turn_count)
+                .find(|session| session.id == session_id)
+                .ok_or_else(|| anyhow!("checkpoint task was removed"))?;
+            anyhow::ensure!(
+                session.history_generation == identity.history_generation,
+                "checkpoint belongs to obsolete task history"
+            );
             {
+                let turn = session
+                    .turns
+                    .iter_mut()
+                    .find(|turn| turn.turn_count == turn_count && turn.id == identity.turn_id)
+                    .ok_or_else(|| anyhow!("checkpoint turn was removed or replaced"))?;
                 if let Some(existing) = turn.checkpoint.as_ref().filter(|checkpoint| {
                     matches!(
                         checkpoint.status,
@@ -770,6 +957,7 @@ impl WakuBackend {
             .collect::<Vec<_>>();
         drop_detached(removed_runtimes);
         self.cleanup_plan_delivery(&removed_ids);
+        self.drop_scratch(&removed_ids);
         Ok(())
     }
 
@@ -853,6 +1041,7 @@ impl WakuBackend {
             .collect::<Vec<_>>();
         drop_detached(removed_runtimes);
         self.cleanup_plan_delivery(&removed_ids);
+        self.drop_scratch(&removed_ids);
         Ok(())
     }
 
@@ -954,6 +1143,9 @@ impl WakuBackend {
         for id in removed_ids {
             drop_detached(self.remove_runtime(id, None, true));
         }
+        // Scratch is reproducible by contract — unlike the worktree it
+        // leaves with the task instead of waiting for the archive purge.
+        self.drop_scratch(&gone);
         Ok(())
     }
 
@@ -1052,6 +1244,10 @@ impl WakuBackend {
             }
             let _ = self.remove_session(session_id);
         }
+        // The same trigger reconciles scratch pools: directories whose
+        // owner archived, left, or never registered — including pools a
+        // crashed archive path could not finish dropping.
+        self.sweep_scratch();
     }
 
     /// Strips heavyweight transcript payloads from detail rows archived past

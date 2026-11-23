@@ -12,6 +12,8 @@ fn busy_boss_chat(backend: &WakuBackend, session_id: Uuid, runtime_id: Uuid) {
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id,
             driver: DriverHandle::from_control(capture),
@@ -417,6 +419,8 @@ fn incident_refresh_delivers_carried_work_once_the_swap_commits() {
     backend.sessions.lock().insert(
         next,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: Uuid::new_v4(),
             driver: DriverHandle::from_control(capture.clone()),
@@ -464,6 +468,8 @@ fn manual_compact_attempt_is_journal_telemetry_and_retry_is_human_only() {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: runtime,
             driver: DriverHandle::from_control(capture.clone()),

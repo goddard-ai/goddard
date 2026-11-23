@@ -26,6 +26,14 @@ pub fn encode_enum<T: Serialize>(value: T) -> anyhow::Result<String> {
 
 pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
     let (kind, payload) = match event {
+        DriverEvent::TaskViewSnapshot {
+            session,
+            detail,
+            settle,
+        } => (
+            "taskViewSnapshot",
+            json!({ "session": session, "detail": detail, "settle": settle }),
+        ),
         DriverEvent::BossTerminalIntent {
             title,
             cwd,
@@ -49,6 +57,9 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
         DriverEvent::AutoTitleUpdated(title) => ("autoTitleUpdated", serde_json::to_value(title)?),
         DriverEvent::AvailableCommands(commands) => {
             ("availableCommands", serde_json::to_value(commands)?)
+        }
+        DriverEvent::TaskTurnStarted(_) => {
+            bail!("client-only turn identities cannot be sent by a provider")
         }
         DriverEvent::TurnStarted => ("turnStarted", Value::Null),
         DriverEvent::TurnCancelled => ("turnCancelled", Value::Null),
@@ -137,18 +148,20 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
             }),
         ),
         DriverEvent::SteerAccepted {
+            submission_id,
             message,
             sent_by_task,
             hidden,
             report_trigger,
         } => (
             "steerAccepted",
-            json!({ "message": message, "sentByTask": sent_by_task, "hidden": hidden, "reportTrigger": report_trigger }),
+            json!({ "message": message, "submissionId": submission_id, "sentByTask": sent_by_task, "hidden": hidden, "reportTrigger": report_trigger }),
         ),
         DriverEvent::QueuedMessagesChanged { messages } => {
             ("queuedMessagesChanged", json!({ "messages": messages }))
         }
         DriverEvent::SteerRejected {
+            submission_id,
             message,
             reason,
             reason_i18n,
@@ -156,6 +169,7 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
         } => (
             "steerRejected",
             json!({
+                "submissionId": submission_id,
                 "message": message,
                 "reason": reason,
                 "reasonI18n": reason_i18n,
@@ -244,6 +258,14 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
         "turnStarted" => DriverEvent::TurnStarted,
         "turnCancelled" => DriverEvent::TurnCancelled,
         "turnParked" => DriverEvent::TurnParked,
+        "taskViewSnapshot" => DriverEvent::TaskViewSnapshot {
+            session: Box::new(serde_json::from_value(payload["session"].clone())?),
+            detail: serde_json::from_value(payload["detail"].clone())?,
+            settle: payload
+                .get("settle")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        },
         "textDelta" => DriverEvent::TextDelta(serde_json::from_value(payload)?),
         "reasoningDelta" => DriverEvent::ReasoningDelta(serde_json::from_value(payload)?),
         "activity" => {
@@ -311,6 +333,7 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
         "steerAccepted" => {
             let steer: AcceptedSteerWire = serde_json::from_value(payload)?;
             DriverEvent::SteerAccepted {
+                submission_id: steer.submission_id,
                 message: steer.message,
                 sent_by_task: steer.sent_by_task,
                 hidden: steer.hidden,
@@ -330,6 +353,7 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
         "steerRejected" => {
             let steer: RejectedSteerWire = serde_json::from_value(payload)?;
             DriverEvent::SteerRejected {
+                submission_id: steer.submission_id,
                 message: steer.message,
                 reason: steer.reason,
                 reason_i18n: steer.reason_i18n,
@@ -464,6 +488,7 @@ struct ComputerUseWire {
 #[serde(rename_all = "camelCase")]
 struct AcceptedSteerWire {
     message: String,
+    submission_id: Option<Uuid>,
     #[serde(default)]
     sent_by_task: Option<Uuid>,
     #[serde(default)]
@@ -476,6 +501,7 @@ struct AcceptedSteerWire {
 #[serde(rename_all = "camelCase")]
 struct RejectedSteerWire {
     message: String,
+    submission_id: Option<Uuid>,
     reason: String,
     #[serde(default)]
     reason_i18n: Option<crate::protocol::WireTranslation>,
@@ -808,7 +834,9 @@ mod tests {
 
     #[test]
     fn the_hidden_steer_flag_round_trips_and_defaults_off() {
+        let id = Uuid::new_v4();
         let wire = event_to_wire(DriverEvent::SteerAccepted {
+            submission_id: Some(id),
             message: "context".into(),
             sent_by_task: None,
             hidden: true,
@@ -816,12 +844,20 @@ mod tests {
         })
         .unwrap();
         assert_eq!(wire.payload["hidden"], true);
-        let DriverEvent::SteerAccepted { hidden, .. } = event_from_wire(wire).unwrap() else {
+        assert_eq!(wire.payload["submissionId"], json!(id));
+        let DriverEvent::SteerAccepted {
+            hidden,
+            submission_id,
+            ..
+        } = event_from_wire(wire).unwrap()
+        else {
             panic!("the event changed variants during its wire round trip");
         };
         assert!(hidden);
+        assert_eq!(submission_id, Some(id));
 
         let wire = event_to_wire(DriverEvent::SteerRejected {
+            submission_id: None,
             message: "context".into(),
             reason: "turn ended".into(),
             reason_i18n: None,

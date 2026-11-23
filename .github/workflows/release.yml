@@ -279,6 +279,7 @@ jobs:
 
       - name: Bundle
         env:
+          _CL_: '/FI"${{ github.workspace }}/scripts/msvc-espeak-compat.h"'
           GODDARD_POSTHOG_API_KEY: ${{ secrets.WAKU_POSTHOG_API_KEY }}
           GODDARD_POSTHOG_HOST: ${{ secrets.WAKU_POSTHOG_HOST }}
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
@@ -332,6 +333,7 @@ jobs:
 
       - name: Bundle
         env:
+          _CL_: '/FI"${{ github.workspace }}/scripts/msvc-espeak-compat.h"'
           GODDARD_POSTHOG_API_KEY: ${{ secrets.WAKU_POSTHOG_API_KEY }}
           GODDARD_POSTHOG_HOST: ${{ secrets.WAKU_POSTHOG_HOST }}
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}

@@ -66,6 +66,11 @@ const NEW_CONTENT_DOT_FADE: Duration = Duration::from_millis(150);
 /// jump button above them when status markers or suggestions are visible.
 /// Reserved whether or not a chip is showing so the transcript never shifts.
 pub(super) const TRANSCRIPT_SUGGESTION_CLEARANCE: f32 = 40.0;
+/// The task-loading placeholder's muted logo stays hidden this long — a
+/// hydration that finishes inside the delay never flashes the mark at all.
+const LOADING_LOGO_DELAY: Duration = Duration::from_secs(1);
+/// The revealed logo's breathing period — the other pulse loaders' cadence.
+const LOADING_LOGO_FLASH_PERIOD: Duration = Duration::from_millis(1600);
 
 #[derive(Clone, Debug)]
 struct ConversationNavigationRailSnapshot {
@@ -149,13 +154,14 @@ impl ConversationNavigationRail {
             return;
         }
         let reset = self.snapshot.reset_generation != snapshot.reset_generation;
-        let turn_identity_changed = self.snapshot.turns.len() != snapshot.turns.len()
-            || self
-                .snapshot
-                .turns
-                .iter()
-                .zip(snapshot.turns.iter())
-                .any(|(previous, next)| previous.message_id != next.message_id);
+        let turn_identity_changed = !Rc::ptr_eq(&self.snapshot.turns, &snapshot.turns)
+            && (self.snapshot.turns.len() != snapshot.turns.len()
+                || self
+                    .snapshot
+                    .turns
+                    .iter()
+                    .zip(snapshot.turns.iter())
+                    .any(|(previous, next)| previous.message_id != next.message_id));
         let active_turn_changed = self.snapshot.active_turn != snapshot.active_turn;
         if reset {
             self.hovered_turn = None;
@@ -206,6 +212,50 @@ impl ConversationNavigationRail {
 impl Waku {
     // ── Transcript ─────────────────────────────────────────────────────────
 
+    /// The muted mark standing in while a task's detail hydrates. The pane
+    /// stays blank for [`LOADING_LOGO_DELAY`] past the hydration's start — a
+    /// load that finishes faster never flashes chrome, and a long-running
+    /// hydration selected late shows the mark on its first frame — then the
+    /// logo breathes on the shared pulse clock. A navigation that exhausted
+    /// its grace period reveals the mark immediately. The parked clock under
+    /// reduce-motion holds the pulse's midpoint, and the armed reveal timer
+    /// still unhides it on schedule.
+    fn render_loading_task_mark(
+        &mut self,
+        session_id: Uuid,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let started = self
+            .session_hydrations
+            .since(session_id)
+            .unwrap_or_else(Instant::now);
+        if self.task_loading_reveal != Some((session_id, started)) {
+            self.task_loading_reveal = Some((session_id, started));
+            if let Some(delay) = LOADING_LOGO_DELAY.checked_sub(started.elapsed()) {
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(delay).await;
+                    let _ = this.update(cx, |_, cx| cx.notify());
+                })
+                .detach();
+            }
+        }
+        let color = theme.text_tertiary;
+        let show_loading = self
+            .pending_session_activation
+            .is_some_and(|pending| pending.session_id == session_id && pending.show_loading);
+        motion::pulse(LOADING_LOGO_FLASH_PERIOD, move |phase| {
+            if !show_loading && started.elapsed() < LOADING_LOGO_DELAY {
+                div().into_any_element()
+            } else {
+                goddard_logo_tinted(color)
+                    .opacity(pulsating_between(0.3, 1.0)(phase))
+                    .into_any_element()
+            }
+        })
+        .into_any_element()
+    }
+
     pub(super) fn transcript_control_focus(
         &self,
         key: impl Into<String>,
@@ -225,57 +275,46 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if let Some(session_id) = self
-            .selected_session()
+            .transcript_session()
             .filter(|session| !session.detail_loaded)
             .map(|session| session.id)
         {
-            let loading = self.session_hydrations.contains(session_id);
+            if !self.session_hydrations.contains(session_id) {
+                // A catalog or runtime update can invalidate detail after
+                // navigation. The facade must start a read even when no
+                // activation is pending; defer it outside the render lease.
+                let waku = cx.weak_entity();
+                cx.defer(move |cx| {
+                    let _ = waku.update(cx, |waku, cx| {
+                        waku.ensure_session_loaded(session_id, cx);
+                    });
+                });
+            }
             let theme = Theme::current(cx);
-            let focus = self.transcript_control_focus("hydrate-task-retry", cx);
             return div()
                 .size_full()
                 .flex()
                 .flex_col()
                 .items_center()
                 .justify_center()
-                .gap(px(12.0))
-                .text_size(sp(12.5))
-                .text_color(theme.text_secondary)
-                .child(if loading {
-                    tr!("sessions.loading")
-                } else {
-                    tr!("sessions.load_failed")
-                })
-                .when(!loading, |view| {
-                    view.child(
-                        div()
-                            .id("hydrate-task-retry")
-                            .track_focus(&focus)
-                            .tab_index(0)
-                            .rounded(px(6.0))
-                            .px(px(12.0))
-                            .py(px(6.0))
-                            .border(hairline())
-                            .border_color(theme.border_subtle)
-                            .focus_visible(|style| style.bg(theme.focus_highlight()))
-                            .hover(|style| style.bg(theme.overlay))
-                            .child(tr!("common.retry"))
-                            .on_activation(cx, move |this, _, cx| {
-                                this.ensure_session_loaded(session_id, cx);
-                                cx.notify();
-                            }),
-                    )
-                })
+                .child(self.render_loading_task_mark(session_id, &theme, cx))
                 .into_any_element();
         }
+        self.task_loading_reveal = None;
         self.begin_transcript_frame();
         self.prefetch_checkpoint_refs(cx);
         self.resolve_transcript_commit_refs(cx);
         self.sync_transcript_rows();
         self.load_boss_history_at_top(cx);
+        // Use this frame's completed layout, including the first open and
+        // resizes, so short windows fill without waiting for a scroll gesture.
+        let entity = cx.entity().downgrade();
+        window.on_next_frame(move |_, cx| {
+            let _ = entity.update(cx, |this, cx| this.load_transcript_history_at_top(cx));
+        });
         self.retire_fading_working_indicator(cx);
         self.retire_fading_queued_card(cx);
-        self.sync_transcript_layout_width(window);
+        self.sync_transcript_layout_width(chat_viewport_width);
         self.apply_pending_transcript_search_reveal(window, cx);
         self.apply_pending_transcript_match_reveal(window, cx);
         self.prune_transcript_annotations(cx);
@@ -287,6 +326,7 @@ impl Waku {
         let commit_popover = self.render_transcript_commit_popover(cx);
         let boss_lifecycle = self.render_boss_lifecycle_status(cx);
         let daemon_request = self.render_daemon_request(cx);
+        let employee_requests = self.render_employee_requests(window, cx);
         let transcript_rows = self.active_transcript_rows().clone();
         // A scrollbar drag owns the position for as long as it lasts, and the
         // bar writes offsets straight into the list rather than through its
@@ -381,21 +421,22 @@ impl Waku {
             let viewport_size = viewport_bounds.size;
             let navigation_turns = self.navigation_turns();
             let navigation_rail_visible = should_show_navigation_rail(
-                transcript_scrollable,
+                transcript_scrollable
+                    || self
+                        .transcript_session_id()
+                        .is_some_and(|id| self.session_transcript_is_partial(id)),
                 navigation_turns.len(),
                 chat_viewport_width,
             );
             let scroll_top_row = transcript_rows.logical_scroll_top().item_ix;
-            let turn_rows = navigation_turns
-                .iter()
-                .map(|turn| turn.row_index)
-                .collect::<Vec<_>>();
-            let active_turn = active_navigation_turn_index(
-                &turn_rows,
-                scroll_top_row,
-                !self.transcript_is_scrolled.get(),
-            )
-            .map(|index| navigation_turns[index].message_id);
+            let at_full_tail = !self.transcript_is_scrolled.get()
+                && self
+                    .transcript_session_id()
+                    .and_then(|id| self.transcript_views.get(&id))
+                    .is_none_or(|view| !view.has_more_after);
+            let active_turn = self
+                .active_navigation_turn(scroll_top_row, at_full_tail)
+                .map(|index| navigation_turns[index].message_id);
             let navigation_rail_snapshot = ConversationNavigationRailSnapshot {
                 visible: navigation_rail_visible,
                 turns: navigation_turns,
@@ -511,10 +552,12 @@ impl Waku {
                 let strip = [boss_lifecycle, daemon_request]
                     .into_iter()
                     .flatten()
+                    .chain(employee_requests)
                     .collect::<Vec<_>>();
                 (!strip.is_empty()).then(|| {
                     div()
                         .id("transcript-top-strip")
+                        .debug_selector(|| "transcript-top-strip".into())
                         .absolute()
                         .top(px(8.0))
                         .left_0()
@@ -552,12 +595,31 @@ impl Waku {
     /// row — scrolling and turn folds can never hide it — and it stays until
     /// the user answers or the daemon settles the request, whichever happens
     /// first.
-    fn render_daemon_request(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(super) fn render_daemon_request(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let session_id = self.attention_session_id()?;
         let permission = self
-            .selected_runtime()?
+            .attention_runtime()?
             .pending_daemon_request
             .as_ref()?
             .clone();
+        Some(
+            div()
+                .id("daemon-request-layer")
+                .child(self.daemon_request_card(session_id, &permission, None, cx))
+                .into_any_element(),
+        )
+    }
+
+    /// A daemon request's options card, shared by the selected session's
+    /// pinned request and a supervisor's inline employee card. Actions are
+    /// bound to the owning session and request id.
+    fn daemon_request_card(
+        &self,
+        session_id: Uuid,
+        permission: &PendingPermission,
+        attribution: Option<Div>,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
         let theme = Theme::current(cx);
         let request_id = permission.request_id.clone();
         // Escape answers with the first deny option — a real response, not
@@ -574,15 +636,24 @@ impl Waku {
             let option_id = option.id.clone();
             let allow = option.allow;
             let focus = self.transcript_control_focus(
-                format!("daemon-request-{}-{}", permission.request_id, option.id),
+                format!(
+                    "daemon-request-{session_id}-{}-{}",
+                    permission.request_id, option.id
+                ),
                 cx,
             );
             buttons = buttons.child(
                 div()
                     .id(SharedString::from(format!(
-                        "daemon-request-{}-{}",
+                        "daemon-request-{session_id}-{}-{}",
                         permission.request_id, option.id
                     )))
+                    .debug_selector(|| {
+                        format!(
+                            "daemon-option-{session_id}-{}-{}",
+                            permission.request_id, option.id
+                        )
+                    })
                     .track_focus(&focus)
                     .tab_index(0)
                     .h(px(28.0))
@@ -620,81 +691,239 @@ impl Waku {
                             .unwrap_or_else(|| option.label.clone()),
                     ))
                     .on_activation(cx, move |this, _, cx| {
-                        this.respond_daemon_request(request_id.clone(), option_id.clone(), cx);
+                        this.respond_daemon_request(
+                            session_id,
+                            request_id.clone(),
+                            option_id.clone(),
+                            cx,
+                        );
                     }),
             );
         }
         let deny_request_id = request_id.clone();
-        Some(
-            div()
-                .id("daemon-request-layer")
-                .child(
-                    div()
-                        .id("daemon-request")
-                        .w_full()
-                        .max_w(px(CONTENT_MAX_WIDTH))
-                        .mx_auto()
-                        .p(px(12.0))
-                        .rounded(px(15.0))
-                        .border(hairline())
-                        .border_color(theme.border_subtle)
-                        .bg(theme.raised)
-                        .shadow_md()
-                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                            if event.keystroke.key == "escape"
-                                && let Some(option_id) = deny_option.clone()
-                            {
-                                this.respond_daemon_request(deny_request_id.clone(), option_id, cx);
-                                cx.stop_propagation();
-                            }
-                        }))
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(8.0))
-                                .child(icon("icons/alert.svg", 13.0, theme.warning))
-                                .child(
-                                    div()
-                                        .text_size(sp(12.5))
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(theme.text)
-                                        .child(SharedString::from(
-                                            permission
-                                                .title_i18n
-                                                .as_ref()
-                                                .map(waku_client::WireTranslation::render)
-                                                .unwrap_or_else(|| permission.title.clone()),
-                                        )),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .id("daemon-request-detail")
-                                .mt(px(8.0))
-                                .max_h(px(92.0))
-                                .overflow_y_scroll()
-                                .p(px(8.0))
-                                .rounded(px(9.0))
-                                .bg(theme.inset)
-                                .font_family(crate::fonts::current(cx).code)
-                                .text_size(sp(12.5))
-                                .line_height(sp(16.0))
-                                .text_color(theme.text_secondary)
-                                .whitespace_normal()
-                                .child(SharedString::from(
-                                    permission
-                                        .detail_i18n
-                                        .as_ref()
-                                        .map(waku_client::WireTranslation::render)
-                                        .unwrap_or_else(|| permission.detail.clone()),
-                                )),
-                        )
-                        .child(buttons),
-                )
-                .into_any_element(),
+        div()
+            .id(SharedString::from(format!(
+                "daemon-request-{session_id}-{}",
+                permission.request_id
+            )))
+            .w_full()
+            .max_w(px(CONTENT_MAX_WIDTH))
+            .mx_auto()
+            .p(px(12.0))
+            .rounded(px(15.0))
+            .border(hairline())
+            .border_color(theme.border_subtle)
+            .bg(theme.raised)
+            .shadow_md()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key == "escape"
+                    && let Some(option_id) = deny_option.clone()
+                {
+                    this.respond_daemon_request(session_id, deny_request_id.clone(), option_id, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .children(attribution)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(icon("icons/alert.svg", 13.0, theme.warning))
+                    .child(
+                        div()
+                            .text_size(sp(12.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(SharedString::from(
+                                permission
+                                    .title_i18n
+                                    .as_ref()
+                                    .map(waku_client::WireTranslation::render)
+                                    .unwrap_or_else(|| permission.title.clone()),
+                            )),
+                    ),
+            )
+            .child(
+                div()
+                    .id(SharedString::from(format!(
+                        "daemon-request-detail-{session_id}-{}",
+                        permission.request_id
+                    )))
+                    .mt(px(8.0))
+                    .max_h(px(92.0))
+                    .overflow_y_scroll()
+                    .p(px(8.0))
+                    .rounded(px(9.0))
+                    .bg(theme.inset)
+                    .font_family(crate::fonts::current(cx).code)
+                    .text_size(sp(12.5))
+                    .line_height(sp(16.0))
+                    .text_color(theme.text_secondary)
+                    .whitespace_normal()
+                    .child(SharedString::from(
+                        permission
+                            .detail_i18n
+                            .as_ref()
+                            .map(waku_client::WireTranslation::render)
+                            .unwrap_or_else(|| permission.detail.clone()),
+                    )),
+            )
+            .child(buttons)
+    }
+
+    /// The free-text field an employee question card edits, created lazily
+    /// per session — the shared `user_input_answer` belongs to the selected
+    /// session's card, so each employee's mounts its own.
+    fn employee_answer_input(
+        &mut self,
+        session_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<TextInput> {
+        if let Some(input) = self.employee_input_answers.get(&session_id) {
+            return input.clone();
+        }
+        let input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .accessibility_label(tr!("a11y.answer"))
+                .placeholder(tr!("user_input.other_placeholder"))
+        });
+        cx.subscribe(
+            &input,
+            move |this: &mut Self, input, event: &InputEvent, cx| match event {
+                InputEvent::Submit(answer) => {
+                    this.submit_user_input_custom_answer(session_id, answer.clone(), cx);
+                }
+                InputEvent::Edited => {
+                    let answer = input.read(cx).content().to_owned();
+                    this.update_user_input_custom_answer(session_id, answer, cx);
+                }
+                InputEvent::Focus
+                | InputEvent::BackspaceOnEmpty
+                | InputEvent::InlineAtomClicked(_)
+                | InputEvent::InlineAtomActivated(_) => {}
+            },
         )
+        .detach();
+        self.employee_input_answers
+            .insert(session_id, input.clone());
+        input
+    }
+
+    /// Pending approvals an employee's supervisor can answer without
+    /// leaving this transcript — rendered as pinned overlay cards like the
+    /// daemon request, so an ask never hides behind a scroll position or a
+    /// task switch. Each card names its employee and binds its actions to
+    /// the employee session's own runtime, so the answer resolves the
+    /// original request wherever it was raised.
+    pub(super) fn render_employee_requests(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let Some(selected) = self.transcript_session_id() else {
+            return Vec::new();
+        };
+        // Answer fields for requests that settled or vanished go with them.
+        let keep: HashSet<Uuid> = self
+            .employee_input_answers
+            .keys()
+            .copied()
+            .filter(|session_id| {
+                self.runtimes
+                    .get(session_id)
+                    .is_some_and(|runtime| runtime.pending_user_input.is_some())
+            })
+            .collect();
+        self.employee_input_answers
+            .retain(|session_id, _| keep.contains(session_id));
+        // Every live roster entry supervised by the session on screen.
+        // `resolve_boss_chat_session` follows a boss rotation so an
+        // employee summoned by a retired chat still reports to its
+        // replacement.
+        let mut employees: Vec<(Uuid, String, String)> = Vec::new();
+        let mut seen = HashSet::new();
+        for state in self.boss_ui.states.values() {
+            for employee in &state.employees {
+                if employee.expired()
+                    || !seen.insert(employee.session_id)
+                    || self.resolve_boss_chat_session(employee.supervisor_id) != selected
+                {
+                    continue;
+                }
+                employees.push((
+                    employee.session_id,
+                    employee.identity.name.clone(),
+                    employee.job_title.clone(),
+                ));
+            }
+        }
+        let mut cards: Vec<AnyElement> = Vec::new();
+        for (session_id, name, job_title) in employees {
+            let Some(runtime) = self.runtimes.get(&session_id) else {
+                continue;
+            };
+            let daemon = runtime.pending_daemon_request.clone();
+            // One interactive card per employee — the same precedence the
+            // session's own composer lane gives a pending question, a
+            // computer approval, then a provider permission.
+            enum Primary {
+                Questions(PendingUserInput),
+                Computer(PendingComputerApproval),
+                Permission(PendingPermission),
+            }
+            let primary = runtime
+                .pending_user_input
+                .clone()
+                .map(Primary::Questions)
+                .or_else(|| {
+                    runtime
+                        .pending_computer_approval
+                        .clone()
+                        .map(Primary::Computer)
+                })
+                .or_else(|| runtime.pending_permission.clone().map(Primary::Permission));
+            if daemon.is_none() && primary.is_none() {
+                continue;
+            }
+            if let Some(permission) = daemon {
+                let attribution = self.employee_attribution(&name, &job_title, cx);
+                cards.push(
+                    self.daemon_request_card(session_id, &permission, Some(attribution), cx)
+                        .into_any_element(),
+                );
+            }
+            let Some(primary) = primary else {
+                continue;
+            };
+            let attribution = self.employee_attribution(&name, &job_title, cx);
+            let card = match primary {
+                Primary::Questions(pending) => {
+                    let input = self.employee_answer_input(session_id, window, cx);
+                    self.render_user_input(session_id, pending, input, Some(attribution), cx)
+                        .into_any_element()
+                }
+                Primary::Computer(pending) => self
+                    .render_computer_permission(session_id, &pending, Some(attribution), cx)
+                    .into_any_element(),
+                Primary::Permission(pending) => self
+                    .permission_request_card(session_id, &pending, Some(attribution), cx)
+                    .into_any_element(),
+            };
+            // The card floats over transcript rows — keep its clicks out of
+            // the selection surface the way the daemon request does.
+            cards.push(
+                div()
+                    .id(SharedString::from(format!("employee-request-{session_id}")))
+                    .debug_selector(|| format!("employee-request-{session_id}"))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(card)
+                    .into_any_element(),
+            );
+        }
+        cards
     }
 
     /// The Boss chat's lifecycle banner — a transcript-top overlay like
@@ -704,7 +933,7 @@ impl Waku {
     /// handoff worth reporting.
     fn render_boss_lifecycle_status(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         use waku_protocol::boss::{BossOperation, BossRotationPhase};
-        let session_id = self.state.selected_session?;
+        let session_id = self.transcript_session_id()?;
         let (key, status) = self.boss_ui.states.iter().find_map(|(key, state)| {
             if state.session_id != Some(session_id) {
                 return None;
@@ -852,6 +1081,17 @@ impl Waku {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.big_picture.rush_session_id().is_some() {
+            if let Some(item) = self
+                .transcript_selection
+                .selection
+                .borrow()
+                .clipboard_item()
+            {
+                cx.write_to_clipboard(item);
+            }
+            return;
+        }
         let reviewing_diff = self.right_panel_visible
             && self
                 .right_panel_active_surface
@@ -880,6 +1120,7 @@ impl Waku {
                     })
                     .flatten()
             })
+            .map(ClipboardItem::new_string)
             .or_else(|| {
                 // The visible lane's registry — its rows paint into a
                 // separate selection state from the session column's.
@@ -890,7 +1131,7 @@ impl Waku {
                         }
                         _ => None,
                     })
-                    .and_then(|view| view.selection.selection.borrow().selected_text())
+                    .and_then(|view| view.selection.selection.borrow().clipboard_item())
             })
             .or_else(|| {
                 // The scratchpad owns the column while it's up — its
@@ -898,23 +1139,66 @@ impl Waku {
                 self.voice_scratchpad_visible()
                     .then(|| {
                         self.selected_voice_scratchpad().and_then(|scratchpad| {
-                            scratchpad.selection.selection.borrow().clipboard_text()
+                            scratchpad.selection.selection.borrow().clipboard_item()
                         })
                     })
                     .flatten()
             })
-            .or_else(|| self.toast_selection.selection.borrow().selected_text())
-            .or_else(|| self.skills_selection.selection.borrow().selected_text())
+            .or_else(|| self.toast_selection.selection.borrow().clipboard_item())
+            .or_else(|| self.skills_selection.selection.borrow().clipboard_item())
             .or_else(|| {
                 self.transcript_selection
                     .selection
                     .borrow()
-                    .clipboard_text()
+                    .clipboard_item()
             });
         match selected {
-            Some(text) => cx.write_to_clipboard(ClipboardItem::new_string(text)),
+            Some(item) => cx.write_to_clipboard(item),
             None => cx.propagate(),
         }
+    }
+
+    /// Shared chip links and clipboard payloads for every user-message surface.
+    pub(super) fn message_atom_markdown_ctx<'a>(
+        &self,
+        ctx: md::render::Ctx<'a>,
+        message: &Message,
+        cx: &Context<Self>,
+    ) -> md::render::Ctx<'a> {
+        if message.role != MessageRole::User || message.atoms.is_empty() {
+            return ctx;
+        }
+        let atoms = Rc::new(message.atoms.clone());
+        let tooltip_atoms = atoms.clone();
+        let message_id = message.id;
+        let waku = cx.entity().downgrade();
+        let links = self.markdown_link_handler.clone();
+        ctx.with_pasted_text_payloads(atoms.clone())
+            .with_link_handler(Rc::new(move |url, window, cx| {
+                if let Some(index) = url.strip_prefix(md::render::PASTED_TEXT_LINK_PREFIX) {
+                    if let Some((index, atom)) = index
+                        .parse::<usize>()
+                        .ok()
+                        .and_then(|index| atoms.get(index).map(|atom| (index, atom)))
+                    {
+                        let _ = waku.update(cx, |this, cx| {
+                            this.open_sent_pasted_text(message_id, index, atom.payload.clone(), cx);
+                        });
+                    }
+                } else {
+                    links(url, window, cx);
+                }
+            }))
+            .with_link_tooltip(Rc::new(move |url, window, cx| {
+                let index = url
+                    .strip_prefix(md::render::PASTED_TEXT_LINK_PREFIX)?
+                    .parse::<usize>()
+                    .ok()?;
+                let atom = tooltip_atoms.get(index)?;
+                Some(composer::pasted_text_tooltip(
+                    composer::pasted_text_preview(&atom.payload).into(),
+                )(window, cx))
+            }))
     }
 
     /// A full-size canvas that installs the frame's selection mouse listeners.
@@ -1317,22 +1601,47 @@ impl ConversationNavigationRail {
 
 impl Waku {
     pub(super) fn scroll_to_navigation_turn(&mut self, message_id: Uuid, cx: &mut Context<Self>) {
-        let row_index = self
+        let target = self
             .navigation_turns()
             .iter()
             .find(|turn| turn.message_id == message_id)
-            .map(|turn| turn.row_index);
-        let Some(row_index) = row_index else {
-            return;
-        };
-
-        self.transcript_anchor_following.set(false);
-        self.active_transcript_rows().scroll_to(ListOffset {
-            item_ix: row_index,
-            offset_in_item: Pixels::ZERO,
-        });
-        self.transcript_is_scrolled.set(true);
-        cx.notify();
+            .cloned();
+        let Some(target) = target else { return };
+        if let Some(id) = self.transcript_session_id()
+            && let Some(view) = self.transcript_views.get_mut(&id)
+        {
+            view.navigation_request = None;
+        }
+        if let Some(row_index) = target.row_index {
+            self.transcript_anchor_following.set(false);
+            self.active_transcript_rows().scroll_to(ListOffset {
+                item_ix: row_index,
+                offset_in_item: Pixels::ZERO,
+            });
+            self.transcript_is_scrolled.set(true);
+            cx.notify();
+        } else if let Some(session_id) = self
+            .transcript_session()
+            .filter(|session| {
+                session
+                    .messages
+                    .iter()
+                    .any(|message| message.id == message_id)
+            })
+            .map(|session| session.id)
+        {
+            self.reveal_transcript_match(
+                &PendingTranscriptMatch {
+                    session_id,
+                    message_id,
+                    query: String::new(),
+                },
+                cx,
+            );
+            cx.notify();
+        } else {
+            self.load_navigation_turn(message_id, cx);
+        }
     }
 
     /// ⌘⌥↑: land on the turn boundary above the scroll top.
@@ -1347,17 +1656,28 @@ impl Waku {
         }
         self.sync_transcript_rows();
         let turns = self.navigation_turns();
-        let turn_rows = turns.iter().map(|turn| turn.row_index).collect::<Vec<_>>();
-        let scroll_top = self.active_transcript_rows().logical_scroll_top();
-        let Some(target) = previous_navigation_turn_index(
-            &turn_rows,
-            scroll_top.item_ix,
-            scroll_top.offset_in_item == Pixels::ZERO,
-        ) else {
+        let scroll = self.active_transcript_rows().logical_scroll_top();
+        let Some(active) = self.active_navigation_turn(scroll.item_ix, false) else {
             return;
         };
-        let message_id = turns[target].message_id;
-        self.scroll_to_navigation_turn(message_id, cx);
+        let target = if turns.iter().all(|turn| turn.row_index.is_some()) {
+            previous_navigation_turn_index(
+                &turns
+                    .iter()
+                    .filter_map(|turn| turn.row_index)
+                    .collect::<Vec<_>>(),
+                scroll.item_ix,
+                scroll.offset_in_item == Pixels::ZERO,
+            )
+            .unwrap_or(active)
+        } else if turns[active].row_index == Some(scroll.item_ix)
+            && scroll.offset_in_item == Pixels::ZERO
+        {
+            active.saturating_sub(1)
+        } else {
+            active
+        };
+        self.scroll_to_navigation_turn(turns[target].message_id, cx);
     }
 
     /// ⌘⌥↓: the first turn boundary below the scroll top, or the pinned
@@ -1373,17 +1693,32 @@ impl Waku {
         }
         self.sync_transcript_rows();
         let turns = self.navigation_turns();
-        let scroll_top_row = self.active_transcript_rows().logical_scroll_top().item_ix;
-        let target = next_navigation_turn_index(
-            &turns.iter().map(|turn| turn.row_index).collect::<Vec<_>>(),
-            scroll_top_row,
-        );
-        match target {
-            Some(index) => {
-                let message_id = turns[index].message_id;
-                self.scroll_to_navigation_turn(message_id, cx);
-            }
-            None => self.scroll_transcript_to_bottom(cx),
+        let scroll = self.active_transcript_rows().logical_scroll_top();
+        let target = if turns.iter().all(|turn| turn.row_index.is_some()) {
+            next_navigation_turn_index(
+                &turns
+                    .iter()
+                    .filter_map(|turn| turn.row_index)
+                    .collect::<Vec<_>>(),
+                scroll.item_ix,
+            )
+        } else {
+            self.active_navigation_turn(scroll.item_ix, false)
+                .map(|active| {
+                    if turns[active]
+                        .row_index
+                        .is_some_and(|row| row > scroll.item_ix)
+                    {
+                        active
+                    } else {
+                        active + 1
+                    }
+                })
+        };
+        if let Some(turn) = target.and_then(|index| turns.get(index)) {
+            self.scroll_to_navigation_turn(turn.message_id, cx);
+        } else {
+            self.scroll_transcript_to_bottom(cx);
         }
     }
 
@@ -1433,7 +1768,7 @@ impl Waku {
             cx.notify();
             return;
         }
-        if self.state.selected_session != Some(session_id) {
+        if self.transcript_session_id() != Some(session_id) {
             let Some(view) = self.side_chat_views.get_mut(&session_id) else {
                 return;
             };
@@ -1469,7 +1804,7 @@ impl Waku {
                 .transcript_blocks
                 .iter()
                 .position(|block| block.activities.iter().any(|activity| activity.id == id))
-        } else if self.state.selected_session == Some(session_id) {
+        } else if self.transcript_session_id() == Some(session_id) {
             self.selected_transcript_blocks()
                 .iter()
                 .position(|block| block.activities.iter().any(|activity| activity.id == id))
@@ -1506,7 +1841,7 @@ impl Waku {
             cx.notify();
             return;
         }
-        if self.state.selected_session != Some(session_id) {
+        if self.transcript_session_id() != Some(session_id) {
             self.expanded_activity_items.insert(id, !current);
             if current {
                 self.activity_diffs.borrow_mut().remove(&id);
@@ -1527,6 +1862,23 @@ impl Waku {
             cx.notify();
             return;
         }
+        // Opening an activity on a windowed session schedules its lazy field
+        // reads — the head clip already renders, the range read fills the
+        // rest. Collected ahead because the closure cannot borrow `cx`.
+        let lazy_fields: Vec<_> = if current {
+            Vec::new()
+        } else {
+            self.transcript_views
+                .get(&session_id)
+                .map(|view| {
+                    view.payloads
+                        .keys()
+                        .filter(|(entry_id, _)| *entry_id == id)
+                        .map(|(_, field)| *field)
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
         self.toggle_block_disclosure(block_index, cx, |this| {
             this.expanded_activity_items.insert(id, !current);
             if current {
@@ -1537,6 +1889,9 @@ impl Waku {
                 this.activity_diff_viewports.borrow_mut().remove(&id);
             }
         });
+        for field in lazy_fields {
+            self.ensure_transcript_payload(session_id, id, field, cx);
+        }
     }
 
     /// Opens a file a tool changed in the right panel's viewer.
@@ -1706,7 +2061,7 @@ impl Waku {
     /// cache which retained turn counts have one. The rewind affordance
     /// appears once the result lands and notifies.
     fn prefetch_checkpoint_refs(&self, cx: &mut Context<Self>) {
-        let Some(session) = self.selected_session() else {
+        let Some(session) = self.transcript_session() else {
             return;
         };
         let generation = self.checkpoint_ref_generation.get();
@@ -1964,6 +2319,18 @@ impl Waku {
             Some(TranscriptRowKind::BossHistoryBoundary(id)) => {
                 return self.render_boss_history_boundary(id, cx);
             }
+            Some(TranscriptRowKind::HistoryBoundary) => {
+                let Some(session_id) = self.transcript_session_id() else {
+                    return div().into_any_element();
+                };
+                return self.render_transcript_history_boundary(session_id, false, cx);
+            }
+            Some(TranscriptRowKind::FutureBoundary) => {
+                let Some(session_id) = self.transcript_session_id() else {
+                    return div().into_any_element();
+                };
+                return self.render_transcript_history_boundary(session_id, true, cx);
+            }
             Some(TranscriptRowKind::BossHistory(id, row)) => {
                 let Some(entry) = self.boss_history_session(id) else {
                     return div().into_any_element();
@@ -2043,26 +2410,43 @@ impl Waku {
             .transcript_display_session()
             .and_then(|session| response_row_turn_id(session, kind));
         let inner = match kind {
-            TranscriptRowKind::BossHistory(..) | TranscriptRowKind::BossHistoryBoundary(_) => {
-                div().into_any_element()
-            }
-            TranscriptRowKind::Message(message_index) => self
+            TranscriptRowKind::BossHistory(..)
+            | TranscriptRowKind::BossHistoryBoundary(_)
+            | TranscriptRowKind::HistoryBoundary
+            | TranscriptRowKind::FutureBoundary => div().into_any_element(),
+            TranscriptRowKind::Message(_) | TranscriptRowKind::PendingPrompt(_) => self
                 .transcript_display_session()
                 .and_then(|session| {
-                    session
-                        .messages
-                        .get(message_index)
-                        .cloned()
-                        .map(|message| (message, session.provider))
+                    let message_index = match kind {
+                        TranscriptRowKind::Message(index) => Some(index),
+                        _ => None,
+                    };
+                    let message = self.transcript_prompt_message(session, kind)?;
+                    Some((message.clone(), message_index, session.provider))
                 })
-                .map(|(message, provider)| {
+                .map(|(message, message_index, provider)| {
+                    if self
+                        .landing_operations
+                        .get(&message.id)
+                        .is_some_and(|entry| entry.operation.transcript_session.is_some())
+                        || self.git_panel_operation.as_ref().is_some_and(|op| {
+                            op.id == message.id
+                                && op.pending == git_panel::GitPanelPending::Landing
+                                && op.transcript_session.is_some()
+                        })
+                    {
+                        return self.render_landing_status(message.id, &message.content, cx);
+                    }
                     let display_content = super::transcript::display_message_content(&message);
                     let copied = self.copied_message_feedback.contains_key(&message.id);
-                    let (assistant_footer_copy_content, assistant_footer_time) =
-                        self.assistant_response_footer_cached(message_index);
-                    let assistant_message_action =
-                        self.assistant_message_action_for_message(message_index);
-                    let user_message_action = self.user_message_action_for_message(message_index);
+                    let (assistant_footer_copy_content, assistant_footer_time) = message_index
+                        .map_or((None, None), |index| {
+                            self.assistant_response_footer_cached(index)
+                        });
+                    let assistant_message_action = message_index
+                        .and_then(|index| self.assistant_message_action_for_message(index));
+                    let user_message_action =
+                        message_index.and_then(|index| self.user_message_action_for_message(index));
                     let message_edit_input = user_message_action.and_then(|action| {
                         self.message_edit
                             .as_ref()
@@ -2099,8 +2483,7 @@ impl Waku {
                         })
                         .collect();
                     let attachments_can_reveal = !self
-                        .state
-                        .selected_session
+                        .transcript_session_id()
                         .is_some_and(|id| self.is_remote_session(id));
                     let menu = self.menu_handle(format!("message-{}", message.id), cx);
                     let user_message_viewport = (message.role == MessageRole::User).then(|| {
@@ -2154,46 +2537,7 @@ impl Waku {
                         .with_commit_refs(
                             message.role == MessageRole::Assistant || message.notice.is_some(),
                         );
-                    if message.role == MessageRole::User && !message.atoms.is_empty() {
-                        let atoms = Rc::new(message.atoms.clone());
-                        let tooltip_atoms = atoms.clone();
-                        let message_id = message.id;
-                        let waku = cx.entity().downgrade();
-                        let links = self.markdown_link_handler.clone();
-                        ctx = ctx
-                            .with_link_handler(Rc::new(move |url, window, cx| {
-                                if let Some(index) =
-                                    url.strip_prefix(md::render::PASTED_TEXT_LINK_PREFIX)
-                                {
-                                    if let Some((index, atom)) =
-                                        index.parse::<usize>().ok().and_then(|index| {
-                                            atoms.get(index).map(|atom| (index, atom))
-                                        })
-                                    {
-                                        let _ = waku.update(cx, |this, cx| {
-                                            this.open_sent_pasted_text(
-                                                message_id,
-                                                index,
-                                                atom.payload.clone(),
-                                                cx,
-                                            );
-                                        });
-                                    }
-                                } else {
-                                    links(url, window, cx);
-                                }
-                            }))
-                            .with_link_tooltip(Rc::new(move |url, window, cx| {
-                                let index = url
-                                    .strip_prefix(md::render::PASTED_TEXT_LINK_PREFIX)?
-                                    .parse::<usize>()
-                                    .ok()?;
-                                let atom = tooltip_atoms.get(index)?;
-                                Some(composer::pasted_text_tooltip(
-                                    composer::pasted_text_preview(&atom.payload).into(),
-                                )(window, cx))
-                            }));
-                    }
+                    ctx = self.message_atom_markdown_ctx(ctx, &message, cx);
                     if message.role == MessageRole::Assistant {
                         ctx = ctx.with_reference_context(message.turn_id.and_then(|turn| {
                             self.transcript_reference_contexts
@@ -2205,7 +2549,7 @@ impl Waku {
                     if message.role == MessageRole::User {
                         ctx = ctx
                             .with_file_link_root(
-                                self.selected_workspace_path()
+                                self.transcript_workspace_path()
                                     .map(std::path::Path::to_path_buf),
                             )
                             // Tables in a user bubble fade into its raised fill,
@@ -2220,7 +2564,7 @@ impl Waku {
                     // just without the bare-name matching.
                     ctx = ctx.with_mention_glyphs(self.mention_glyphs());
                     if let Some(key) = self
-                        .boss_chat_key()
+                        .transcript_boss_chat_key()
                         .or_else(|| self.selected_surface_boss_key())
                     {
                         let (mentions, avatars) = self.boss_session_mentions(key);
@@ -2238,8 +2582,9 @@ impl Waku {
                         .history_render_session
                         .get()
                         .is_none()
-                        .then(|| self.transcript_search_highlights(message_index))
+                        .then_some(message_index)
                         .flatten()
+                        .and_then(|index| self.transcript_search_highlights(index))
                     {
                         ctx = ctx.with_search_highlights(highlights);
                     }
@@ -2393,6 +2738,14 @@ impl Waku {
             TranscriptRowKind::BossTrigger(anchor) => {
                 self.render_boss_trigger_row(anchor, &theme, cx)
             }
+            TranscriptRowKind::CounselRecommendation(id) => {
+                let session_id = self.transcript_display_session().map(|session| session.id);
+                session_id
+                    .map(|session_id| {
+                        self.render_counsel_recommendation_row(session_id, id, &theme, window, cx)
+                    })
+                    .unwrap_or_else(|| div().into_any_element())
+            }
         };
         let new_content_dot = self
             .transcript_new_content_dot
@@ -2457,7 +2810,7 @@ impl Waku {
             .as_ref()
             .filter(|flash| {
                 flash.armed_at.elapsed() < transcript_search::MATCH_FLASH_FADE
-                    && self.state.selected_session == Some(flash.session_id)
+                    && self.transcript_session_id() == Some(flash.session_id)
                     && !cx.reduce_motion()
                     && matches!(kind, TranscriptRowKind::Message(row_message) if row_message == flash.message_index)
                     && self
@@ -2536,7 +2889,7 @@ impl Waku {
         turn_id: Uuid,
         message_index: usize,
         theme: &Theme,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let session = self.transcript_display_session();
@@ -2566,25 +2919,23 @@ impl Waku {
         let force_visible = self
             .hovered_response_row
             .is_some_and(|(hovered_turn_id, _)| hovered_turn_id == turn_id);
-        if let Some(markers) = self.render_status_marker_row(turn_id, theme) {
-            column = column.child(div().w_full().mb(px(3.0)).child(markers));
-        }
+        let footer = render_message_footer(
+            theme,
+            &message,
+            footer_time.unwrap_or(message.created_at),
+            copy_content,
+            copied,
+            self.state.show_response_token_speed,
+            group_name,
+            force_visible,
+            false,
+            action,
+            None,
+            self.message_voice_briefing_footer(message.id),
+            cx.entity().downgrade(),
+        );
         column
-            .child(render_message_footer(
-                theme,
-                &message,
-                footer_time.unwrap_or(message.created_at),
-                copy_content,
-                copied,
-                self.state.show_response_token_speed,
-                group_name,
-                force_visible,
-                false,
-                action,
-                None,
-                self.message_voice_briefing_footer(message.id),
-                cx.entity().downgrade(),
-            ))
+            .child(self.render_status_marker_footer(turn_id, footer, theme, window, cx))
             .into_any_element()
     }
 
@@ -2694,7 +3045,7 @@ impl Waku {
     }
 
     fn remeasure_notice_message(&self, message_id: Uuid) {
-        if let Some(message_index) = self.selected_session().and_then(|session| {
+        if let Some(message_index) = self.transcript_session().and_then(|session| {
             session
                 .messages
                 .iter()
@@ -2702,7 +3053,7 @@ impl Waku {
         }) {
             self.remeasure_transcript_message(message_index);
         } else if let Some(history) = self
-            .boss_chat_key()
+            .transcript_boss_chat_key()
             .and_then(|key| self.boss_ui.chat_history.get(&key))
         {
             if let Some((id, index)) = history.sessions.iter().find_map(|(id, entry)| {
@@ -2890,7 +3241,7 @@ impl Waku {
             return;
         };
         let Some(project_path) = self
-            .selected_workspace_path()
+            .transcript_workspace_path()
             .map(std::path::Path::to_path_buf)
         else {
             return;
@@ -3802,26 +4153,11 @@ impl Waku {
     /// the turn settles into its "Worked for N" fold, then lingers for a
     /// [`WORKING_INDICATOR_FADE_OUT`] fade rather than a jump cut.
     fn render_working_indicator_row(&self, theme: &Theme) -> AnyElement {
-        let session = self.selected_session();
+        let session = self.transcript_session();
         let fade = self
             .working_indicator_fade
             .get()
             .filter(|fade| session.is_some_and(|session| session.id == fade.session_id));
-        let elapsed = session
-            .and_then(|session| session.turns.last())
-            .map(|turn| {
-                if fade.is_some() {
-                    // The turn already settled; hold the label at its final
-                    // duration for the fade.
-                    turn.completed_at.unwrap_or_else(unix_time)
-                } else if turn.status == TurnStatus::Running {
-                    unix_time()
-                } else {
-                    turn.started_at
-                }
-                .saturating_sub(turn.started_at)
-            })
-            .unwrap_or(0);
         // A sandboxed launch spends its Connecting window building the guest;
         // name that work instead of the ordinary working/routing labels.
         let setup = session
@@ -3830,7 +4166,10 @@ impl Waku {
         // A parked turn is waiting on detached work, not working; a
         // submission still preparing reads as its live stage — workspace,
         // checkpoint, routing, or provider start — not connecting.
-        let label = if let Some(status) = setup {
+        let label = if session.is_some_and(|session| self.transcript_prompt_is_sending(session.id))
+        {
+            tr!("transcript.sending_prompt")
+        } else if let Some(status) = setup {
             match status {
                 crate::model::SandboxSetupStatus::DownloadingImage => {
                     tr!("sandbox.setup_downloading")
@@ -3847,26 +4186,13 @@ impl Waku {
                 ),
                 crate::model::SandboxSetupStatus::Ready => unreachable!("cleared on store"),
             }
-        } else if session.is_some_and(|session| session.status == SessionStatus::Background) {
-            tr!("transcript.waiting_background")
-        } else if session.is_some_and(|session| {
-            session.status == SessionStatus::Connecting
-                && session.auto_route
-                && session.route_decision.is_none()
-        }) {
-            match session
-                .and_then(|session| self.submission_stages.get(&session.id))
-                .map(|slot| SubmissionStage::current(slot))
-            {
-                Some(SubmissionStage::Checkpoint) => tr!("routing.checkpoint"),
-                Some(SubmissionStage::Routing) => tr!("routing.in_progress"),
-                Some(SubmissionStage::Starting) => tr!("composer.starting_agent"),
-                _ => tr!("routing.workspace"),
-            }
         } else {
-            tr!(
-                "transcript.working_for",
-                duration = format_working_elapsed(elapsed)
+            working_indicator_label(
+                session,
+                session
+                    .and_then(|session| self.submission_stages.get(&session.id))
+                    .map(|slot| SubmissionStage::current(slot)),
+                unix_time(),
             )
         };
         let row = div()
@@ -3904,7 +4230,7 @@ impl Waku {
         let fade = self
             .queued_card_fade
             .get()
-            .filter(|fade| Some(fade.session_id) == self.state.selected_session);
+            .filter(|fade| Some(fade.session_id) == self.transcript_session_id());
         let card = self.queued_employee_card();
         let (phase, headline, secondary, session_id, key) = match (card, fade) {
             (Some(card), _) => (
@@ -4311,14 +4637,19 @@ impl Waku {
         });
         let expanded = if let Some(entry) = self.boss_history_session(session_id) {
             entry.expanded_blocks.get(&block_index).copied()
-        } else if self.state.selected_session == Some(session_id) {
+        } else if self.transcript_session_id() == Some(session_id) {
             self.activities_expanded.get(&block_index).copied()
         } else {
             self.side_chat_views
                 .get(&session_id)
                 .and_then(|view| view.expanded_activity_blocks.get(&block_index).copied())
         }
-        .unwrap_or(live_group);
+        .unwrap_or_else(|| {
+            live_group
+                || activities
+                    .iter()
+                    .any(|activity| activity.tool_name.as_deref() == Some("image_gen"))
+        });
         let live_reasoning_id = (self
             .runtimes
             .get(&session_id)
@@ -4502,11 +4833,11 @@ impl Waku {
                 || !sections.is_empty()
                 || shows_diff;
             let item_expanded = has_detail
-                && self
-                    .expanded_activity_items
-                    .get(&id)
-                    .copied()
-                    .unwrap_or(reasoning_live);
+                && self.expanded_activity_items.get(&id).copied().unwrap_or(
+                    reasoning_live
+                        || (activity.tool_name.as_deref() == Some("image_gen")
+                            && !activity.image_urls.is_empty()),
+                );
             let item_focus = self.transcript_control_focus(format!("activity-item-{id}"), cx);
             let mut item = div()
                 .w_full()
@@ -4944,7 +5275,9 @@ impl Waku {
                     detail_card = detail_card.child(section_view);
                 }
                 for (image_index, image_url) in activity.image_urls.iter().enumerate() {
-                    let image = self.image_for_reference(image_url, None, None, cx);
+                    let daemon_path =
+                        session.and_then(|session| self.workspace_path_for_session(session));
+                    let image = self.image_for_reference(image_url, daemon_path, None, cx);
                     detail_card = detail_card.child(render_activity_image(
                         image_url,
                         image,
@@ -5208,7 +5541,7 @@ impl Waku {
             "memory-card-{owner_session}-{}-{}",
             card.bucket_id, card.note_id
         );
-        let selection = if self.state.selected_session == Some(owner_session)
+        let selection = if self.transcript_session_id() == Some(owner_session)
             || self.boss_history_session(owner_session).is_some()
         {
             self.transcript_selection.clone()
@@ -5278,7 +5611,7 @@ impl Waku {
             owner: cx.entity_id(),
             toggle: Rc::new(move |_, cx| {
                 let _ = toggle_waku.update(cx, |this, cx| {
-                    if this.state.selected_session == Some(owner_session)
+                    if this.transcript_session_id() == Some(owner_session)
                         || this.boss_history_session(owner_session).is_some()
                     {
                         this.pin_transcript_for_disclosure();
@@ -5313,7 +5646,7 @@ impl Waku {
             }) {
                 self.remeasure_transcript_rows(row..row + 1);
             }
-        } else if self.state.selected_session == Some(session_id) {
+        } else if self.transcript_session_id() == Some(session_id) {
             self.remeasure_transcript_block(block_index);
         } else if let Some(view) = self.side_chat_views.get(&session_id)
             && let Some(row) = view
@@ -5896,7 +6229,7 @@ mod navigation_rail_scroll_tests {
                 .map(|index| TranscriptNavigationTurn {
                     message_id: Uuid::new_v4(),
                     message_index: index,
-                    row_index: index,
+                    row_index: Some(index),
                     prompt: format!("Prompt {index}"),
                     response: String::new(),
                 })

@@ -28,6 +28,11 @@ export type AgentSession = { id: string,
  */
 metadata_revision?: number,
 /**
+ * Daemon-owned history lineage. A destructive rewind advances it so
+ * projections captured before that rewind cannot replace its result.
+ */
+history_generation?: number,
+/**
  * A title explicitly chosen by the user. [`Self::DEFAULT_TITLE`] means
  * no explicit title has been set, so [`Self::auto_title`] may be shown.
  */
@@ -36,7 +41,12 @@ title: string,
  * Best-effort title supplied by the provider, or derived locally from the
  * first prompt until the provider reports a better one.
  */
-auto_title?: string | null, project_id: string,
+auto_title?: string | null,
+/**
+ * The automatic title is still the replaceable first-prompt placeholder.
+ * Missing on older records: conservatively preserve their existing title.
+ */
+auto_title_is_prompt?: boolean, project_id: string,
 /**
  * Local project checkout or an isolated Git worktree for this task.
  */
@@ -70,7 +80,11 @@ workspace_move?: WorkspaceMove | null,
  * parent's right panel, and deleted when the parent is archived or
  * removed.
  */
-side_chat_of?: string | null, provider: ProviderKind, model?: string | null,
+side_chat_of?: string | null, provider: ProviderKind,
+/**
+ * Older Antigravity tasks ran in the desktop terminal. New tasks use ACP.
+ */
+antigravity_acp?: boolean, model?: string | null,
 /**
  * A same-provider model change to note after this session's next visible
  * user prompt. Kept pending so choosing a model alone doesn't add a row.
@@ -94,11 +108,10 @@ sandboxed?: boolean, reasoning_effort?: string | null, service_tier?: string | n
  */
 context_window?: string | null,
 /**
- * The runtime-confirmed activation the `provider`/`model`/
- * `reasoning_effort` fields reflect, once a stable-runtime
- * `ConfigActivated` fact has been applied. Daemon-owned and merged
- * forward only: a stale activation or a client save that never saw it
- * cannot resurrect a superseded selection or lower the mark.
+ * The latest runtime-confirmed activation applied from stable replay.
+ * Selected provider/options remain user-owned metadata. This separate
+ * daemon-owned mark merges forward only for replay deduplication;
+ * provider facts cannot replace the selected settings.
  * `None` for sessions no runtime has confirmed.
  */
 config_activation?: ConfigActivation | null,
@@ -209,10 +222,10 @@ planning?: SessionPlanning | null, provider_cursor: ProviderResumeCursor | null,
  */
 suspended_provider_sessions?: Array<SuspendedProviderSession>,
 /**
- * Compacted context staged by a provider switch, prepended to the next
- * outbound prompt and then cleared — the same one-shot delivery
- * `workspace_moved_from` uses. Persisted so a quit between the switch
- * and the next prompt does not lose it.
+ * Context staged by a provider switch or incoming friend delivery,
+ * prepended to the next outbound prompt and then cleared — the same
+ * one-shot delivery `workspace_moved_from` uses. Persisted so a quit
+ * before the next prompt does not lose it.
  */
 pending_provider_context?: string | null,
 /**

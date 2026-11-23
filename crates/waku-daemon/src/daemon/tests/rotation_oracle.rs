@@ -8,6 +8,91 @@ use waku_boss::rotation_oracle::{
     RotationObservation,
 };
 
+#[cfg(unix)]
+#[test]
+fn boss_preparation_keeps_the_native_enqueue_gate_available_to_stop() {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    for steering in [false, true] {
+        let root = std::env::temp_dir().join(format!("boss-enqueue-gate-{}", Uuid::new_v4()));
+        let (backend, _) = surface_test_backend(&root);
+        let boss = rotation_boss(&backend);
+        let capture = Arc::new(CaptureDriver::default());
+        let driver = backend.boss_driver_boundary(
+            boss,
+            Uuid::new_v4(),
+            DriverHandle::from_control(capture.clone()),
+        );
+        let journal = backend.boss_journal_path();
+        let _ = std::fs::remove_file(&journal);
+        let path = std::ffi::CString::new(journal.as_os_str().as_encoded_bytes()).unwrap();
+        // SAFETY: the FIFO is inside this test's unique owned data directory.
+        assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+        let entered = Arc::new(AtomicBool::new(false));
+        let stopped = Arc::new(AtomicBool::new(false));
+        let worker_entered = entered.clone();
+        let worker_stopped = stopped.clone();
+        let worker = std::thread::spawn(move || {
+            let gate = |enqueue: &mut dyn FnMut()| {
+                worker_entered.store(true, Ordering::Release);
+                anyhow::ensure!(
+                    !worker_stopped.load(Ordering::Acquire),
+                    "stopped before enqueue"
+                );
+                enqueue();
+                Ok(())
+            };
+            if steering {
+                driver.steer_with_gate("context after preparation".into(), &gate)
+            } else {
+                driver.prompt_with_gate("prompt after preparation".into(), Vec::new(), &gate)
+            }
+        });
+        // Opening a nonblocking writer succeeds only once the real ownership
+        // reader has opened the FIFO. Keep it empty to hold that file read.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut release = loop {
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .custom_flags(libc::O_NONBLOCK)
+                .open(&journal)
+            {
+                Ok(writer) => break writer,
+                Err(error)
+                    if error.raw_os_error() == Some(libc::ENXIO)
+                        && std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+                Err(error) => panic!("ownership reader did not reach the held file: {error}"),
+            }
+        };
+        let gate_held_during_preparation = entered.load(Ordering::Acquire);
+        stopped.store(true, Ordering::Release);
+        let bytes =
+            serde_json::to_vec(&waku_boss::boss_rotation::RotationJournal::default()).unwrap();
+        release.write_all(&bytes).unwrap();
+        drop(release);
+        let result = worker.join().unwrap();
+        std::fs::remove_file(&journal).unwrap();
+        std::fs::write(&journal, bytes).unwrap();
+        let sent = capture.prompts.lock().len() + capture.steers.lock().len();
+        drop(backend);
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(
+            !gate_held_during_preparation,
+            "ownership file I/O held the native enqueue gate"
+        );
+        assert!(
+            result.is_err(),
+            "the stopped input was sent after preparation"
+        );
+        assert_eq!(sent, 0);
+    }
+}
+
 fn install_rotation_observer(backend: &WakuBackend) -> Arc<Mutex<Vec<RotationObservation>>> {
     let observations = Arc::new(Mutex::new(Vec::new()));
     let sink = observations.clone();
@@ -22,6 +107,8 @@ fn boss_runtime(backend: &WakuBackend, session_id: Uuid, runtime_id: Uuid) -> Ar
     backend.sessions.lock().insert(
         session_id,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id,
             driver: backend.boss_driver_boundary(
@@ -81,6 +168,7 @@ fn frozen_boss_admission_fails_closed_and_human_input_stays_queued() {
                 session_id: boss,
                 runtime_id: runtime,
                 command: Command::Prompt {
+                    runtime_mode: None,
                     prompt: "continue the coordinated work".into(),
                     turn_id: None,
                     message_id: None,
@@ -928,6 +1016,7 @@ fn ordinary_boss_and_planning_chat_deliver_prompts_without_claiming_qualificatio
                     session_id: session,
                     runtime_id: runtime,
                     command: Command::Prompt {
+                        runtime_mode: None,
                         prompt: "continue coordinated work".into(),
                         turn_id: None,
                         message_id: Some(message_id),
@@ -1421,6 +1510,7 @@ fn compaction_upgrade_recovers_unsubmitted_checkpoints_but_retains_unknown_attem
                     session_id: old,
                     runtime_id: Uuid::nil(),
                     command: Command::Prompt {
+                        runtime_mode: None,
                         prompt: "preserve this human message".into(),
                         turn_id: None,
                         message_id: Some(queued),

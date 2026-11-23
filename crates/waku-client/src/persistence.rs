@@ -644,6 +644,10 @@ fn default_code_font_size() -> f32 {
     DEFAULT_CODE_FONT_SIZE
 }
 
+fn default_recent_transcript_limit() -> usize {
+    3
+}
+
 fn default_render_math() -> bool {
     true
 }
@@ -721,6 +725,10 @@ fn resolve_last_environment(
 
 fn default_completion_sound_volume() -> f32 {
     DEFAULT_COMPLETION_SOUND_VOLUME
+}
+
+fn default_prefer_starred_when_nothing_unread() -> bool {
+    true
 }
 
 fn default_starred_completion_sound() -> bool {
@@ -1043,7 +1051,7 @@ fn collect_composer_draft_changes(
     }
 }
 
-/// A draft the user explicitly parked out of a composer, listed on the
+/// A draft parked from a composer or recovered after an offline send, listed on the
 /// Drafts page until it is used or deleted. Unlike the automatic
 /// per-composer draft — which belongs to a session's slot and silently
 /// reappears there — a saved draft is named user data with its own
@@ -1117,6 +1125,7 @@ pub enum PersistedSidebarGroup {
     /// State files predate the rename — the stored token stays `bundles`.
     #[serde(rename = "bundles")]
     Deliverables,
+    Rushed,
 }
 
 /// A virtualized list's logical scroll position — row index plus the pixel
@@ -1371,6 +1380,12 @@ impl GitHubFeatures {
 pub struct AppSettings {
     pub analytics_enabled: bool,
     pub favorite_models: Vec<FavoriteModel>,
+    /// Auto routing occupies this slot in the combined favorite order.
+    #[serde(default)]
+    pub auto_favorite_position: Option<usize>,
+    /// Last configured/enabled state; preserves an explicit unstar across restarts.
+    #[serde(default)]
+    pub auto_favorite_eligible: bool,
     pub theme: ThemeSettings,
     pub language: AppLanguage,
     /// Base text size for the interface, in pixels: chrome and prose are
@@ -1397,6 +1412,10 @@ pub struct AppSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code_font_family: Option<String>,
     pub render_math: bool,
+    /// Most recently visited desktop transcripts retained, including the current task.
+    /// Zero disables retention of previously visited tasks.
+    #[serde(default = "default_recent_transcript_limit")]
+    pub recent_transcript_limit: usize,
     /// Append an estimated "N tok/s" readout to settled response footers.
     pub show_response_token_speed: bool,
     /// Last reading speed selected in the transient speed reader.
@@ -1533,6 +1552,9 @@ pub struct AppSettings {
     /// unread elsewhere leads. Off keeps the star leading inside each
     /// attention tier only.
     pub starred_idle_before_unseen: bool,
+    /// Prefer starred projects in the idle rotation after fresh attention is drained.
+    #[serde(default = "default_prefer_starred_when_nothing_unread")]
+    pub prefer_starred_when_nothing_unread: bool,
     /// User-owned terminal commands surfaced in the command palette.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom_commands: Vec<CustomCommand>,
@@ -1592,9 +1614,16 @@ pub struct AppSettings {
     /// distinct approved models on the same provider. Off by default,
     /// including debug builds.
     pub phase_routing_enabled: bool,
+    /// Allow Jev to rewrite automatic task titles. Off by default.
+    #[serde(default)]
+    pub title_rewrites_enabled: bool,
     /// Desktop-owned overrides for the fixed suggested-prompt actions.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub suggested_prompts: BTreeMap<String, String>,
+    #[serde(default)]
+    pub suggested_prompt_labels: BTreeMap<String, String>,
+    #[serde(default)]
+    pub suggested_prompt_conditions: BTreeMap<String, String>,
     /// Action id -> minimum Jev probability (80–100). Presence is opt-in.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub automatic_suggested_actions: BTreeMap<String, u8>,
@@ -1717,6 +1746,8 @@ impl Default for AppSettings {
         Self {
             analytics_enabled: default_analytics_enabled(),
             favorite_models: Vec::new(),
+            auto_favorite_position: None,
+            auto_favorite_eligible: false,
             theme: ThemeSettings::default(),
             language: AppLanguage::default(),
             ui_font_size: DEFAULT_UI_FONT_SIZE,
@@ -1725,6 +1756,7 @@ impl Default for AppSettings {
             ui_font_family: None,
             code_font_family: None,
             render_math: true,
+            recent_transcript_limit: default_recent_transcript_limit(),
             show_response_token_speed: false,
             speed_reader_wpm: default_speed_reader_wpm(),
             sync_with_merge: false,
@@ -1767,6 +1799,7 @@ impl Default for AppSettings {
             notify_waiting_input: default_notification_enabled(),
             starred_completion_sound: true,
             starred_idle_before_unseen: false,
+            prefer_starred_when_nothing_unread: true,
             custom_commands: Vec::new(),
             big_picture_enabled: default_experiment_enabled(),
             git_panel_enabled: default_experiment_enabled(),
@@ -1782,7 +1815,10 @@ impl Default for AppSettings {
             action_predictions_enabled: true,
             move_fast_break_things: false,
             phase_routing_enabled: false,
+            title_rewrites_enabled: false,
             suggested_prompts: BTreeMap::new(),
+            suggested_prompt_labels: BTreeMap::new(),
+            suggested_prompt_conditions: BTreeMap::new(),
             automatic_suggested_actions: BTreeMap::new(),
             disabled_suggested_actions: BTreeSet::new(),
             automations_enabled: default_experiment_enabled(),
@@ -1946,6 +1982,8 @@ struct AppState {
     qa_configs: HashMap<Uuid, waku_protocol::workspace::QaConfig>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     qa_sessions: HashMap<Uuid, QaSessionRecord>,
+    #[serde(default, skip_serializing_if = "HashSet::is_empty")]
+    qa_session_ids: HashSet<Uuid>,
     app_state_version: u32,
     #[serde(default = "Uuid::new_v4")]
     analytics_id: Uuid,
@@ -1961,6 +1999,8 @@ struct AppState {
     recent_sessions: Vec<Uuid>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     recent_project_scripts: Vec<RecentProjectScript>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    mention_uses: HashMap<Uuid, HashMap<String, u64>>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     new_task_project_uses: HashMap<Uuid, NewTaskProjectUse>,
     /// Replies the voice briefing already played, so a restart does not
@@ -2111,10 +2151,30 @@ struct AppState {
     /// Drafts parked from a composer via "Create draft", newest first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     saved_drafts: Vec<SavedDraft>,
+    /// Local recovery copies of remote submissions not yet confirmed started.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    remote_submission_drafts: Vec<SavedDraft>,
     /// Payloads a composer submitted, newest first, capped by the app — the
     /// "Restore recent prompt" menu's source.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     recent_prompts: Vec<ComposerDraft>,
+}
+
+impl AppState {
+    /// Recover each interrupted send independently. A crash may have happened
+    /// after delivery, so expose drafts for review instead of replaying them.
+    fn recover_remote_submission_drafts(&mut self) -> bool {
+        if self.remote_submission_drafts.is_empty() {
+            return false;
+        }
+        let mut known: HashSet<_> = self.saved_drafts.iter().map(|draft| draft.id).collect();
+        for draft in self.remote_submission_drafts.drain(..) {
+            if known.insert(draft.id) {
+                self.saved_drafts.insert(0, draft);
+            }
+        }
+        true
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -2123,6 +2183,10 @@ pub struct PersistedState {
     pub qa_configs: HashMap<Uuid, waku_protocol::workspace::QaConfig>,
     #[serde(default)]
     pub qa_sessions: HashMap<Uuid, QaSessionRecord>,
+    /// All QA conversations, including finished reviews whose checkout record
+    /// has been removed. Keep them out of the main window's task history.
+    #[serde(default)]
+    pub qa_session_ids: HashSet<Uuid>,
     pub version: u32,
     #[serde(default = "Uuid::new_v4")]
     pub analytics_id: Uuid,
@@ -2145,6 +2209,11 @@ pub struct PersistedState {
     /// Project scripts run from the command palette, newest first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recent_project_scripts: Vec<RecentProjectScript>,
+    /// Accepted @ suggestions, keyed by project and stable mention identity.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub mention_uses: HashMap<Uuid, HashMap<String, u64>>,
+    #[serde(skip)]
+    pub mention_uses_revision: u64,
     /// Explicit new-task picker choices, with a 30-day frequency half-life.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub new_task_project_uses: HashMap<Uuid, NewTaskProjectUse>,
@@ -2204,6 +2273,12 @@ pub struct PersistedState {
     pub project_worktree_bases: HashMap<Uuid, String>,
     #[serde(default)]
     pub favorite_models: Vec<FavoriteModel>,
+    /// Auto routing occupies this slot in the combined favorite order.
+    #[serde(default)]
+    pub auto_favorite_position: Option<usize>,
+    /// Last configured/enabled state; preserves an explicit unstar across restarts.
+    #[serde(default)]
+    pub auto_favorite_eligible: bool,
     #[serde(default)]
     pub theme: ThemeSettings,
     #[serde(default)]
@@ -2225,6 +2300,10 @@ pub struct PersistedState {
     pub code_font_family: Option<String>,
     #[serde(default = "default_render_math")]
     pub render_math: bool,
+    /// Most recently visited desktop transcripts retained, including the current task.
+    /// Zero disables retention of previously visited tasks.
+    #[serde(default = "default_recent_transcript_limit")]
+    pub recent_transcript_limit: usize,
     /// Append an estimated "N tok/s" readout to settled response footers.
     #[serde(default)]
     pub show_response_token_speed: bool,
@@ -2376,6 +2455,9 @@ pub struct PersistedState {
     /// projects' unseen completions.
     #[serde(default)]
     pub starred_idle_before_unseen: bool,
+    /// Prefer starred projects in the idle rotation after fresh attention is drained.
+    #[serde(default = "default_prefer_starred_when_nothing_unread")]
+    pub prefer_starred_when_nothing_unread: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom_commands: Vec<CustomCommand>,
     /// Experimental feature opt-ins from the Experiments settings page —
@@ -2424,6 +2506,10 @@ pub struct PersistedState {
     #[serde(default)]
     pub suggested_prompts: BTreeMap<String, String>,
     #[serde(default)]
+    pub suggested_prompt_labels: BTreeMap<String, String>,
+    #[serde(default)]
+    pub suggested_prompt_conditions: BTreeMap<String, String>,
+    #[serde(default)]
     pub automatic_suggested_actions: BTreeMap<String, u8>,
     /// Suggested-action ids switched off in Settings — they cannot surface
     /// as chips or run automatically.
@@ -2431,6 +2517,9 @@ pub struct PersistedState {
     pub disabled_suggested_actions: BTreeSet<String>,
     #[serde(default)]
     pub phase_routing_enabled: bool,
+    /// Allow Jev to rewrite automatic task titles. Off by default.
+    #[serde(default)]
+    pub title_rewrites_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
     pub automations_enabled: bool,
     #[serde(default = "default_experiment_enabled")]
@@ -2618,6 +2707,10 @@ pub struct PersistedState {
     /// App-local — they persist through `AppState`, not the daemon.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub saved_drafts: Vec<SavedDraft>,
+    /// Recovery copies of offline remote sends, keyed by their message id.
+    /// App-local; never shipped to the remote daemon. Incognito is excluded.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub remote_submission_drafts: Vec<SavedDraft>,
     /// Payloads a composer submitted, newest first — the "Restore recent
     /// prompt" menu's source. App-local like `saved_drafts`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2655,6 +2748,12 @@ pub struct PersistedState {
     /// Experimental Boss surface and daemon feature flag, mirrored from the daemon.
     #[serde(default = "default_experiment_enabled")]
     pub boss_experiment_enabled: bool,
+    /// Experimental Counsel surface and daemon feature flag, mirrored from
+    /// the daemon. Counsel rides on the Boss experiment — both flags must
+    /// be on — and unlike Boss it defaults off in every build, development
+    /// included.
+    #[serde(default)]
+    pub counsel_experiment_enabled: bool,
     /// Daemon-owned Boss rotation policy mirrored for the settings UI.
     #[serde(default)]
     pub boss_rotation_disabled: bool,
@@ -2838,6 +2937,7 @@ impl PersistedState {
         Self {
             qa_configs: HashMap::new(),
             qa_sessions: HashMap::new(),
+            qa_session_ids: HashSet::new(),
             version: STATE_VERSION,
             analytics_id: Uuid::new_v4(),
             analytics_enabled: true,
@@ -2848,6 +2948,8 @@ impl PersistedState {
             unseen_completions: HashMap::new(),
             recent_sessions: Vec::new(),
             recent_project_scripts: Vec::new(),
+            mention_uses: HashMap::new(),
+            mention_uses_revision: 0,
             new_task_project_uses: HashMap::new(),
             briefed_messages: Vec::new(),
             last_provider: ProviderKind::Codex,
@@ -2867,6 +2969,8 @@ impl PersistedState {
             project_workspaces: HashMap::new(),
             project_worktree_bases: HashMap::new(),
             favorite_models: Vec::new(),
+            auto_favorite_position: None,
+            auto_favorite_eligible: false,
             theme: ThemeSettings::default(),
             language: AppLanguage::default(),
             ui_font_size: DEFAULT_UI_FONT_SIZE,
@@ -2875,6 +2979,7 @@ impl PersistedState {
             ui_font_family: None,
             code_font_family: None,
             render_math: true,
+            recent_transcript_limit: default_recent_transcript_limit(),
             show_response_token_speed: false,
             speed_reader_wpm: default_speed_reader_wpm(),
             sync_with_merge: false,
@@ -2917,6 +3022,7 @@ impl PersistedState {
             notify_waiting_input: default_notification_enabled(),
             starred_completion_sound: true,
             starred_idle_before_unseen: false,
+            prefer_starred_when_nothing_unread: true,
             custom_commands: Vec::new(),
             big_picture_enabled: default_experiment_enabled(),
             git_panel_enabled: default_experiment_enabled(),
@@ -2932,7 +3038,10 @@ impl PersistedState {
             action_predictions_enabled: true,
             move_fast_break_things: false,
             phase_routing_enabled: false,
+            title_rewrites_enabled: false,
             suggested_prompts: BTreeMap::new(),
+            suggested_prompt_labels: BTreeMap::new(),
+            suggested_prompt_conditions: BTreeMap::new(),
             automatic_suggested_actions: BTreeMap::new(),
             disabled_suggested_actions: BTreeSet::new(),
             automations_enabled: default_experiment_enabled(),
@@ -2998,6 +3107,7 @@ impl PersistedState {
             last_visible_terminal: None,
             right_panel_terminals: HashMap::new(),
             saved_drafts: Vec::new(),
+            remote_submission_drafts: Vec::new(),
             recent_prompts: Vec::new(),
             computer_use_enabled: false,
             computer_use_experiment_enabled: default_experiment_enabled(),
@@ -3010,6 +3120,7 @@ impl PersistedState {
             qa_branch: default_qa_branch(),
             subagents_enabled: default_experiment_enabled(),
             boss_experiment_enabled: default_experiment_enabled(),
+            counsel_experiment_enabled: false,
             boss_rotation_disabled: false,
             boss_rotation_context_threshold: default_boss_rotation_threshold(),
             employee_chat_search_days: default_employee_chat_search_days(),
@@ -3050,6 +3161,67 @@ impl PersistedState {
     /// `last_sandboxed` flag — read this instead of the field.
     pub fn last_environment(&self) -> SessionEnvironment {
         resolve_last_environment(self.last_environment, self.last_sandboxed)
+    }
+
+    /// Add Auto only on a transition into configured, enabled routing.
+    pub fn sync_auto_favorite(&mut self) -> bool {
+        let previous = (self.auto_favorite_position, self.auto_favorite_eligible);
+        let eligible = self.auto_model_routing() != AutoModelRouting::Disabled
+            && self
+                .eval
+                .as_ref()
+                .is_some_and(|eval| eval.ready(&self.inference));
+        if eligible && !self.auto_favorite_eligible && self.auto_favorite_position.is_none() {
+            self.auto_favorite_position = Some(self.favorite_models.len());
+        }
+        self.auto_favorite_eligible = eligible;
+        self.auto_favorite_position = self
+            .auto_favorite_position
+            .map(|p| p.min(self.favorite_models.len()));
+        previous != (self.auto_favorite_position, self.auto_favorite_eligible)
+    }
+
+    pub fn favorite_display_index(&self, concrete_index: usize) -> usize {
+        concrete_index
+            + usize::from(
+                self.auto_favorite_position
+                    .is_some_and(|p| p <= concrete_index),
+            )
+    }
+
+    pub fn favorite_concrete_index(&self, display_index: usize) -> Option<usize> {
+        match self.auto_favorite_position {
+            Some(p) if p == display_index => None,
+            Some(p) if p < display_index => Some(display_index - 1),
+            _ => Some(display_index),
+        }
+    }
+
+    /// Reorder the combined list without manufacturing a provider/model for Auto.
+    pub fn move_model_favorite(&mut self, from: usize, to: usize) {
+        let total = self.favorite_models.len() + usize::from(self.auto_favorite_position.is_some());
+        if from == to || from >= total || to >= total {
+            return;
+        }
+        if self.auto_favorite_position == Some(from) {
+            self.auto_favorite_position = Some(to);
+        } else {
+            let Some(index) = self.favorite_concrete_index(from) else {
+                return;
+            };
+            let favorite = self.favorite_models.remove(index);
+            if let Some(position) = self.auto_favorite_position.as_mut() {
+                if from < *position {
+                    *position -= 1;
+                }
+                if to <= *position {
+                    *position += 1;
+                }
+            }
+            let index = self.favorite_concrete_index(to).unwrap_or(to);
+            self.favorite_models
+                .insert(index.min(self.favorite_models.len()), favorite);
+        }
     }
 
     /// The effective Auto-routing mode — read this instead of the fields.
@@ -3265,6 +3437,18 @@ impl PersistedState {
             .map_or(0.0, |usage| usage.score_at(now))
     }
 
+    /// Count an accepted mention without wrapping a frequently used entry.
+    pub fn record_mention_use(&mut self, project_id: Uuid, key: String) {
+        let count = self
+            .mention_uses
+            .entry(project_id)
+            .or_default()
+            .entry(key)
+            .or_default();
+        *count = count.saturating_add(1);
+        self.mention_uses_revision = self.mention_uses_revision.wrapping_add(1);
+    }
+
     /// Records a script run, moving its project-scoped key to the front.
     pub fn record_project_script_use(&mut self, project_id: Uuid, key: &str) {
         self.recent_project_scripts
@@ -3317,6 +3501,7 @@ impl PersistedState {
             qa_branch: self.qa_branch.clone(),
             subagents_enabled: self.subagents_enabled,
             boss_experiment_enabled: self.boss_experiment_enabled,
+            counsel_experiment_enabled: self.counsel_experiment_enabled,
             boss_rotation_disabled: self.boss_rotation_disabled,
             boss_rotation_context_threshold: self.boss_rotation_context_threshold,
             employee_chat_search_days: self.employee_chat_search_days,
@@ -3357,6 +3542,7 @@ impl PersistedState {
         self.qa_branch = settings.qa_branch;
         self.subagents_enabled = settings.subagents_enabled;
         self.boss_experiment_enabled = settings.boss_experiment_enabled;
+        self.counsel_experiment_enabled = settings.counsel_experiment_enabled;
         self.boss_rotation_disabled = settings.boss_rotation_disabled;
         self.boss_rotation_context_threshold = settings.boss_rotation_context_threshold;
         self.employee_chat_search_days = settings.employee_chat_search_days;
@@ -3384,6 +3570,8 @@ impl PersistedState {
         AppSettings {
             analytics_enabled: self.analytics_enabled,
             favorite_models: self.favorite_models.clone(),
+            auto_favorite_position: self.auto_favorite_position,
+            auto_favorite_eligible: self.auto_favorite_eligible,
             theme: self.theme,
             language: self.language,
             ui_font_size: self.ui_font_size,
@@ -3392,6 +3580,7 @@ impl PersistedState {
             ui_font_family: self.ui_font_family.clone(),
             code_font_family: self.code_font_family.clone(),
             render_math: self.render_math,
+            recent_transcript_limit: self.recent_transcript_limit,
             show_response_token_speed: self.show_response_token_speed,
             speed_reader_wpm: self.speed_reader_wpm,
             sync_with_merge: self.sync_with_merge,
@@ -3434,6 +3623,7 @@ impl PersistedState {
             notify_waiting_input: self.notify_waiting_input,
             starred_completion_sound: self.starred_completion_sound,
             starred_idle_before_unseen: self.starred_idle_before_unseen,
+            prefer_starred_when_nothing_unread: self.prefer_starred_when_nothing_unread,
             custom_commands: self.custom_commands.clone(),
             big_picture_enabled: self.big_picture_enabled,
             git_panel_enabled: self.git_panel_enabled,
@@ -3451,7 +3641,10 @@ impl PersistedState {
             action_predictions_enabled: self.action_predictions_enabled,
             move_fast_break_things: self.move_fast_break_things,
             phase_routing_enabled: self.phase_routing_enabled,
+            title_rewrites_enabled: self.title_rewrites_enabled,
             suggested_prompts: self.suggested_prompts.clone(),
+            suggested_prompt_labels: self.suggested_prompt_labels.clone(),
+            suggested_prompt_conditions: self.suggested_prompt_conditions.clone(),
             automatic_suggested_actions: self.automatic_suggested_actions.clone(),
             disabled_suggested_actions: self.disabled_suggested_actions.clone(),
             automations_enabled: self.automations_enabled,
@@ -3494,6 +3687,7 @@ impl PersistedState {
         AppState {
             qa_configs: self.qa_configs.clone(),
             qa_sessions: self.qa_sessions.clone(),
+            qa_session_ids: self.qa_session_ids.clone(),
             app_state_version: APP_STATE_VERSION,
             analytics_id: self.analytics_id,
             selected_project: self.selected_project,
@@ -3501,6 +3695,7 @@ impl PersistedState {
             unseen_completions: self.unseen_completions.clone(),
             recent_sessions: self.recent_sessions.clone(),
             recent_project_scripts: self.recent_project_scripts.clone(),
+            mention_uses: self.mention_uses.clone(),
             new_task_project_uses: self.new_task_project_uses.clone(),
             briefed_messages: self.briefed_messages.clone(),
             last_provider: self.last_provider,
@@ -3551,6 +3746,18 @@ impl PersistedState {
             right_panel_terminals: self.right_panel_terminals.clone(),
             fullscreen_surface: None,
             saved_drafts: self.saved_drafts.clone(),
+            remote_submission_drafts: self
+                .remote_submission_drafts
+                .iter()
+                .filter(|draft| match draft.target {
+                    ComposerDraftTarget::Session { session_id } => !self
+                        .sessions
+                        .iter()
+                        .any(|session| session.id == session_id && session.incognito),
+                    _ => true,
+                })
+                .cloned()
+                .collect(),
             recent_prompts: self.recent_prompts.clone(),
         }
     }
@@ -3558,6 +3765,8 @@ impl PersistedState {
     fn apply_app_settings(&mut self, settings: AppSettings) {
         self.analytics_enabled = settings.analytics_enabled;
         self.favorite_models = settings.favorite_models;
+        self.auto_favorite_position = settings.auto_favorite_position;
+        self.auto_favorite_eligible = settings.auto_favorite_eligible;
         self.theme = settings.theme;
         self.language = settings.language;
         self.ui_font_size = sanitized_ui_font_size(settings.ui_font_size);
@@ -3571,6 +3780,7 @@ impl PersistedState {
         self.ui_font_family = sanitized_font_family(settings.ui_font_family);
         self.code_font_family = sanitized_font_family(settings.code_font_family);
         self.render_math = settings.render_math;
+        self.recent_transcript_limit = settings.recent_transcript_limit.min(100);
         self.show_response_token_speed = settings.show_response_token_speed;
         self.speed_reader_wpm = settings.speed_reader_wpm.clamp(100, 1200);
         self.sync_with_merge = settings.sync_with_merge;
@@ -3615,6 +3825,7 @@ impl PersistedState {
         self.notify_waiting_input = settings.notify_waiting_input;
         self.starred_completion_sound = settings.starred_completion_sound;
         self.starred_idle_before_unseen = settings.starred_idle_before_unseen;
+        self.prefer_starred_when_nothing_unread = settings.prefer_starred_when_nothing_unread;
         self.custom_commands = settings.custom_commands;
         self.big_picture_enabled = settings.big_picture_enabled;
         self.git_panel_enabled = settings.git_panel_enabled;
@@ -3630,7 +3841,10 @@ impl PersistedState {
         self.action_predictions_enabled = settings.action_predictions_enabled;
         self.move_fast_break_things = settings.move_fast_break_things;
         self.phase_routing_enabled = settings.phase_routing_enabled;
+        self.title_rewrites_enabled = settings.title_rewrites_enabled;
         self.suggested_prompts = settings.suggested_prompts;
+        self.suggested_prompt_labels = settings.suggested_prompt_labels;
+        self.suggested_prompt_conditions = settings.suggested_prompt_conditions;
         self.automatic_suggested_actions = settings
             .automatic_suggested_actions
             .into_iter()
@@ -3685,12 +3899,17 @@ impl PersistedState {
     fn apply_app_state(&mut self, app_state: AppState) {
         self.qa_configs = app_state.qa_configs;
         self.qa_sessions = app_state.qa_sessions;
+        self.qa_session_ids = app_state.qa_session_ids;
+        // Existing resumable reviews predate the retained identity set.
+        self.qa_session_ids.extend(self.qa_sessions.keys().copied());
         self.analytics_id = app_state.analytics_id;
         self.selected_project = app_state.selected_project;
         self.selected_session = app_state.selected_session;
         self.unseen_completions = app_state.unseen_completions;
         self.recent_sessions = app_state.recent_sessions;
         self.recent_project_scripts = app_state.recent_project_scripts;
+        self.mention_uses = app_state.mention_uses;
+        self.mention_uses_revision = self.mention_uses_revision.wrapping_add(1);
         self.new_task_project_uses = app_state.new_task_project_uses;
         self.briefed_messages = app_state.briefed_messages;
         self.last_provider = app_state.last_provider;
@@ -3779,7 +3998,36 @@ impl PersistedState {
                 .get_or_insert(fullscreen);
         }
         self.saved_drafts = app_state.saved_drafts;
+        self.remote_submission_drafts = app_state.remote_submission_drafts;
         self.recent_prompts = app_state.recent_prompts;
+    }
+
+    /// Retain a recovery copy until the provider has actually started its
+    /// matching message, rather than trusting a local optimistic transcript.
+    fn retire_started_remote_submission_drafts(&mut self) {
+        self.remote_submission_drafts.retain(|draft| {
+            let ComposerDraftTarget::Session { session_id } = draft.target else {
+                return true;
+            };
+            let Some(session) = self
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+            else {
+                return true;
+            };
+            let Some(message) = session
+                .messages
+                .iter()
+                .find(|message| message.id == draft.id)
+            else {
+                return true;
+            };
+            !session
+                .turns
+                .iter()
+                .any(|turn| Some(turn.id) == message.turn_id && turn.provider_turn_started)
+        });
     }
 
     fn persistable_selected_session(&self) -> Option<Uuid> {
@@ -4601,7 +4849,12 @@ impl StateStore {
         }
         let app_state = read_app_state_file(&self.app_state_path);
         let app_state_missing = app_state.is_none();
-        if let Some(app_state) = app_state {
+        if let Some(mut app_state) = app_state {
+            if app_state.recover_remote_submission_drafts() {
+                // Preserve the original UI snapshot: remote catalogs are not
+                // loaded yet, so rebuilding it from sessions can lose selection.
+                let _ = self.write_app_state(&app_state);
+            }
             state.apply_app_state(app_state);
         }
         state.migrate_loaded();
@@ -4657,12 +4910,24 @@ impl StateStore {
         Ok(Some(stored))
     }
 
+    /// Persist desktop preferences without writing session state to a daemon.
+    pub fn save_app_settings(&self, state: &PersistedState) -> io::Result<()> {
+        self.write_app_settings(&state.app_settings())
+    }
+
+    /// Checkpoint desktop state without contacting any daemon. Offline sends
+    /// must be on local disk before the app accepts them into its waiting queue.
+    pub fn save_app_state(&self, state: &PersistedState) -> io::Result<()> {
+        self.write_app_state(&state.app_state())
+    }
+
     /// Partition the merged catalog back to its owning daemons: each receives
     /// only its own projects, live session ids, and dirty rows, so one
     /// daemon's data never lands in another's database. A daemon that rejects
     /// or is unreachable keeps its dirty ids queued for the next save while
     /// the rest still commit.
     pub fn save(&self, state: &mut PersistedState) -> io::Result<()> {
+        state.retire_started_remote_submission_drafts();
         self.write_app_settings(&state.app_settings())?;
         self.write_app_state(&state.app_state())?;
         if !self.task_state_loaded.load(Ordering::Acquire) {
@@ -4704,13 +4969,12 @@ impl StateStore {
             // Drafts stay local until their first prompt: a session that has
             // not started owns no daemon row, and shipping one would
             // catalogue it as a phantom "New task" skeleton in every client's
-            // next load. Archived employee shells are daemon-owned even before
-            // their first turn, so their archive flag must still be sent.
+            // next load. Managed shells already belong to the daemon before
+            // their first turn, so picker edits must still be sent.
             let mut prepared = Vec::new();
             for session in state.sessions.iter().filter(|session| {
                 dirty_ids.contains(&session.id)
-                    && (session.has_started()
-                        || (session.boss_managed && session.archived_at.is_some()))
+                    && (session.has_started() || session.boss_managed)
                     && owned(&session.id)
             }) {
                 let cursor = self.save_cursors.lock().get(&session.id).copied();
@@ -5298,6 +5562,31 @@ mod tests {
     }
 
     #[test]
+    fn recent_transcript_limit_defaults_and_persists_locally() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(defaults.recent_transcript_limit, 3);
+        let mut state = PersistedState::empty();
+        assert_eq!(state.recent_transcript_limit, 3);
+        state.recent_transcript_limit = 0;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["recent_transcript_limit"], 0);
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("recent_transcript_limit")
+                .is_none()
+        );
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert_eq!(restored.recent_transcript_limit, 0);
+        restored.apply_app_settings(AppSettings {
+            recent_transcript_limit: usize::MAX,
+            ..Default::default()
+        });
+        assert_eq!(restored.recent_transcript_limit, 100);
+    }
+
+    #[test]
     fn math_rendering_defaults_on_and_persists_as_an_app_preference() {
         let defaults: AppSettings = serde_json::from_str("{}").unwrap();
         assert!(defaults.render_math);
@@ -5753,6 +6042,20 @@ mod tests {
     }
 
     #[test]
+    fn title_rewrites_default_off_and_persist_as_a_setting() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(!defaults.title_rewrites_enabled);
+        let mut state = PersistedState::empty();
+        assert!(!state.title_rewrites_enabled);
+        state.title_rewrites_enabled = true;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["title_rewrites_enabled"], true);
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert!(restored.title_rewrites_enabled);
+    }
+
+    #[test]
     fn phase_routing_defaults_off_and_persists_as_a_setting() {
         let defaults: AppSettings = serde_json::from_str("{}").unwrap();
         assert!(!defaults.phase_routing_enabled);
@@ -5913,18 +6216,31 @@ mod tests {
             git::{CommitEntry, CreatedWorktree},
             workspace::{QaCheckout, QaConfig},
         };
+        let legacy: QaConfig =
+            serde_json::from_str(r#"{"devCommand":"bun dev","installCommand":"","branch":"dev"}"#)
+                .unwrap();
+        assert_eq!(legacy.provider, None);
+        assert_eq!(legacy.model, None);
         let project_id = Uuid::new_v4();
         let session_id = Uuid::new_v4();
         let config = QaConfig {
             dev_command: "pnpm dev".into(),
             install_command: "pnpm install --frozen-lockfile".into(),
             branch: "dev".into(),
+            provider: Some(ProviderKind::Claude),
+            model: Some("qa-test-model".into()),
+            primary_checkout: true,
+            dependencies_ready: true,
+            server_url: "http://localhost:3000".into(),
         };
         let record = QaSessionRecord {
             project_id,
             session_id,
             config: config.clone(),
             checkout: QaCheckout {
+                session_id: Some(session_id),
+                original_head: Some("original".into()),
+                original_branch: Some("refs/heads/dev".into()),
                 base_branch: "trunk".into(),
                 base_sha: "base".into(),
                 qa_branch: "dev".into(),
@@ -5958,11 +6274,32 @@ mod tests {
             "reviewed"
         );
         assert_eq!(restored.qa_sessions[&session_id].checkout.base_sha, "base");
+        assert_eq!(
+            restored.qa_sessions[&session_id]
+                .checkout
+                .original_head
+                .as_deref(),
+            Some("original")
+        );
+        assert_eq!(
+            restored.qa_sessions[&session_id].checkout.session_id,
+            Some(session_id)
+        );
         assert_eq!(restored.qa_sessions[&session_id].project_id, project_id);
         assert_eq!(restored.qa_sessions[&session_id].config, config);
+        assert!(restored.qa_session_ids.contains(&session_id));
+        // Ending a review drops the checkout record, but its conversation
+        // must stay hidden after the next app restart.
+        restored.qa_sessions.remove(&session_id);
+        let saved = serde_json::to_vec(&restored.app_state()).unwrap();
+        let mut finished = PersistedState::empty();
+        finished.apply_app_state(serde_json::from_slice(&saved).unwrap());
+        assert!(finished.qa_sessions.is_empty());
+        assert!(finished.qa_session_ids.contains(&session_id));
         let legacy: AppState = serde_json::from_str(r#"{"app_state_version":1}"#).unwrap();
         assert!(legacy.qa_configs.is_empty());
         assert!(legacy.qa_sessions.is_empty());
+        assert!(legacy.qa_session_ids.is_empty());
     }
 
     #[test]
@@ -6121,9 +6458,24 @@ mod tests {
             .disabled_suggested_actions
             .insert("fix-errors".to_owned());
 
+        state
+            .suggested_prompt_labels
+            .insert("run-tests".into(), "Test it".into());
+        state.suggested_prompt_conditions.insert(
+            "run-tests".into(),
+            "The changed behavior needs verification.".into(),
+        );
         let settings = serde_json::to_value(state.app_settings()).unwrap();
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert_eq!(
+            restored.suggested_prompt_labels,
+            state.suggested_prompt_labels
+        );
+        assert_eq!(
+            restored.suggested_prompt_conditions,
+            state.suggested_prompt_conditions
+        );
         assert_eq!(restored.suggested_prompts, state.suggested_prompts);
         assert_eq!(
             restored.automatic_suggested_actions,
@@ -6136,6 +6488,8 @@ mod tests {
 
         let legacy: AppSettings = serde_json::from_str("{}").unwrap();
         assert!(legacy.suggested_prompts.is_empty());
+        assert!(legacy.suggested_prompt_labels.is_empty());
+        assert!(legacy.suggested_prompt_conditions.is_empty());
         assert!(legacy.automatic_suggested_actions.is_empty());
         assert!(legacy.disabled_suggested_actions.is_empty());
 
@@ -6461,6 +6815,26 @@ mod tests {
     }
 
     #[test]
+    fn mention_frequency_is_project_scoped_and_survives_restart() {
+        let project = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        let mut state = PersistedState::empty();
+        state.record_mention_use(project, "file:README.md".into());
+        state.record_mention_use(project, "file:README.md".into());
+        state.record_mention_use(other, "file:README.md".into());
+        let mut saved = serde_json::to_value(state.app_state()).unwrap();
+        let mut restored = PersistedState::empty();
+        restored.apply_app_state(serde_json::from_value(saved.clone()).unwrap());
+        assert_eq!(restored.mention_uses[&project]["file:README.md"], 2);
+        assert_eq!(restored.mention_uses[&other]["file:README.md"], 1);
+        restored.record_mention_use(project, "file:README.md".into());
+        assert_eq!(restored.mention_uses[&project]["file:README.md"], 3);
+        saved.as_object_mut().unwrap().remove("mention_uses");
+        restored.apply_app_state(serde_json::from_value(saved).unwrap());
+        assert!(restored.mention_uses.is_empty());
+    }
+
+    #[test]
     fn project_script_recency_survives_an_app_state_round_trip() {
         let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
         let project_id = state.projects[0].id;
@@ -6634,6 +7008,102 @@ mod tests {
     }
 
     #[test]
+    fn starred_idle_priority_defaults_on_and_preserves_opt_out() {
+        let settings: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(settings.prefer_starred_when_nothing_unread);
+        let mut state = PersistedState::empty();
+        assert!(state.prefer_starred_when_nothing_unread);
+        state.prefer_starred_when_nothing_unread = false;
+        let settings =
+            serde_json::from_value(serde_json::to_value(state.app_settings()).unwrap()).unwrap();
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(settings);
+        assert!(!restored.prefer_starred_when_nothing_unread);
+
+        // Older persisted state lacks this field and must retain today's behavior.
+        let mut legacy = serde_json::to_value(PersistedState::empty()).unwrap();
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("prefer_starred_when_nothing_unread");
+        let restored: PersistedState = serde_json::from_value(legacy).unwrap();
+        assert!(restored.prefer_starred_when_nothing_unread);
+    }
+
+    #[test]
+    fn auto_favorite_preserves_unstar_until_routing_is_enabled_again() {
+        let mut state = PersistedState::empty();
+        state.favorite_models.push(FavoriteModel {
+            provider: ProviderKind::Codex,
+            model: "test-model".into(),
+            effort: None,
+            fast: false,
+        });
+        state.auto_model_routing = Some(AutoModelRouting::ShowInModelPicker);
+        state.sync_auto_favorite();
+        assert_eq!(state.auto_favorite_position, None);
+        state.eval = Some(waku_protocol::eval::EvalSettings::default());
+        state
+            .inference
+            .entry(waku_protocol::inference::InferenceProvider::TypeSafe)
+            .or_default()
+            .credential_configured = true;
+        state.sync_auto_favorite();
+        assert_eq!(state.auto_favorite_position, Some(1));
+        state.sync_auto_favorite();
+        assert_eq!(state.auto_favorite_position, Some(1));
+        state.auto_favorite_position = None;
+        let settings =
+            serde_json::from_value(serde_json::to_value(state.app_settings()).unwrap()).unwrap();
+        state.apply_app_settings(settings);
+        state.sync_auto_favorite();
+        assert_eq!(state.auto_favorite_position, None);
+        state.auto_model_routing = Some(AutoModelRouting::Disabled);
+        state.sync_auto_favorite();
+        state.auto_model_routing = Some(AutoModelRouting::ShowInModelPicker);
+        state.sync_auto_favorite();
+        assert_eq!(state.auto_favorite_position, Some(1));
+    }
+
+    #[test]
+    fn auto_favorite_reorders_with_concrete_models() {
+        let mut state = PersistedState::empty();
+        state.favorite_models = ["a", "b", "c"]
+            .map(|model| FavoriteModel {
+                provider: ProviderKind::Codex,
+                model: model.into(),
+                effort: None,
+                fast: false,
+            })
+            .to_vec();
+        state.auto_favorite_position = Some(3);
+        state.move_model_favorite(3, 1);
+        assert_eq!(state.auto_favorite_position, Some(1));
+        assert_eq!(state.favorite_display_index(1), 2);
+        assert_eq!(state.favorite_concrete_index(1), None);
+        state.move_model_favorite(3, 0);
+        assert_eq!(state.auto_favorite_position, Some(2));
+        assert_eq!(
+            state
+                .favorite_models
+                .iter()
+                .map(|m| m.model.as_str())
+                .collect::<Vec<_>>(),
+            ["c", "a", "b"]
+        );
+        state.move_model_favorite(0, 3);
+        assert_eq!(state.auto_favorite_position, Some(1));
+        assert_eq!(
+            state
+                .favorite_models
+                .iter()
+                .map(|m| m.model.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "b", "c"]
+        );
+    }
+
+    #[test]
     fn boss_deliverable_width_round_trips_separately_from_chat_width() {
         let mut state = PersistedState::empty();
         state.right_panel_width = 640.0;
@@ -6745,6 +7215,20 @@ mod tests {
         // A provider with no hosted environment falls back to the host.
         let session = state.new_session(Uuid::new_v4(), ProviderKind::Pi);
         assert_eq!(session.environment(), SessionEnvironment::Local);
+    }
+
+    #[test]
+    fn counsel_experiment_flag_defaults_off_and_mirrors_daemon_settings() {
+        // Counsel is opt-in in every build — an old document without the
+        // key and a fresh state alike default it off.
+        let state = PersistedState::empty();
+        assert!(!state.counsel_experiment_enabled);
+        assert!(!state.daemon_settings().counsel_experiment_enabled);
+
+        let mut mirror = PersistedState::empty();
+        mirror.counsel_experiment_enabled = true;
+        mirror.apply_daemon_settings(state.daemon_settings());
+        assert!(!mirror.counsel_experiment_enabled);
     }
 
     #[test]

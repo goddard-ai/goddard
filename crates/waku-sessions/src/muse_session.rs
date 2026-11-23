@@ -220,6 +220,7 @@ fn items_to_history(items: &[Value], visible_turn_limit: usize) -> ProviderSessi
                 turn_count: history.turns.len() + 1,
                 status: TurnStatus::Completed,
                 provider_turn_started: true,
+                provider_started_at: None,
                 provider_resume_at: None,
                 interruption: None,
                 started_at: 0,

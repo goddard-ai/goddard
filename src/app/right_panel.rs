@@ -40,7 +40,7 @@ pub(super) struct WorkingTreeEntry {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum TranscriptLinkRoute {
-    ProjectFile(String, Option<String>),
+    PanelFile(String, Option<String>),
     Finder(PathBuf),
     /// A `goddard://task/<id>` reference — `None` when the id is malformed.
     /// A `?message=<id>` query deep-links to that message's transcript row.
@@ -191,6 +191,69 @@ pub(super) fn markdown_file_link_path(target: &str) -> Option<PathBuf> {
     path.is_absolute().then_some(path)
 }
 
+fn markdown_preview_file_link(
+    source_path: &str,
+    target: &str,
+    workspace: Option<&Path>,
+) -> Option<(String, Option<(usize, usize)>, Option<String>)> {
+    if file_highlighter_language(source_path) != "markdown" {
+        return None;
+    }
+
+    let raw_target = target.trim();
+    let position = file_link_location(raw_target).map(|(line, column)| (line, column.unwrap_or(1)));
+    let fragment = raw_target.rsplit_once('#').map(|(_, fragment)| fragment);
+    let target = strip_file_location(raw_target);
+    let (path_target, _) = target.rsplit_once('#').unwrap_or((target, ""));
+    let path_target = path_target
+        .split_once('?')
+        .map_or(path_target, |(path, _)| path);
+    if path_target.is_empty() || path_target.starts_with("//") {
+        return None;
+    }
+
+    let linked_path = if path_target
+        .get(..5)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("file:"))
+    {
+        url::Url::parse(path_target).ok()?.to_file_path().ok()?
+    } else {
+        let path = Path::new(path_target);
+        if !path.is_absolute() && url::Url::parse(path_target).is_ok() {
+            return None;
+        }
+        PathBuf::from(percent_decode_file_path(path_target))
+    };
+    if file_highlighter_language(&linked_path.to_string_lossy()) != "markdown" {
+        return None;
+    }
+
+    let source_path = Path::new(source_path);
+    let source_path = if source_path.is_absolute() {
+        source_path.to_path_buf()
+    } else {
+        workspace?.join(source_path)
+    };
+    let linked_path = if linked_path.is_absolute() {
+        linked_path
+    } else {
+        source_path.parent()?.join(linked_path)
+    };
+    let source_path = normalized_path(&source_path);
+    let linked_path = normalized_path(&linked_path);
+    if source_path == linked_path {
+        return None;
+    }
+
+    let linked_path = workspace
+        .and_then(|workspace| workspace_relative_file_path(workspace, &linked_path))
+        .unwrap_or_else(|| linked_path.to_string_lossy().into_owned());
+    let heading = fragment
+        .filter(|fragment| !fragment.is_empty() && !line_fragment(fragment))
+        .map(percent_decode_file_path);
+    Some((linked_path, position, heading))
+}
+
 /// Provider references may name a file relative to their captured workspace.
 /// Keep this permissive parser scoped to those references; ordinary Markdown
 /// links still require an absolute file path before they enter the file route.
@@ -203,7 +266,7 @@ fn markdown_file_link_path_inner(target: &str) -> Option<PathBuf> {
     let target = target
         .rsplit_once('#')
         .filter(|(path, fragment)| {
-            !line_fragment(fragment) && path.to_ascii_lowercase().ends_with(".md")
+            !line_fragment(fragment) && file_highlighter_language(path) == "markdown"
         })
         .map_or(target, |(path, _)| path);
     if target
@@ -222,9 +285,7 @@ fn markdown_file_link_heading(target: &str) -> Option<String> {
         return None;
     }
     let path = markdown_file_link_path(path_target)?;
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
+    (file_highlighter_language(&path.to_string_lossy()) == "markdown")
         .then(|| percent_decode_file_path(fragment))
 }
 
@@ -331,7 +392,9 @@ fn transcript_link_route(target: &str, workspace: Option<&Path>) -> TranscriptLi
     if let Some(relative_path) =
         workspace.and_then(|workspace| workspace_relative_file_path(workspace, &path))
     {
-        TranscriptLinkRoute::ProjectFile(relative_path, heading)
+        TranscriptLinkRoute::PanelFile(relative_path, heading)
+    } else if file_highlighter_language(&path.to_string_lossy()) == "markdown" {
+        TranscriptLinkRoute::PanelFile(path.to_string_lossy().into_owned(), heading)
     } else {
         TranscriptLinkRoute::Finder(path)
     }
@@ -1318,14 +1381,14 @@ pub(super) fn transfer_file_is_previewable(path: &Path) -> bool {
     )
 }
 
-/// Stored deliverables use their own read root without re-rooting the
+/// Absolute file previews use their own read root without re-rooting the
 /// conversation's file tree. Workspace requests require a relative file name.
 fn panel_file_read_target(
     panel_root: Option<&Path>,
     file_path: &str,
     published_deliverable: bool,
 ) -> Option<(PathBuf, String)> {
-    if published_deliverable {
+    if published_deliverable || Path::new(file_path).is_absolute() {
         let path = Path::new(file_path);
         Some((
             path.parent()?.to_path_buf(),
@@ -1476,6 +1539,7 @@ impl RightPanelSurface {
             Self::GitHub(_) => "github",
             Self::SideChat(_) => "side_chat",
             Self::Plan { .. } => "plan",
+            Self::Git => "git",
             Self::Goals => "goals",
             Self::PastedText { .. } => "pasted_text",
         }
@@ -1508,6 +1572,7 @@ impl RightPanelSurface {
             Self::Plan { plan_file, .. } => {
                 plan_file.rsplit('/').next().unwrap_or(plan_file).to_owned()
             }
+            Self::Git => "Git".to_string(),
             Self::Goals => tr!("right_panel.goals"),
             Self::PastedText { .. } => tr!("composer.pasted_block"),
         }
@@ -1525,6 +1590,7 @@ impl RightPanelSurface {
             Self::GitHub(_) => "icons/github.svg",
             Self::SideChat(_) => "icons/chat.svg",
             Self::Plan { plan_file, .. } => file_icon_for_path(plan_file),
+            Self::Git => "icons/git-branch.svg",
             Self::Goals => "icons/target.svg",
             Self::PastedText { .. } => "icons/file.svg",
         }
@@ -1619,7 +1685,8 @@ pub(super) fn reusable_surface_index(
         RightPanelSurface::Goals => surfaces
             .iter()
             .position(|surface| matches!(surface, RightPanelSurface::Goals)),
-        RightPanelSurface::Files
+        RightPanelSurface::Git
+        | RightPanelSurface::Files
         | RightPanelSurface::Diff
         | RightPanelSurface::File(_)
         | RightPanelSurface::FileAtRef { .. }
@@ -1862,8 +1929,8 @@ impl BossGoalStatus {
             | Self::UsageLimited
             | Self::Blocked
             | Self::Attention
-            | Self::FollowUp
             | Self::BudgetReached => ("icons/alert.svg", BossGoalTone::Warning, false),
+            Self::FollowUp => ("icons/bell.svg", BossGoalTone::Warning, false),
             Self::Paused => ("icons/pause.svg", BossGoalTone::Secondary, false),
             Self::Failed => ("icons/x-bold.svg", BossGoalTone::Danger, false),
             Self::Cancelled => ("icons/ban.svg", BossGoalTone::Secondary, false),
@@ -2066,10 +2133,10 @@ fn boss_wait_time_label(at: u64) -> String {
 fn boss_outcome_wait_label(outcome: &waku_protocol::boss::BossOutcome, now: u64) -> Option<String> {
     let until = |at: u64| tr!("boss.goals_wait_until", time = boss_wait_time_label(at));
     match &outcome.waiting {
-        Some(waku_protocol::boss::OutcomeWait::Dependency { note }) => {
+        Some(waku_protocol::boss::OutcomeWait::Dependency { note, .. }) => {
             Some(tr!("boss.goals_wait_note", note = note.clone()))
         }
-        Some(waku_protocol::boss::OutcomeWait::Until { at }) if *at > now => Some(until(*at)),
+        Some(waku_protocol::boss::OutcomeWait::Until { at, .. }) if *at > now => Some(until(*at)),
         _ => outcome.snoozed_until.filter(|at| *at > now).map(until),
     }
 }
@@ -2096,7 +2163,10 @@ fn boss_expiry_cause_label(cause: waku_protocol::boss::ExpiryCause) -> Option<St
 /// owed decisions land in Blocked; a healthy live member owns In progress
 /// even when queued work or a wait stands beside it; everything else
 /// lands in Pending with its honest label — queued, waiting with its
-/// recorded reason, not started, or simply open.
+/// recorded reason, not started, or simply open. A recorded wait the
+/// boss wrote after the attention evidence is the newer truth and reads
+/// Waiting instead of Blocked — evidence newer than the wait still
+/// surfaces, and an owed review always does.
 fn boss_outcome_status(
     row: &boss::BossOutcomeRow,
     sessions: &HashMap<Uuid, &AgentSession>,
@@ -2126,9 +2196,9 @@ fn boss_outcome_status(
         } else {
             status
         };
-        // Needs-attention work files under Blocked; genuinely running
-        // work stays In progress.
-        let bucket = if row.attention || status.attention() {
+        // The current live status decides the section. Attention retained
+        // from earlier attempts must not keep resumed work in Blocked.
+        let bucket = if status.attention() {
             BossGoalBucket::Blocked
         } else {
             BossGoalBucket::Running
@@ -2136,8 +2206,10 @@ fn boss_outcome_status(
         return (bucket, status);
     }
     // Nothing is running — the Blocked precedence names the needs-
-    // attention signal first, then the Pending labels' own order.
-    if row.attention {
+    // attention signal first, then the Pending labels' own order. A
+    // recorded wait the boss wrote after the evidence supersedes it;
+    // anything the wait predates still blocks.
+    if row.attention && !row.outcome.wait_supersedes(now, row.attention_at) {
         return (BossGoalBucket::Blocked, BossGoalStatus::Blocked);
     }
     if row.outcome.pending_handoffs().next().is_some() {
@@ -2170,8 +2242,8 @@ fn hide_archived_outcome_row(
         .is_some_and(|session| session.archived_at.is_some())
 }
 
-/// One expanded assignment entry's status — the durable settle verdict
-/// when the attempt resolved, else the live roster and session evidence.
+/// One expanded assignment entry's status — an owed follow-up first,
+/// then the durable settle verdict or live roster and session evidence.
 /// An unsettled row no roster covers can only read as unavailable: it is
 /// either still in flight somewhere the snapshot cannot see, or its
 /// settle was never recorded — inventing a result would be worse.
@@ -2181,6 +2253,11 @@ fn boss_outcome_entry_status(
     sessions: &HashMap<Uuid, &AgentSession>,
 ) -> BossGoalStatus {
     use waku_protocol::boss::AssignmentVerdict;
+    if row.outcome.pending_handoffs().any(|handoff| {
+        handoff.assignment == assignment.session && handoff.attempt == assignment.generation
+    }) {
+        return BossGoalStatus::FollowUp;
+    }
     if let Some(settle) = &assignment.settled {
         return match settle.verdict {
             AssignmentVerdict::Finished => BossGoalStatus::Finished,
@@ -2202,31 +2279,6 @@ fn boss_outcome_entry_status(
         sessions.get(&member.employee.session_id).copied(),
     )
     .1
-}
-
-/// Whether a recorded prerequisite still blocks an in-flight attempt:
-/// its sibling row is unsettled or settled without success. A
-/// prerequisite that failed or was cancelled shows the dependency as
-/// blocked rather than ordinary waiting.
-fn boss_outcome_prerequisite_failed(
-    row: &boss::BossOutcomeRow,
-    assignment: &waku_protocol::boss::OutcomeAssignment,
-) -> bool {
-    assignment.prerequisites.iter().any(|prerequisite| {
-        row.outcome
-            .assignments
-            .iter()
-            .filter(|sibling| sibling.session == *prerequisite)
-            .next_back()
-            .is_some_and(|sibling| {
-                sibling.settled.as_ref().is_some_and(|settle| {
-                    !matches!(
-                        settle.verdict,
-                        waku_protocol::boss::AssignmentVerdict::Finished
-                    )
-                })
-            })
-    })
 }
 
 /// The cause a Needs-attention row names — the unresolved member's own
@@ -2353,9 +2405,8 @@ enum BossOutcomeItem {
     /// An expanded outcome's current assignment — one per session,
     /// painted with the sidebar employee row's look.
     Employee(Arc<boss::BossEmployeeRow>),
-    /// A line nested under an expanded outcome — an earlier attempt's
-    /// history, the conflict, handoff, wait, or empty marker — the
-    /// item's own height keeps the list's uniform geometry.
+    /// A line nested under an expanded outcome — a conflict, wait, or
+    /// empty marker. The item's height keeps the list's uniform geometry.
     Entry(Arc<BossOutcomeEntry>),
     HistoryToggle {
         /// The section the toggle unfolds — one toggle trails each
@@ -3464,18 +3515,18 @@ mod tests {
 
         assert_eq!(
             transcript_link_route(&project_file_with_line, Some(workspace)),
-            TranscriptLinkRoute::ProjectFile(relative_project_file.clone(), None)
+            TranscriptLinkRoute::PanelFile(relative_project_file.clone(), None)
         );
         assert_eq!(
             transcript_link_route(&project_file_with_column, Some(workspace)),
-            TranscriptLinkRoute::ProjectFile(relative_project_file, None)
+            TranscriptLinkRoute::PanelFile(relative_project_file, None)
         );
 
         let encoded_file_url =
             url::Url::from_file_path(workspace.join("My File.rs")).expect("absolute file path");
         assert_eq!(
             transcript_link_route(&format!("{encoded_file_url}#L12C4"), Some(workspace)),
-            TranscriptLinkRoute::ProjectFile("My File.rs".into(), None)
+            TranscriptLinkRoute::PanelFile("My File.rs".into(), None)
         );
 
         let outside_file = workspace.join("../kero/src/app.rs");
@@ -3490,6 +3541,52 @@ mod tests {
         );
     }
 
+    #[test]
+    fn markdown_links_outside_projects_open_in_the_panel() {
+        let root = std::env::temp_dir().join("goddard-markdown-links");
+        let path = root.join("Review Notes.MD");
+        let file_url = url::Url::from_file_path(&path).unwrap();
+        let workspace = root.join("project");
+        for target in [
+            path.to_string_lossy().into_owned(),
+            format!("{}:12:4", path.display()),
+            file_url.to_string(),
+        ] {
+            for workspace in [None, Some(workspace.as_path())] {
+                assert_eq!(
+                    transcript_link_route(&target, workspace),
+                    TranscriptLinkRoute::PanelFile(path.to_string_lossy().into_owned(), None),
+                );
+            }
+        }
+        assert_eq!(
+            transcript_link_route(&format!("{file_url}#review-notes"), None),
+            TranscriptLinkRoute::PanelFile(
+                path.to_string_lossy().into_owned(),
+                Some("review-notes".into()),
+            ),
+        );
+        for extension in ["md", "markdown", "mdx"] {
+            let path = root.join(format!("notes.{extension}"));
+            assert_eq!(
+                transcript_link_route(&format!("{}#summary", path.display()), None),
+                TranscriptLinkRoute::PanelFile(
+                    path.to_string_lossy().into_owned(),
+                    Some("summary".into()),
+                ),
+            );
+        }
+        let expected = Some((root, "Review Notes.MD".into()));
+        assert_eq!(
+            panel_file_read_target(None, path.to_str().unwrap(), false),
+            expected
+        );
+        assert_eq!(
+            panel_file_read_target(Some(&workspace), path.to_str().unwrap(), false),
+            expected,
+        );
+    }
+
     fn published_link_fixture() -> waku_client::boss::BossDeliverable {
         let root = std::env::temp_dir().join("goddard-deliverable-link-fixture");
         let filename = ".xplat-workaround-review.deliverable.md";
@@ -3497,7 +3594,8 @@ mod tests {
             id: Uuid::parse_str("6e72122c-db05-47c2-b582-0044fde480e7").unwrap(),
             name: "Opals review".into(),
             path: root
-                .join("published/6e72122c-db05-47c2-b582-0044fde480e7")
+                .join("published")
+                .join("6e72122c-db05-47c2-b582-0044fde480e7")
                 .join(filename)
                 .to_string_lossy()
                 .into_owned(),
@@ -3528,10 +3626,11 @@ mod tests {
             project_root: Path::new(source).parent().unwrap().to_path_buf(),
             worktree: None,
         };
-        // A published Boss review link used to take the Finder route.
+        // A published Boss review link used to take the Finder route; Markdown
+        // previews now open in the panel even without the deliverable match.
         assert_eq!(
             transcript_link_route(stored, None),
-            TranscriptLinkRoute::Finder(PathBuf::from(stored))
+            TranscriptLinkRoute::PanelFile(stored.clone(), None)
         );
         for target in [
             stored.clone(),
@@ -3598,16 +3697,16 @@ mod tests {
         }
         assert_eq!(
             transcript_link_route(&project.join("source.md").to_string_lossy(), Some(&project)),
-            TranscriptLinkRoute::ProjectFile("source.md".into(), None)
+            TranscriptLinkRoute::PanelFile("source.md".into(), None)
         );
         assert_eq!(
             transcript_link_route("https://example.com/review.md", None),
             TranscriptLinkRoute::External
         );
-        let unpublished = root.join("unpublished/review.md");
+        let unpublished = root.join("unpublished").join("review.md");
         assert_eq!(
             transcript_link_route(&unpublished.to_string_lossy(), None),
-            TranscriptLinkRoute::Finder(unpublished)
+            TranscriptLinkRoute::PanelFile(unpublished.to_string_lossy().into_owned(), None)
         );
     }
 
@@ -4383,6 +4482,7 @@ mod tests {
                 })
                 .collect(),
             attention: false,
+            attention_at: None,
         }
     }
 
@@ -4624,6 +4724,15 @@ mod tests {
             (BossGoalBucket::Blocked, BossGoalStatus::Attention)
         );
 
+        // Resuming work moves the outcome back to In progress even when
+        // an earlier attempt still carries an attention flag.
+        row.attention = true;
+        row.members[0].employee.blocker = None;
+        assert_eq!(
+            boss_outcome_status(&row, &sessions, now),
+            (BossGoalBucket::Running, BossGoalStatus::Working)
+        );
+
         // Queued members with nothing running read Pending · Queued.
         let row = outcome_row(
             OutcomeState::Open,
@@ -4649,13 +4758,19 @@ mod tests {
                 assigned_at: Some(10),
                 settled: None,
             });
-        row.outcome.waiting = Some(waku_protocol::boss::OutcomeWait::Until { at: now + 600 });
+        row.outcome.waiting = Some(waku_protocol::boss::OutcomeWait::Until {
+            at: now + 600,
+            recorded_at: None,
+        });
         assert_eq!(
             boss_outcome_status(&row, &sessions, now),
             (BossGoalBucket::Pending, BossGoalStatus::Waiting)
         );
         // An elapsed defer no longer explains the pause.
-        row.outcome.waiting = Some(waku_protocol::boss::OutcomeWait::Until { at: now - 1 });
+        row.outcome.waiting = Some(waku_protocol::boss::OutcomeWait::Until {
+            at: now - 1,
+            recorded_at: None,
+        });
         assert_eq!(
             boss_outcome_status(&row, &sessions, now),
             (BossGoalBucket::Pending, BossGoalStatus::Open)
@@ -4722,6 +4837,89 @@ mod tests {
         );
     }
 
+    /// A recorded wait the boss wrote after the attention evidence is
+    /// the newer truth — the row reads Pending · Waiting rather than
+    /// Blocked. Evidence stamped after the wait still surfaces, an owed
+    /// review always does, and an elapsed defer supersedes nothing.
+    #[test]
+    fn outcome_status_wait_supersedes_only_older_attention() {
+        use waku_protocol::boss::OutcomeState;
+        let sessions: HashMap<Uuid, &AgentSession> = HashMap::new();
+        let now = 1_000u64;
+
+        let mut row = outcome_row(OutcomeState::Open, Vec::new());
+        row.outcome
+            .assignments
+            .push(outcome_assignment(Uuid::new_v4(), 1));
+        row.attention = true;
+        row.attention_at = Some(10);
+
+        // A wait stamped after the failure acknowledges it.
+        row.outcome.waiting = Some(waku_protocol::boss::OutcomeWait::Dependency {
+            note: "waiting on the human".into(),
+            recorded_at: Some(20),
+        });
+        assert_eq!(
+            boss_outcome_status(&row, &sessions, now),
+            (BossGoalBucket::Pending, BossGoalStatus::Waiting)
+        );
+
+        // A failure stamped after the wait still surfaces.
+        row.attention_at = Some(30);
+        assert_eq!(
+            boss_outcome_status(&row, &sessions, now),
+            (BossGoalBucket::Blocked, BossGoalStatus::Blocked)
+        );
+
+        // A wait persisted before the stamp existed stays the current
+        // truth over every record.
+        row.outcome.waiting = Some(waku_protocol::boss::OutcomeWait::Dependency {
+            note: "waiting on the human".into(),
+            recorded_at: None,
+        });
+        assert_eq!(
+            boss_outcome_status(&row, &sessions, now),
+            (BossGoalBucket::Pending, BossGoalStatus::Waiting)
+        );
+
+        // An elapsed defer supersedes nothing — the deferral already
+        // ended, and a reminder snooze is no acknowledgment either.
+        row.outcome.waiting = Some(waku_protocol::boss::OutcomeWait::Until {
+            at: now - 1,
+            recorded_at: Some(40),
+        });
+        assert_eq!(
+            boss_outcome_status(&row, &sessions, now),
+            (BossGoalBucket::Blocked, BossGoalStatus::Blocked)
+        );
+        row.outcome.waiting = None;
+        row.outcome.snoozed_until = Some(now + 600);
+        assert_eq!(
+            boss_outcome_status(&row, &sessions, now),
+            (BossGoalBucket::Blocked, BossGoalStatus::Blocked)
+        );
+
+        // An owed review never hides behind a superseding wait.
+        row.outcome.waiting = Some(waku_protocol::boss::OutcomeWait::Dependency {
+            note: "waiting on the human".into(),
+            recorded_at: Some(40),
+        });
+        row.outcome
+            .handoffs
+            .push(waku_protocol::boss::OutcomeHandoff {
+                id: Uuid::new_v4(),
+                assignment: Uuid::new_v4(),
+                attempt: 1,
+                intent: "Review the result".into(),
+                created_at: 10,
+                resolution: None,
+            });
+        assert_eq!(
+            boss_outcome_status(&row, &sessions, now),
+            (BossGoalBucket::Blocked, BossGoalStatus::FollowUp)
+        );
+    }
+
     fn outcome_assignment(
         session: Uuid,
         generation: u64,
@@ -4739,12 +4937,10 @@ mod tests {
         }
     }
 
-    /// An expanded outcome keeps every attempt distinct and honest,
-    /// newest summoned first: the structured fields retain recorded
-    /// causes, waits, and blockers, while only employees whose
-    /// conversation the snapshot knows become navigable.
+    /// Assignment rows retain their status and newest-first ordering;
+    /// only known conversations become navigable.
     #[test]
-    fn outcome_employees_track_each_attempt_and_its_cause() {
+    fn outcome_employees_track_status_order_and_navigation() {
         use waku_protocol::boss::{
             AssignmentSettle, AssignmentVerdict, EmployeeLifecycle, ExpiryCause, OutcomeState,
         };
@@ -4788,8 +4984,6 @@ mod tests {
         let mut session = AgentSession::new(dependent, ProviderKind::Codex);
         session.id = dependent;
         let sessions: HashMap<Uuid, &AgentSession> = HashMap::from([(dependent, &session)]);
-        let queued: HashMap<Uuid, String> =
-            HashMap::from([(dependent, "Waiting for earlier work".to_owned())]);
 
         // The flagged member's blocker is also the row's named cause.
         assert_eq!(
@@ -4797,7 +4991,7 @@ mod tests {
             Some("missing credentials")
         );
 
-        let employees = boss_outcome_employee_fields(&row, &sessions, &queued);
+        let employees = boss_outcome_employee_fields(&row, &sessions);
         assert_eq!(employees.len(), 3);
 
         // Newest summon first — the member's `created_at` stamp; the
@@ -4819,49 +5013,14 @@ mod tests {
         assert_eq!(waiting_entry.name, "Nina");
         assert!(waiting_entry.detail.is_empty());
         assert!(!waiting_entry.aria.contains("Reviewer"));
-        // The wait and the failed prerequisite each get their own line.
-        assert!(
-            waiting_entry
-                .reasons
-                .contains(&boss::BossEmployeeReason::Queued(
-                    "Waiting for earlier work".to_owned()
-                )),
-            "{:?}",
-            waiting_entry.reasons
-        );
-        assert!(
-            waiting_entry
-                .reasons
-                .contains(&boss::BossEmployeeReason::Blocked(tr!(
-                    "boss.goals_prereq_failed"
-                ))),
-            "{:?}",
-            waiting_entry.reasons
-        );
         assert!(waiting_entry.navigable);
         assert!(waiting_entry.aria.starts_with("Open conversation"));
 
-        let blocked_entry = &employees[1];
-        assert!(
-            blocked_entry
-                .reasons
-                .contains(&boss::BossEmployeeReason::Blocked(
-                    "missing credentials".to_owned()
-                )),
-            "{:?}",
-            blocked_entry.reasons
-        );
+        assert_eq!(employees[1].status, BossGoalStatus::Attention);
 
         let failure = &employees[2];
         assert_eq!(failure.key, format!("{}:{}:1", row.outcome.id, failed));
         assert_eq!(failure.status, BossGoalStatus::Failed);
-        assert!(
-            failure.reasons.contains(&boss::BossEmployeeReason::Detail(
-                "provider exited mid-turn".to_owned()
-            )),
-            "{:?}",
-            failure.reasons
-        );
         assert!(!failure.navigable);
         assert!(
             !failure.aria.starts_with("Open conversation"),
@@ -4870,13 +5029,11 @@ mod tests {
     }
 
     /// A session's retries collapse to one card: the newest generation —
-    /// and anything still in flight — keeps `current`; earlier settled
-    /// generations compress into quiet history lines that carry the
-    /// verdict and stamp without the blocked or mid-turn exit reason.
+    /// and anything still in flight — keeps `current`. Earlier settled
+    /// generations are omitted from the expanded outcome.
     #[test]
-    fn outcome_attempt_history_collapses_to_lines() {
+    fn outcome_retries_keep_only_current_employee_rows() {
         use waku_protocol::boss::{AssignmentSettle, AssignmentVerdict, ExpiryCause, OutcomeState};
-        let now = 1_000u64;
         let session_id = Uuid::new_v4();
         let other = Uuid::new_v4();
 
@@ -4902,8 +5059,7 @@ mod tests {
         row.outcome.assignments = vec![first, second, running];
 
         let sessions: HashMap<Uuid, &AgentSession> = HashMap::new();
-        let queued: HashMap<Uuid, String> = HashMap::new();
-        let fields = boss_outcome_employee_fields(&row, &sessions, &queued);
+        let fields = boss_outcome_employee_fields(&row, &sessions);
         assert_eq!(fields.len(), 3);
         let by_generation = |session: Uuid, generation: u64| {
             fields
@@ -4916,36 +5072,62 @@ mod tests {
         assert!(!by_generation(session_id, 1).current);
         assert!(by_generation(session_id, 2).current);
         assert!(by_generation(other, 1).current);
+    }
 
-        let history = boss_outcome_attempt_entry(by_generation(session_id, 1), now);
-        assert_eq!(
-            history.title,
-            format!(
-                "{} — {}",
-                tr!("boss.goals_entry_unavailable"),
-                tr!("boss.goals_status_failed")
-            )
-        );
+    #[test]
+    fn outcome_follow_up_belongs_to_the_employee_attempt_until_resolved() {
+        use waku_protocol::boss::{
+            AssignmentSettle, AssignmentVerdict, HandoffDecision, HandoffResolution,
+            OutcomeHandoff, OutcomeState,
+        };
+        let session = Uuid::new_v4();
+        let mut row = outcome_row(OutcomeState::Open, Vec::new());
+        let mut first = outcome_assignment(session, 1);
+        first.settled = Some(AssignmentSettle {
+            verdict: AssignmentVerdict::Finished,
+            cause: None,
+            blocked: false,
+            at: Some(20),
+        });
+        let mut retry = first.clone();
+        retry.generation = 2;
+        row.outcome.assignments = vec![first, retry];
+        row.outcome.handoffs.push(OutcomeHandoff {
+            id: Uuid::new_v4(),
+            assignment: session,
+            attempt: 1,
+            intent: "Review the result".into(),
+            created_at: 30,
+            resolution: None,
+        });
+        let sessions = HashMap::new();
+        let fields = boss_outcome_employee_fields(&row, &sessions);
+        assert_eq!(fields[0].status, BossGoalStatus::FollowUp);
         assert!(
-            !history.detail.contains("provider exited mid-turn"),
-            "{}",
-            history.detail
+            fields[0].current,
+            "an owed follow-up remains visible after a retry"
         );
-        assert!(
-            history
-                .detail
-                .contains(&sidebar::format_time_ago(now - 940)),
-            "{}",
-            history.detail
-        );
-        assert_eq!(history.session, Some(session_id));
-        assert!(!history.destination);
-        assert_eq!(history.icon, "icons/x-bold.svg");
+        assert!(fields[0].aria.contains(&BossGoalStatus::FollowUp.label()));
+        assert_eq!(fields[1].status, BossGoalStatus::Finished);
+        let (icon, tone, spin) = fields[0].status.marker();
+        assert_eq!(icon, "icons/bell.svg");
+        assert!(matches!(tone, BossGoalTone::Warning));
+        assert!(!spin);
+        assert!(boss_outcome_note_entries(&row, 40).is_empty());
+
+        row.outcome.handoffs[0].resolution = Some(HandoffResolution {
+            decision: HandoffDecision::Dismiss,
+            at: 40,
+        });
+        let fields = boss_outcome_employee_fields(&row, &sessions);
+        assert_eq!(fields[0].status, BossGoalStatus::Finished);
+        assert!(!fields[0].current);
+        assert!(fields[1].current);
     }
 
     /// The expanded view's member joins and note lines: two running
-    /// assignments share the outcome and both appear, owed handoffs and
-    /// recorded waits get their own lines, a settled row nobody can
+    /// assignments share the outcome and both appear, recorded waits
+    /// keep their notes without duplicating follow-ups, a settled row nobody can
     /// describe reads as unavailable, and an empty outcome says so rather
     /// than inventing history.
     #[test]
@@ -4981,8 +5163,7 @@ mod tests {
         second_session.status = SessionStatus::Working;
         let sessions: HashMap<Uuid, &AgentSession> =
             HashMap::from([(first, &first_session), (second, &second_session)]);
-        let queued: HashMap<Uuid, String> = HashMap::new();
-        let employees = boss_outcome_employee_fields(&row, &sessions, &queued);
+        let employees = boss_outcome_employee_fields(&row, &sessions);
         assert_eq!(employees.len(), 3);
         for employee in &employees[..2] {
             assert_eq!(employee.status, BossGoalStatus::Working);
@@ -4990,7 +5171,7 @@ mod tests {
         assert_eq!(employees[2].status, BossGoalStatus::UnavailableHistory);
         assert_eq!(employees[2].name, tr!("boss.goals_entry_unavailable"));
 
-        // Owed decisions and recorded pauses become their own lines.
+        // Follow-ups belong on employees; recorded pauses keep their notes.
         let mut row = outcome_row(OutcomeState::Open, Vec::new());
         row.outcome.assignments = vec![outcome_assignment(first, 1)];
         row.outcome
@@ -5005,20 +5186,10 @@ mod tests {
             });
         row.outcome.waiting = Some(waku_protocol::boss::OutcomeWait::Dependency {
             note: "upstream deploy".into(),
+            recorded_at: None,
         });
-        let entries = boss_outcome_note_entries(&row, &sessions, now);
-        assert!(
-            entries
-                .iter()
-                .any(|entry| entry.title == tr!("boss.goals_handoff_pending")
-                    && entry.detail.contains("Review the result")),
-            "{}",
-            entries
-                .iter()
-                .map(|entry| entry.title.as_str())
-                .collect::<Vec<_>>()
-                .join(" | ")
-        );
+        let entries = boss_outcome_note_entries(&row, now);
+        assert_eq!(entries.len(), 1, "follow-ups belong on employee rows");
         assert!(
             entries
                 .iter()
@@ -5045,7 +5216,7 @@ mod tests {
             reason: "evidence missing".into(),
             at: now - 30,
         });
-        let entries = boss_outcome_note_entries(&row, &sessions, now);
+        let entries = boss_outcome_note_entries(&row, now);
         let conflict = entries.last().unwrap();
         assert_eq!(conflict.title, tr!("boss.goals_conflict"));
         assert_eq!(conflict.detail, "evidence missing");
@@ -5061,7 +5232,7 @@ mod tests {
             at: None,
         });
         row.outcome.assignments = vec![recovered];
-        let employees = boss_outcome_employee_fields(&row, &sessions, &queued);
+        let employees = boss_outcome_employee_fields(&row, &sessions);
         assert_eq!(employees[0].status, BossGoalStatus::UnavailableHistory);
         assert_eq!(employees[0].name, tr!("boss.goals_entry_unavailable"));
     }
@@ -5073,7 +5244,6 @@ mod tests {
     fn outcome_waits_reopen_and_snoozes_stay_honest() {
         use waku_protocol::boss::{AssignmentSettle, AssignmentVerdict, OutcomeState};
         let sessions: HashMap<Uuid, &AgentSession> = HashMap::new();
-        let queued: HashMap<Uuid, String> = HashMap::new();
         let now = 1_000u64;
 
         // A snooze is the outcome's other recorded pause — it reads as
@@ -5088,10 +5258,7 @@ mod tests {
             (BossGoalBucket::Pending, BossGoalStatus::Waiting)
         );
         assert_eq!(
-            boss_outcome_note_entries(&row, &sessions, now)
-                .last()
-                .unwrap()
-                .key,
+            boss_outcome_note_entries(&row, now).last().unwrap().key,
             format!("{}:wait", row.outcome.id)
         );
         // An elapsed snooze stops explaining the pause.
@@ -5104,6 +5271,7 @@ mod tests {
         row.outcome.snoozed_until = Some(now + 600);
         row.outcome.waiting = Some(waku_protocol::boss::OutcomeWait::Dependency {
             note: "upstream deploy".into(),
+            recorded_at: None,
         });
         assert_eq!(
             boss_outcome_wait_label(&row.outcome, now).as_deref(),
@@ -5157,18 +5325,9 @@ mod tests {
             boss_outcome_attention_cause(&row).as_deref(),
             Some("interrupted by a daemon restart")
         );
-        let employees = boss_outcome_employee_fields(&row, &sessions, &queued);
+        let employees = boss_outcome_employee_fields(&row, &sessions);
         assert_eq!(employees.len(), 2);
         assert_eq!(employees[0].status, BossGoalStatus::Failed);
-        assert!(
-            employees[0]
-                .reasons
-                .contains(&boss::BossEmployeeReason::Detail(
-                    "interrupted by a daemon restart".to_owned()
-                )),
-            "{:?}",
-            employees[0].reasons
-        );
         assert_eq!(employees[1].status, BossGoalStatus::Finished);
     }
 }
@@ -5288,6 +5447,9 @@ impl Waku {
             }
             self.mark_deliverable_viewed(DaemonKey::Local, deliverable.id, cx);
             let file_path = path.to_string_lossy().into_owned();
+            if let Some(editor) = self.right_panel_file_editors.get_mut(&file_path) {
+                editor.show_source = false;
+            }
             self.open_right_panel_file(file_path.clone(), cx);
             self.set_right_panel_visible(true, cx);
             let target = crate::model::ReferenceContext::decode_reference(target)
@@ -5357,8 +5519,12 @@ impl Waku {
         let files_root = self.resolve_right_panel_files_root(cx);
         let route = transcript_link_route(target, files_root.as_deref());
         let linked_path = match &route {
-            TranscriptLinkRoute::ProjectFile(relative_path, _) => {
-                files_root.as_ref().map(|root| root.join(relative_path))
+            TranscriptLinkRoute::PanelFile(relative_path, _) => {
+                if Path::new(relative_path).is_absolute() {
+                    Some(PathBuf::from(relative_path))
+                } else {
+                    files_root.as_ref().map(|root| root.join(relative_path))
+                }
             }
             TranscriptLinkRoute::Finder(path) => Some(path.clone()),
             TranscriptLinkRoute::Task(..) | TranscriptLinkRoute::External => None,
@@ -5372,11 +5538,17 @@ impl Waku {
             return true;
         }
         match route {
-            TranscriptLinkRoute::ProjectFile(relative_path, heading) => {
+            TranscriptLinkRoute::PanelFile(relative_path, heading) => {
                 // A `file:line` target rides the same pending slot the finder
                 // uses: the editor takes focus and the jump lands once the
                 // file's first read does.
                 let location = file_link_location(target);
+                if file_highlighter_language(&relative_path) == "markdown" {
+                    self.set_markdown_preview(true, cx);
+                    if let Some(editor) = self.right_panel_file_editors.get_mut(&relative_path) {
+                        editor.show_source = false;
+                    }
+                }
                 self.open_right_panel_surface(RightPanelSurface::Files, cx);
                 self.open_right_panel_file(relative_path.clone(), cx);
                 if location.is_some() || heading.is_some() {
@@ -5898,7 +6070,7 @@ impl Waku {
         // in flight at park time failed their landing check. A relaunch
         // restore carries only the flag, so the panel rebuilds on the window
         // a tick out — without claiming focus like a user-opened one does.
-        if self.git_panel_visible {
+        if self.git_panel_visible || self.right_panel_surfaces.contains(&RightPanelSurface::Git) {
             if self.git_panel.is_some() {
                 if let Some(panel) = self.git_panel.as_mut() {
                     panel.snapshot_loading = false;
@@ -5916,7 +6088,10 @@ impl Waku {
                             // A faster second swap may have parked a real
                             // panel or closed the slot again — only rebuild
                             // when the flag still stands with none mounted.
-                            if this.git_panel_visible && this.git_panel.is_none() {
+                            if (this.git_panel_visible
+                                || this.right_panel_surfaces.contains(&RightPanelSurface::Git))
+                                && this.git_panel.is_none()
+                            {
                                 this.open_git_panel(window, cx, false);
                             }
                         });
@@ -6521,6 +6696,80 @@ impl Waku {
         self.select_right_panel_file(relative_path, true, cx);
     }
 
+    pub(super) fn open_file_finder_tab(&mut self, relative_path: String, cx: &mut Context<Self>) {
+        let surface = RightPanelSurface::File(relative_path.clone());
+        if !self.right_panel_owner_allows(&surface) {
+            return;
+        }
+        self.right_panel_file_tree_visible = false;
+        if self.right_panel_files_selected_path.as_deref() == Some(&relative_path)
+            && self
+                .right_panel_surfaces
+                .contains(&RightPanelSurface::Files)
+        {
+            self.open_right_panel_surface(RightPanelSurface::Files, cx);
+            return;
+        }
+        let is_new = reusable_surface_index(&self.right_panel_surfaces, &surface).is_none();
+        self.open_right_panel_surface(surface, cx);
+        if is_new && let Some(index) = self.right_panel_active_surface {
+            let surface = self.right_panel_surfaces.remove(index);
+            self.right_panel_surfaces.insert(0, surface);
+            self.right_panel_active_surface = Some(0);
+            self.reveal_right_panel_tab(0);
+        }
+    }
+
+    fn open_markdown_preview_file_link(
+        &mut self,
+        source_path: &str,
+        target: &str,
+        workspace: Option<&Path>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some((path, position, heading)) =
+            markdown_preview_file_link(source_path, target, workspace)
+        else {
+            return false;
+        };
+        let surface = RightPanelSurface::File(path.clone());
+        if !self.right_panel_owner_allows(&surface) {
+            return false;
+        }
+
+        self.open_right_panel_surface(surface, cx);
+        if position.is_some() || heading.is_some() {
+            self.right_panel_pending_file_focus = Some(PendingFileFocus {
+                path,
+                position,
+                heading,
+            });
+        }
+        true
+    }
+
+    fn markdown_preview_link_handler(
+        &self,
+        source_path: Option<String>,
+        workspace: Option<PathBuf>,
+        cx: &mut Context<Self>,
+    ) -> md::render::LinkHandler {
+        let waku = cx.entity().downgrade();
+        let link_handler = self.markdown_link_handler.clone();
+        Rc::new(move |url, window, cx| {
+            let opened = source_path.as_deref().is_some_and(|source_path| {
+                waku.update(cx, |this, cx| {
+                    this.open_markdown_preview_file_link(source_path, url, workspace.as_deref(), cx)
+                })
+                .unwrap_or(false)
+            });
+            if !opened {
+                link_handler(url, window, cx);
+            }
+            cx.stop_propagation();
+        })
+    }
+
     fn select_right_panel_file(
         &mut self,
         relative_path: String,
@@ -6542,6 +6791,13 @@ impl Waku {
             self.open_right_panel_surface(RightPanelSurface::File(relative_path), cx);
             return;
         };
+        // The maximized tab navigates inside itself when the tree picks its
+        // file: the layer follows the file rather than ending at the next
+        // `settle_panel_slides` reconcile.
+        let maximized_tab = self
+            .fullscreen_surface
+            .as_ref()
+            .is_some_and(|(surface, _)| self.active_right_panel_surface() == Some(surface));
         match self.right_panel_surfaces.get(active).cloned() {
             Some(RightPanelSurface::Files) => {
                 let dirty_file_would_be_replaced = self
@@ -6557,6 +6813,9 @@ impl Waku {
                 }
 
                 self.right_panel_files_selected_path = Some(relative_path);
+                if maximized_tab {
+                    self.retarget_panel_fullscreen();
+                }
                 self.set_right_panel_visible(true, cx);
                 cx.notify();
             }
@@ -6584,6 +6843,9 @@ impl Waku {
                 } else {
                     self.right_panel_surfaces[active] = requested;
                     self.reveal_right_panel_tab(active);
+                }
+                if maximized_tab {
+                    self.retarget_panel_fullscreen();
                 }
                 self.set_right_panel_visible(true, cx);
                 cx.notify();
@@ -6651,6 +6913,16 @@ impl Waku {
         self.right_panel_pending_tree_reveal = Some(relative_path.clone());
         self.right_panel_files_selected_path = Some(relative_path);
         self.open_right_panel_surface(RightPanelSurface::Files, cx);
+        // A reveal that lands on the already-maximized Files tab moves its
+        // selection — an in-tab navigation the layer follows. Landing from
+        // another tab is a surface switch and still ends the mode.
+        if self
+            .fullscreen_surface
+            .as_ref()
+            .is_some_and(|(surface, _)| self.active_right_panel_surface() == Some(surface))
+        {
+            self.retarget_panel_fullscreen();
+        }
     }
 
     /// The tree's next entries resolve the pending reveal to a row index —
@@ -6967,6 +7239,9 @@ impl Waku {
             }
         }
         let body = match self.active_right_panel_surface().cloned() {
+            Some(RightPanelSurface::Git) => {
+                self.render_git_panel(width, window, cx).into_any_element()
+            }
             None => self.render_right_panel_chooser(cx).into_any_element(),
             Some(RightPanelSurface::BackgroundWork { key, .. }) => self
                 .render_background_work_surface(&key, cx)
@@ -7031,7 +7306,11 @@ impl Waku {
                             div()
                                 .px(px(8.0))
                                 .py(px(4.0))
-                                .child(self.render_terminal_location_for_id(terminal_id, cx)),
+                                .flex()
+                                .items_center()
+                                .child(self.render_terminal_location_for_id(terminal_id, cx))
+                                .child(div().flex_1())
+                                .child(self.render_terminal_actions(terminal_id, cx)),
                         )
                         .child(terminal),
                     terminal_id,
@@ -7090,6 +7369,9 @@ impl Waku {
             .flex_col()
             .min_w_0()
             .key_context("RightPanel")
+            .on_action(cx.listener(|this, _: &ToggleTerminalMaximize, _, cx| {
+                this.toggle_panel_fullscreen(cx);
+            }))
             .track_focus(&self.right_panel_focus)
             .border_l(hairline())
             .border_color(theme.separator)
@@ -7267,6 +7549,9 @@ impl Waku {
         // The transcript's resolved-commit set is shared so SHAs underline
         // and hit-test in the lane the way they do in the session column.
         let resolved_commits = self.transcript_selection.resolved_commits.clone();
+        let mut pending_rows = Vec::new();
+        self.append_pending_prompt_rows(session_id, &mut pending_rows);
+        let pending_fingerprint = self.pending_prompt_fingerprint(session_id);
         let view = self
             .side_chat_views
             .entry(session_id)
@@ -7290,7 +7575,8 @@ impl Waku {
                 }
             });
         let expanded_turns = view.expanded_turns.clone();
-        let fingerprint = transcript_rows_fingerprint(&session, &expanded_turns, pending_turn);
+        let fingerprint = transcript_rows_fingerprint(&session, &expanded_turns, pending_turn)
+            ^ pending_fingerprint.rotate_left(1);
         let previous_kinds = view.kinds.1.clone();
         let (kinds, refolded) = if view.kinds.0 != fingerprint {
             let mut folded = folded_transcript_row_kinds(&session, &expanded_turns, pending_turn);
@@ -7315,6 +7601,10 @@ impl Waku {
                 && !folded.contains(&TranscriptRowKind::ChangedFiles(turn_id))
             {
                 folded.push(TranscriptRowKind::ChangedFiles(turn_id));
+            }
+            if !pending_rows.is_empty() {
+                folded.retain(|kind| *kind != TranscriptRowKind::WorkingIndicator);
+                folded.extend(pending_rows);
             }
             let kinds = Rc::new(folded);
             view.kinds = (fingerprint, kinds.clone());
@@ -7862,9 +8152,8 @@ impl Waku {
             )
         };
         let inner = match kind {
-            TranscriptRowKind::Message(message_index) => session
-                .messages
-                .get(message_index)
+            TranscriptRowKind::Message(_) | TranscriptRowKind::PendingPrompt(_) => self
+                .transcript_prompt_message(session, kind)
                 .cloned()
                 .map(|message| {
                     let copied = self.copied_message_feedback.contains_key(&message.id);
@@ -7930,6 +8219,7 @@ impl Waku {
                         // not the panel surface.
                         ctx = ctx.with_surface(theme.raised);
                     }
+                    let ctx = self.message_atom_markdown_ctx(ctx, &message, cx);
                     let work_item_refs = (message.role == MessageRole::User)
                         .then(|| {
                             self.work_item_refs_for_content(
@@ -7948,10 +8238,11 @@ impl Waku {
                             let view = markdown
                                 .entry(message.id)
                                 .or_insert_with(MarkdownView::seeded);
-                            view.set_transcript_text(
+                            view.set_transcript_text_with_atom_links(
                                 message.visible_content(),
                                 message.streaming,
                                 message.role == MessageRole::User,
+                                !message.atoms.is_empty(),
                             );
                             &*view
                         });
@@ -8024,6 +8315,8 @@ impl Waku {
             }
             TranscriptRowKind::BossHistory(..)
             | TranscriptRowKind::BossHistoryBoundary(_)
+            | TranscriptRowKind::HistoryBoundary
+            | TranscriptRowKind::FutureBoundary
             // The queued card lives only on the selected employee's own
             // transcript — the fold for a side chat never emits it.
             | TranscriptRowKind::QueuedEmployee => {
@@ -8105,6 +8398,9 @@ impl Waku {
                         cx.entity().downgrade(),
                     ))
                     .into_any_element()
+            }
+            TranscriptRowKind::CounselRecommendation(id) => {
+                self.render_counsel_recommendation_row(session_id, id, &theme, window, cx)
             }
         };
         let response_turn_id = super::transcript::response_row_turn_id(session, kind);
@@ -8206,6 +8502,7 @@ impl Waku {
                         && preview.phase != ComputerUsePhase::AwaitingApproval
                 })
             })
+            || self.big_picture.is_open()
             || self.command_palette.is_open()
             || self.task_switcher.is_open()
             || self.project_switcher.is_open()
@@ -8909,18 +9206,6 @@ impl Waku {
                     .text_color(theme.text_secondary)
                     .child(self.qa_server_status(cx)),
             );
-        }
-
-        if let Some(terminal_id) = self
-            .active_right_panel_surface()
-            .and_then(RightPanelSurface::terminal_id)
-        {
-            header = header.child(self.render_terminal_split_button(
-                "right-panel-terminal-split",
-                terminal_id,
-                RIGHT_PANEL_TERMINAL_MAX_PANES,
-                cx,
-            ));
         }
 
         if self.active_right_panel_surface().is_some() {
@@ -10721,10 +11006,14 @@ impl Waku {
             }
             return;
         };
+        let standalone_file = Path::new(&relative_path).is_absolute();
         let workspace = if published_deliverable {
             self.daemons
                 .supervisor(DaemonKey::Local)
                 .map(|daemon| waku_client::WorkspaceClient::new(daemon.client()))
+        } else if standalone_file && let Some(session) = self.selected_session() {
+            // Out-of-workspace references still belong to the transcript's host.
+            self.workspace_client_for_session(session.id)
         } else {
             self.workspace_client_for_path(&project_path)
         };
@@ -10763,7 +11052,7 @@ impl Waku {
                                     read_right_panel_file(&workspace, &project_path, &read_path);
                                 RightPanelFileRead::Text(
                                     content,
-                                    writable && !published_deliverable,
+                                    writable && !published_deliverable && !standalone_file,
                                 )
                             }
                         }
@@ -11368,6 +11657,19 @@ impl Waku {
         cx.notify();
     }
 
+    /// Rebind the maximized layer to its tab's current surface and file.
+    /// An in-tab file navigation keeps the mode up this way; without the
+    /// retarget the next `settle_panel_slides` reconcile reads the changed
+    /// surface or path as a takeover and ends it.
+    fn retarget_panel_fullscreen(&mut self) {
+        if self.fullscreen_surface.is_some() {
+            self.fullscreen_surface = self
+                .active_right_panel_surface()
+                .cloned()
+                .map(|surface| (surface, self.visible_right_panel_file_path()));
+        }
+    }
+
     /// Escape inside the maximized layer. The binding's PanelFullscreen
     /// context sits deeper than Waku's CancelTurn and shallower than
     /// FileEditorPane's close-find, so it only fires once no find bar has
@@ -11733,6 +12035,13 @@ impl Waku {
         let reader_title = tr!("speed_reader.preview_title", path = "plan");
         let reader_waku = cx.entity().downgrade();
         let speed_reader_enabled = self.state.speed_reader_enabled;
+        let link_handler = self.markdown_preview_link_handler(
+            self.plan_docs
+                .get(&session_id)
+                .map(|document| document.path.clone()),
+            self.right_panel_files_root.clone(),
+            cx,
+        );
         let (block, count) = {
             let cache = self.plan_markdown.borrow();
             let Some((_, view)) = cache.as_ref().filter(|(id, _)| *id == session_id) else {
@@ -11770,7 +12079,7 @@ impl Waku {
                 )]
             }))
             .with_link_items(self.markdown_link_menu_items.clone())
-            .with_link_handler(self.markdown_link_handler.clone());
+            .with_link_handler(link_handler.clone());
             match md::render::markdown_block(view, &ctx, index) {
                 Some(block) => (block, view.block_count()),
                 None => return div().into_any_element(),
@@ -12141,6 +12450,11 @@ impl Waku {
         let reader_title = tr!("speed_reader.preview_title", path = relative_path);
         let reader_waku = cx.entity().downgrade();
         let speed_reader_enabled = self.state.speed_reader_enabled;
+        let link_handler = self.markdown_preview_link_handler(
+            Some(relative_path.to_owned()),
+            self.right_panel_files_root.clone(),
+            cx,
+        );
         let mut ctx = MarkdownCtx::new(
             format!("file-preview-{relative_path}"),
             &palette,
@@ -12172,7 +12486,7 @@ impl Waku {
             )]
         }))
         .with_link_items(self.markdown_link_menu_items.clone())
-        .with_link_handler(self.markdown_link_handler.clone());
+        .with_link_handler(link_handler);
         if let Some(highlights) = self.file_preview_search_highlights(relative_path) {
             ctx = ctx.with_search_highlights(highlights);
         }
@@ -13122,7 +13436,7 @@ impl Waku {
             detail,
             reason,
             updated_label,
-            attention: row.attention || status.attention(),
+            attention: status.attention(),
             expanded,
             aria: if expanded {
                 tr!(
@@ -13147,21 +13461,19 @@ impl Waku {
     /// supplies the derivable parts; this adds what only the view knows:
     /// the face, project, and the status marker's color. Only each
     /// session's current attempt keeps the sidebar-styled employee row;
-    /// every earlier attempt compresses into a one-line history entry so
-    /// a retried outcome cannot fill the panel with repeating cards.
+    /// older settled attempts stay in the durable history so a retried
+    /// outcome cannot fill the panel with repeating rows.
     fn prepare_boss_outcome_assignments(
         &self,
         row: &boss::BossOutcomeRow,
         sessions: &HashMap<Uuid, &AgentSession>,
         now: u64,
         cx: &App,
-    ) -> (Vec<boss::BossEmployeeRow>, Vec<BossOutcomeEntry>) {
+    ) -> Vec<boss::BossEmployeeRow> {
         let theme = Theme::current(cx);
         let mut employees = Vec::new();
-        let mut history = Vec::new();
-        for fields in boss_outcome_employee_fields(row, sessions, &self.boss_ui.queued) {
+        for fields in boss_outcome_employee_fields(row, sessions) {
             if !fields.current {
-                history.push(boss_outcome_attempt_entry(&fields, now));
                 continue;
             }
             let member = row
@@ -13230,13 +13542,12 @@ impl Waku {
                 aria: Some(fields.aria),
             });
         }
-        (employees, history)
+        employees
     }
 }
 
 /// One expanded-outcome assignment row's derivable fields — everything
-/// the shared card or the compressed history line paints that does not
-/// need the live view. `Waku`'s `prepare_boss_outcome_assignments` adds
+/// the employee row paints without the live view. `Waku`'s `prepare_boss_outcome_assignments` adds
 /// the avatar, project, and chip data only the view can resolve.
 struct BossOutcomeEmployeeFields {
     /// The entry's stable key — `{outcome}:{session}:{generation}` — the
@@ -13254,12 +13565,8 @@ struct BossOutcomeEmployeeFields {
     /// joined with " · " after the job title on the detail line.
     detail: String,
     status: BossGoalStatus,
-    /// Recorded blocked/queued/cause text; history presentation filters
-    /// blocked reasons and the mid-turn exit cause.
-    reasons: Vec<boss::BossEmployeeReason>,
-    /// Still in flight or the session's newest recorded attempt — the
-    /// only rows painted with the full employee card. Older attempts
-    /// compress into history lines.
+    /// The newest attempt, live work, or an attempt still owed a follow-up.
+    /// Earlier settled attempts stay in the durable history.
     current: bool,
     /// The settle or assignment stamp the card shows.
     stamp: Option<u64>,
@@ -13273,18 +13580,16 @@ struct BossOutcomeEmployeeFields {
 
 /// The expanded outcome's employee rows — every recorded assignment
 /// attempt with its live status or settle verdict, newest first.
-/// Attempts never drop off: retries and failures stay visible beside the
-/// latest work. Kept free of `Waku` so the panel's tests pin the
+/// Attempts remain in the durable record; `current` selects the visible
+/// employee rows. Kept free of `Waku` so the panel's tests pin the
 /// contract without building a view.
 fn boss_outcome_employee_fields(
     row: &boss::BossOutcomeRow,
     sessions: &HashMap<Uuid, &AgentSession>,
-    queued: &HashMap<Uuid, String>,
 ) -> Vec<BossOutcomeEmployeeFields> {
     // Each session's newest recorded generation is its current attempt —
-    // the one row that keeps the full employee card. Earlier generations
-    // compress into history lines, so the live plan chips and readiness
-    // can never repeat across a session's retries.
+    // one shown on its employee row. Earlier settled generations stay
+    // out of the expanded outcome.
     let mut latest_generation: HashMap<Uuid, u64> = HashMap::new();
     for assignment in &row.outcome.assignments {
         let latest = latest_generation.entry(assignment.session).or_default();
@@ -13345,45 +13650,6 @@ fn boss_outcome_employee_fields(
                 .filter(|part| !part.is_empty())
                 .collect::<Vec<_>>()
                 .join(" · ");
-            // Retain each source reason so history rows can choose which
-            // details to present without changing the recorded status.
-            let mut reasons = Vec::new();
-            if let Some(blocker) = member
-                .and_then(|member| member.employee.blocker.as_deref())
-                .map(str::trim)
-                .filter(|text| !text.is_empty())
-            {
-                reasons.push(boss::BossEmployeeReason::Blocked(blocker.to_owned()));
-            }
-            if assignment.settled.is_none() {
-                if let Some(wait) =
-                    member.and_then(|member| queued.get(&member.employee.session_id))
-                {
-                    reasons.push(boss::BossEmployeeReason::Queued(wait.clone()));
-                }
-                if boss_outcome_prerequisite_failed(row, assignment) {
-                    reasons.push(boss::BossEmployeeReason::Blocked(tr!(
-                        "boss.goals_prereq_failed"
-                    )));
-                }
-            }
-            if let Some(cause) = assignment
-                .settled
-                .as_ref()
-                .and_then(|settle| settle.cause)
-                .and_then(boss_expiry_cause_label)
-            {
-                reasons.push(boss::BossEmployeeReason::Detail(cause));
-            } else if assignment
-                .settled
-                .as_ref()
-                .is_some_and(|settle| settle.blocked)
-                || member.is_some_and(|member| member.employee.blocker.is_some())
-            {
-                reasons.push(boss::BossEmployeeReason::Blocked(tr!(
-                    "boss.goals_status_blocked"
-                )));
-            }
             let stamp = assignment
                 .settled
                 .as_ref()
@@ -13410,8 +13676,8 @@ fn boss_outcome_employee_fields(
                 job,
                 detail,
                 status,
-                reasons,
                 current: assignment.settled.is_none()
+                    || status == BossGoalStatus::FollowUp
                     || latest_generation.get(&assignment.session) == Some(&assignment.generation),
                 stamp,
                 sort_key: member
@@ -13442,57 +13708,9 @@ fn boss_outcome_employee_fields(
     fields
 }
 
-/// An earlier attempt's history line — the status marker, name and
-/// verdict up front, then attempt context and age. Blocker text and the
-/// mid-turn exit cause stay out of Tasks rows. Only the current attempt
-/// keeps the full card, so retries read as one card plus quiet lines.
-fn boss_outcome_attempt_entry(fields: &BossOutcomeEmployeeFields, now: u64) -> BossOutcomeEntry {
-    let (icon, tone, spin) = fields.status.marker();
-    let mut detail = fields.detail.clone();
-    for reason in &fields.reasons {
-        let visible = match reason {
-            boss::BossEmployeeReason::Blocked(_) => false,
-            boss::BossEmployeeReason::Queued(_) => true,
-            boss::BossEmployeeReason::Detail(text) => {
-                text != &tr!("boss.goals_cause_exited_mid_turn")
-                    && text != &tr!("boss.goals_status_blocked")
-            }
-        };
-        if !visible {
-            continue;
-        }
-        if !detail.is_empty() {
-            detail.push_str(" · ");
-        }
-        detail.push_str(reason.text());
-    }
-    if let Some(stamp) = fields.stamp {
-        if !detail.is_empty() {
-            detail.push_str(" · ");
-        }
-        detail.push_str(&sidebar::format_time_ago(now.saturating_sub(stamp)));
-    }
-    BossOutcomeEntry {
-        focus: None,
-        key: fields.key.clone(),
-        session: Some(fields.session_id),
-        icon,
-        tone,
-        spin,
-        title: format!("{} — {}", fields.name, fields.status.label()),
-        detail,
-        aria: fields.aria.clone(),
-        destination: fields.navigable,
-    }
-}
-
-/// The expanded outcome's note lines — the owed-decision and wait
-/// records that explain the current state, below the employee rows.
-fn boss_outcome_note_entries(
-    row: &boss::BossOutcomeRow,
-    sessions: &HashMap<Uuid, &AgentSession>,
-    now: u64,
-) -> Vec<BossOutcomeEntry> {
+/// The expanded outcome's conflict and wait notes. Owed follow-ups
+/// appear as the corresponding employee's status.
+fn boss_outcome_note_entries(row: &boss::BossOutcomeRow, now: u64) -> Vec<BossOutcomeEntry> {
     let mut entries = Vec::new();
     if let Some(conflict) = &row.outcome.completion_conflict {
         entries.push(BossOutcomeEntry {
@@ -13506,53 +13724,6 @@ fn boss_outcome_note_entries(
             aria: conflict.reason.clone(),
             detail: conflict.reason.clone(),
             destination: false,
-        });
-    }
-    for handoff in row.outcome.pending_handoffs() {
-        let assignee = row
-            .outcome
-            .assignments
-            .iter()
-            .rev()
-            .find(|assignment| assignment.session == handoff.assignment)
-            .and_then(|assignment| assignment.identity.as_ref())
-            .map(|identity| identity.name.clone());
-        let title = match assignee {
-            Some(name) => format!("{} — {name}", tr!("boss.goals_handoff_pending")),
-            None => tr!("boss.goals_handoff_pending"),
-        };
-        let mut detail = handoff.intent.trim().to_owned();
-        let elapsed = now.saturating_sub(handoff.created_at);
-        if elapsed > 0 {
-            if !detail.is_empty() {
-                detail.push_str(" · ");
-            }
-            detail.push_str(&sidebar::format_time_ago(elapsed));
-        }
-        let destination = sessions.contains_key(&handoff.assignment);
-        entries.push(BossOutcomeEntry {
-            focus: None,
-            key: format!("{}:handoff:{}", row.outcome.id, handoff.id),
-            session: Some(handoff.assignment),
-            icon: "icons/bell.svg",
-            tone: BossGoalTone::Warning,
-            spin: false,
-            aria: if destination {
-                tr!(
-                    "boss.goals_open_assignment",
-                    label = title,
-                    status = detail.clone()
-                )
-            } else {
-                tr!(
-                    "boss.goals_assignment_status",
-                    label = title,
-                    status = detail.clone()
-                )
-            },
-            title,
-            detail,
-            destination,
         });
     }
     if let Some(wait) = boss_outcome_wait_label(&row.outcome, now) {
@@ -13761,12 +13932,10 @@ impl Waku {
             if prepared.expanded {
                 // Each session's current attempt paints the same card the
                 // Employees tab uses, newest summoned first, followed by
-                // the conflict/handoff notes; earlier attempts
-                // compress into quiet history lines at the end. Entries
+                // completion conflict notes. Entries
                 // that name a conversation the session snapshot knows get
                 // the list's persistent focus handle; the rest stay inert.
-                let (employees, attempt_history) =
-                    self.prepare_boss_outcome_assignments(row, &sessions, now, cx);
+                let employees = self.prepare_boss_outcome_assignments(row, &sessions, now, cx);
                 let mut detail_items: Vec<BossOutcomeItem> = employees
                     .into_iter()
                     .map(|mut employee| {
@@ -13795,12 +13964,11 @@ impl Waku {
                     BossOutcomeItem::Entry(Arc::new(entry))
                 };
                 detail_items.extend(
-                    boss_outcome_note_entries(row, &sessions, now)
+                    boss_outcome_note_entries(row, now)
                         .into_iter()
                         .filter(|entry| !entry.key.ends_with(":wait"))
                         .map(&mut entries_focus),
                 );
-                detail_items.extend(attempt_history.into_iter().map(&mut entries_focus));
                 if detail_items.is_empty() {
                     detail_items.push(BossOutcomeItem::Entry(Arc::new(boss_outcome_empty_entry(
                         row.outcome.id,
@@ -14095,7 +14263,7 @@ impl Waku {
                                         .flex_none()
                                         .h(px(28.0))
                                         .mt(px(4.0))
-                                        .pl(px(26.0))
+                                        .pl(px(8.0))
                                         .flex()
                                         .items_center()
                                         .cursor_default()

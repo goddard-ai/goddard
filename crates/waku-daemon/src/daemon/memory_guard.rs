@@ -124,6 +124,16 @@ impl MemoryGuard {
         self.save(&recovery)
     }
 
+    /// The durable end state after a completed containment — the pause
+    /// fence without the in-flight stop marker. Tests reach the settled
+    /// state the teardown leaves, not its transient phase.
+    #[cfg(test)]
+    pub(super) fn pause_for_test(&self, session: Uuid) {
+        let mut recovery = self.recovery.lock();
+        recovery.entry(session).or_default().paused = true;
+        self.save(&recovery).unwrap();
+    }
+
     fn claim_restart(&self, session: Uuid) -> anyhow::Result<bool> {
         let mut recovery = self.recovery.lock();
         let entry = recovery.entry(session).or_default();
@@ -608,7 +618,10 @@ impl WakuBackend {
                     let lifecycle = self.runtime_lifecycles.session(watch.session);
                     let _owner = lifecycle.lock();
                     let removed = self.remove_runtime(watch.session, Some(runtime), false);
-                    if removed.is_some() {
+                    if let Some(entry) = removed.as_ref() {
+                        entry.driver.trace(driver::timeline::Event::Evicted {
+                            reason: driver::timeline::EvictionReason::MemoryPressure,
+                        });
                         let sink = self.event_source().for_session(watch.session, runtime);
                         sink.notify_runtime_ended();
                         sink.end_session_runtime();
@@ -750,6 +763,8 @@ mod tests {
             self.backend.sessions.lock().insert(
                 session,
                 RuntimeEntry {
+                    mode: Default::default(),
+                    _admission: None,
                     plan_gate: None,
                     runtime_id: runtime,
                     driver: DriverHandle::from_control(driver.clone()),
@@ -1260,6 +1275,8 @@ mod tests {
             backend.sessions.lock().insert(
                 session,
                 RuntimeEntry {
+                    mode: Default::default(),
+                    _admission: None,
                     plan_gate: None,
                     runtime_id: runtime,
                     driver: DriverHandle::from_control(driver.clone()),
@@ -1290,6 +1307,8 @@ mod tests {
             backend.sessions.lock().insert(
                 sibling_session,
                 RuntimeEntry {
+                    mode: Default::default(),
+                    _admission: None,
                     plan_gate: None,
                     runtime_id: sibling_runtime,
                     driver: DriverHandle::from_control(sibling_driver.clone()),

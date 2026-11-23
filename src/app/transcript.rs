@@ -24,7 +24,63 @@ pub(super) fn display_message_content(message: &Message) -> String {
     visible
 }
 
+/// Preparation owns the label until dispatch, then only provider evidence
+/// changes sending to working. A connection alone does not accept a prompt.
+pub(super) fn working_indicator_label(
+    session: Option<&AgentSession>,
+    stage: Option<SubmissionStage>,
+    now: u64,
+) -> String {
+    if session.is_some_and(|session| session.status == SessionStatus::Background) {
+        return tr!("transcript.waiting_background");
+    }
+    if session.is_some_and(|session| {
+        session.compaction_hint(Instant::now())
+            == Some(waku_protocol::compaction::CompactionHint::Possible)
+    }) {
+        return tr!("transcript.possible_compaction");
+    }
+    let turn = session.and_then(|session| session.turns.last());
+    if turn.is_some_and(|turn| !turn.provider_turn_started) {
+        return match stage {
+            Some(SubmissionStage::Workspace) => tr!("routing.workspace"),
+            Some(SubmissionStage::Checkpoint) => tr!("routing.checkpoint"),
+            Some(SubmissionStage::Routing) => tr!("routing.in_progress"),
+            Some(SubmissionStage::Starting) => tr!("composer.starting_agent"),
+            None => tr!("transcript.sending_prompt"),
+        };
+    }
+    let elapsed = turn
+        .map(|turn| {
+            let end = turn.completed_at.unwrap_or(now);
+            end.saturating_sub(turn.provider_started_at.unwrap_or(turn.started_at))
+        })
+        .unwrap_or(0);
+    tr!(
+        "transcript.working_for",
+        duration = format_working_elapsed(elapsed)
+    )
+}
+
 impl Waku {
+    /// The modal can host a task without changing workspace selection.
+    pub(super) fn transcript_session_id(&self) -> Option<Uuid> {
+        self.attention_session_id()
+    }
+
+    pub(super) fn transcript_session(&self) -> Option<&AgentSession> {
+        let id = self.transcript_session_id()?;
+        self.state.sessions.iter().find(|session| session.id == id)
+    }
+
+    pub(super) fn transcript_workspace_path(&self) -> Option<&Path> {
+        self.workspace_path_for_session(self.transcript_session()?)
+    }
+
+    pub(super) fn transcript_boss_chat_key(&self) -> Option<waku_client::DaemonKey> {
+        self.boss_chat_key_for(self.transcript_session()?)
+    }
+
     /// One list row per message plus each ordered non-message turn block.
     pub(super) fn transcript_row_count(&self) -> usize {
         self.refresh_transcript_row_kinds()
@@ -75,33 +131,63 @@ impl Waku {
 
     fn scan_transcript_rows_fingerprint(&self) -> u64 {
         let revision = self
-            .boss_chat_key()
+            .transcript_boss_chat_key()
             .and_then(|key| self.boss_ui.chat_history.get(&key))
             .map_or(0, |history| history.revision);
         // The queued card's presence lives in `boss_ui`, not the session —
         // a ticket entering or leaving `Queued` must move the fingerprint
         // or the tail row would appear and drop without a refold.
         let queued_card = self.selected_queued_employee().is_some() as u64;
+        // The window sentinel lives in `transcript_views` — paging state
+        // moving refolds the top row.
+        let windowed = self
+            .transcript_session_id()
+            .and_then(|id| self.transcript_views.get(&id))
+            .map_or(0, |view| {
+                mix(
+                    view.revision,
+                    (view.has_more_before as u64) << 1
+                        | view.loading_before as u64
+                        | (view.has_more_after as u64) << 2
+                        | (view.loading_after as u64) << 3,
+                )
+            });
+        // Counsel card rows live in `boss_ui` too: a proposal landing or a
+        // record arriving through a state push must refold the transcript.
+        let counsel = self
+            .transcript_session_id()
+            .and_then(|id| self.counsel_state_for_session(id))
+            .map_or(0, |(_, state)| state.revision);
         mix(
             mix(
-                self.selected_session()
-                    .map_or(EMPTY_TRANSCRIPT_FINGERPRINT, |session| {
-                        transcript_rows_fingerprint(
-                            session,
-                            &self.expanded_turns,
-                            self.blocked_checkpoint_turn(session.id),
-                        )
-                    }),
-                revision,
+                mix(
+                    mix(
+                        self.transcript_session()
+                            .map_or(EMPTY_TRANSCRIPT_FINGERPRINT, |session| {
+                                transcript_rows_fingerprint(
+                                    session,
+                                    &self.expanded_turns,
+                                    self.blocked_checkpoint_turn(session.id),
+                                )
+                            }),
+                        revision,
+                    ),
+                    queued_card,
+                ),
+                windowed,
             ),
-            queued_card,
+            mix(
+                counsel,
+                self.transcript_session_id()
+                    .map_or(0, |id| self.pending_prompt_fingerprint(id)),
+            ),
         )
     }
 
     fn fold_transcript_row_kinds_if_stale(&self, fingerprint: u64) -> usize {
         if self.transcript_row_kinds_fingerprint.get() != Some(fingerprint) {
             let mut next_kinds = self.selected_transcript_row_kinds();
-            let session = self.selected_session();
+            let session = self.transcript_session();
             let mut contexts = self.transcript_reference_contexts.borrow_mut();
             contexts.clear();
             let (history, _) = self.boss_history_chain();
@@ -116,7 +202,7 @@ impl Waku {
                 }
             }
             if let Some(session) = session {
-                let boss_chat = self.boss_chat_key().is_some();
+                let boss_chat = self.transcript_boss_chat_key().is_some();
                 let mut seen = HashSet::new();
                 for prompt in session
                     .messages
@@ -176,29 +262,123 @@ impl Waku {
     }
 
     pub(super) fn selected_transcript_row_kinds(&self) -> Vec<TranscriptRowKind> {
-        let Some(session) = self.selected_session() else {
+        let Some(session) = self.transcript_session() else {
             return Vec::new();
         };
         let pending = self.blocked_checkpoint_turn(session.id);
-        if let Some(key) = self.boss_chat_key() {
-            return self.boss_ui.chat_history.get(&key).map_or_else(
+        // A bounded window's top edge earns a sentinel row — the trigger
+        // scrolling reaches for the previous page.
+        let view = self.transcript_views.get(&session.id);
+        let windowed = view.is_some_and(|view| view.has_more_before);
+        if let Some(key) = self.transcript_boss_chat_key() {
+            let mut rows = self.boss_ui.chat_history.get(&key).map_or_else(
                 || {
                     super::boss_history::BossChatHistory::default().transcript_rows(
                         session,
                         &self.expanded_turns,
                         pending,
+                        windowed,
                     )
                 },
-                |history| history.transcript_rows(session, &self.expanded_turns, pending),
+                |history| history.transcript_rows(session, &self.expanded_turns, pending, windowed),
             );
+            if self
+                .transcript_views
+                .get(&session.id)
+                .is_some_and(|view| view.has_more_after)
+            {
+                rows.push(TranscriptRowKind::FutureBoundary);
+            }
+            return rows;
         }
         let mut rows = folded_transcript_row_kinds(session, &self.expanded_turns, pending);
+        // Counsel's recommendations splice into the folded flow at their
+        // originating positions — content and status stay live reads.
+        if let Some((_, state)) = self.counsel_state_for_session(session.id) {
+            let partial = view.is_some_and(|view| view.has_more_before || view.has_more_after);
+            splice_counsel_rows(&mut rows, session, &state.recommendations, partial);
+        }
+        self.append_pending_prompt_rows(session.id, &mut rows);
+        if windowed {
+            rows.insert(0, TranscriptRowKind::HistoryBoundary);
+        }
+        if self
+            .transcript_views
+            .get(&session.id)
+            .is_some_and(|view| view.has_more_after)
+        {
+            rows.push(TranscriptRowKind::FutureBoundary);
+        }
         // The queued card is the transcript's live tail — below the last row,
         // and the only row on an employee shell that has no turns yet.
         if self.selected_queued_employee().is_some() {
             rows.push(TranscriptRowKind::QueuedEmployee);
         }
         rows
+    }
+
+    pub(super) fn append_pending_prompt_rows(
+        &self,
+        session_id: Uuid,
+        rows: &mut Vec<TranscriptRowKind>,
+    ) {
+        if !self.transcript_prompt_is_sending(session_id) {
+            return;
+        }
+        let status = rows
+            .iter()
+            .position(|row| *row == TranscriptRowKind::WorkingIndicator)
+            .unwrap_or_else(|| {
+                rows.push(TranscriptRowKind::WorkingIndicator);
+                rows.len() - 1
+            });
+        rows.splice(
+            status..status,
+            self.pending_transcript_prompts(session_id)
+                .map(|message| TranscriptRowKind::PendingPrompt(message.id)),
+        );
+    }
+
+    pub(super) fn transcript_prompt_is_sending(&self, session_id: Uuid) -> bool {
+        self.runtime_submission_checks.contains_key(&session_id)
+            || self.employee_prompt_previews.contains_key(&session_id)
+    }
+
+    pub(super) fn pending_transcript_prompts(
+        &self,
+        session_id: Uuid,
+    ) -> impl Iterator<Item = &Message> {
+        self.runtime_submission_checks
+            .get(&session_id)
+            .into_iter()
+            .flat_map(|check| &check.previews)
+            .chain(
+                self.employee_prompt_previews
+                    .get(&session_id)
+                    .into_iter()
+                    .flatten(),
+            )
+    }
+
+    pub(super) fn pending_prompt_fingerprint(&self, session_id: Uuid) -> u64 {
+        self.pending_transcript_prompts(session_id).fold(
+            u64::from(self.transcript_prompt_is_sending(session_id)),
+            |fingerprint, message| mix(fingerprint, message.id.as_u128() as u64),
+        )
+    }
+
+    pub(super) fn transcript_prompt_message<'a>(
+        &'a self,
+        session: &'a AgentSession,
+        kind: TranscriptRowKind,
+    ) -> Option<&'a Message> {
+        match kind {
+            TranscriptRowKind::Message(index) => session.messages.get(index),
+            TranscriptRowKind::PendingPrompt(id) => self
+                .pending_transcript_prompts(session.id)
+                .find(|message| message.id == id),
+            _ => None,
+        }
     }
 
     /// The response footer's copy content and timestamp for `message_index`,
@@ -227,7 +407,7 @@ impl Waku {
         if let Some(cached) = self.assistant_footer_cache.borrow().get(&message_index) {
             return cached.clone();
         }
-        let value = self.selected_session().map_or((None, None), |session| {
+        let value = self.transcript_session().map_or((None, None), |session| {
             (
                 assistant_response_footer(session, message_index).map(SharedString::from),
                 assistant_response_footer_time(session, message_index),
@@ -253,24 +433,54 @@ impl Waku {
         let fingerprint = self.transcript_row_kinds_fingerprint.get();
         if self.transcript_navigation_turns_fingerprint.get() != fingerprint {
             let kinds = self.transcript_row_kinds.borrow();
-            let turns = self
-                .selected_session()
-                .map(|session| {
-                    if let Some(history) = self
-                        .boss_chat_key()
-                        .and_then(|key| self.boss_ui.chat_history.get(&key))
-                    {
-                        history.navigation_turns(session, &kinds)
-                    } else {
-                        transcript_navigation_turns(session, &kinds)
-                    }
-                })
-                .unwrap_or_default();
+            let turns =
+                self.transcript_session()
+                    .map(|session| {
+                        if let Some(history) = self
+                            .transcript_boss_chat_key()
+                            .and_then(|key| self.boss_ui.chat_history.get(&key))
+                        {
+                            let mut turns = history.navigation_turns(session, &kinds);
+                            if let Some(view) = self.transcript_views.get(&session.id) {
+                                turns.retain(|turn| {
+                                    turn.row_index.and_then(|row| kinds.get(row)).is_some_and(
+                                        |kind| matches!(kind, TranscriptRowKind::BossHistory(..)),
+                                    )
+                                });
+                                turns.extend(super::transcript_window::window_navigation_turns(
+                                    session, &kinds, view,
+                                ));
+                            }
+                            turns
+                        } else if let Some(view) = self.transcript_views.get(&session.id) {
+                            super::transcript_window::window_navigation_turns(session, &kinds, view)
+                        } else {
+                            transcript_navigation_turns(session, &kinds)
+                        }
+                    })
+                    .unwrap_or_default();
+            let view = self
+                .transcript_session_id()
+                .and_then(|id| self.transcript_views.get(&id));
+            let base = view.map_or(0, |view| view.message_base as usize);
+            let window_start = kinds
+                .iter()
+                .position(|kind| *kind == TranscriptRowKind::HistoryBoundary)
+                .unwrap_or(0);
+            *self.transcript_navigation_positions.borrow_mut() =
+                TranscriptNavigationPositions::new(&turns, base, window_start);
             *self.transcript_navigation_turns.borrow_mut() = Rc::new(turns);
             self.transcript_navigation_turns_fingerprint
                 .set(fingerprint);
         }
         self.transcript_navigation_turns.borrow().clone()
+    }
+
+    pub(super) fn active_navigation_turn(&self, scroll_top: usize, at_end: bool) -> Option<usize> {
+        self.navigation_turns();
+        self.transcript_navigation_positions
+            .borrow()
+            .active(scroll_top, at_end)
     }
 
     pub(super) fn active_transcript_rows(&self) -> &ListState {
@@ -368,7 +578,7 @@ impl Waku {
         &self,
         session_id: Uuid,
     ) -> Option<Vec<TranscriptRowKind>> {
-        if self.state.selected_session != Some(session_id) {
+        if self.transcript_session_id() != Some(session_id) {
             return None;
         }
         self.sync_transcript_rows();
@@ -399,7 +609,7 @@ impl Waku {
 
     pub(super) fn selected_transcript_anchor_row(&self) -> Option<usize> {
         let anchor = self.transcript_anchor.get()?;
-        let selected = self.selected_session()?;
+        let selected = self.transcript_session()?;
         let historical = selected.id != anchor.session_id;
         let session = if historical {
             if !self.boss_history_chain().0.contains(&anchor.session_id) {
@@ -462,7 +672,7 @@ impl Waku {
     /// the list has not measured yet is past the rendered window, so it
     /// counts as below the viewport rather than on it.
     pub(super) fn transcript_watches_live_turn(&self) -> bool {
-        let Some(session) = self.selected_session() else {
+        let Some(session) = self.transcript_session() else {
             return false;
         };
         if !session.is_busy() {
@@ -489,7 +699,7 @@ impl Waku {
     /// The top visible row belongs to the latest turn. A glimpse of that turn
     /// below earlier content is not enough to override the reader's preference.
     pub(super) fn transcript_watches_latest_turn(&self) -> bool {
-        let Some(session) = self.selected_session() else {
+        let Some(session) = self.transcript_session() else {
             return false;
         };
         let Some(turn) = session.turns.last() else {
@@ -522,7 +732,7 @@ impl Waku {
     /// which is the only reason to override the position the reader left it
     /// at.
     pub(super) fn apply_transcript_landing(&mut self, attention: bool, cx: &mut Context<Self>) {
-        let Some(session_id) = self.state.selected_session else {
+        let Some(session_id) = self.transcript_session_id() else {
             return;
         };
         // A deep-linked search hit owns the landing: reveal the matched
@@ -554,10 +764,13 @@ impl Waku {
     /// Re-apply the landing activation chose after a late runtime attach or
     /// interrupt resets the rows a second time.
     pub(super) fn reapply_transcript_landing(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        let Some((landing_session, landing)) = self.transcript_landing.take() else {
-            return;
-        };
-        if landing_session == session_id {
+        if self.transcript_session_id() == Some(session_id)
+            && self
+                .transcript_landing
+                .as_ref()
+                .is_some_and(|(id, _)| *id == session_id)
+            && let Some((_, landing)) = self.transcript_landing.take()
+        {
             self.scroll_to_transcript_landing(landing, cx);
         }
     }
@@ -673,13 +886,8 @@ impl Waku {
         }
     }
 
-    pub(super) fn sync_transcript_layout_width(&self, window: &Window) -> bool {
-        let (sidebar_width, right_panel_width) = self.effective_panel_widths(window);
-        let sidebar_width = px(sidebar_width);
-        let right_panel_width = px(right_panel_width);
-        let content_width =
-            (window.viewport_size().width - sidebar_width - right_panel_width - px(40.0))
-                .clamp(px(1.0), px(CONTENT_MAX_WIDTH));
+    pub(super) fn sync_transcript_layout_width(&self, viewport_width: f32) -> bool {
+        let content_width = (px(viewport_width) - px(40.0)).clamp(px(1.0), px(CONTENT_MAX_WIDTH));
         let previous = self.transcript_layout_width.replace(content_width);
         if previous > Pixels::ZERO && (previous - content_width).abs() < px(1.0) {
             return false;
@@ -734,7 +942,7 @@ impl Waku {
 
     pub(super) fn remeasure_changed_files(&self, turn_id: Uuid) {
         self.sync_transcript_rows();
-        let target = self.selected_session()
+        let target = self.transcript_session()
             .and_then(|session| response_footer_message_index(session, turn_id))
             .map(|index| TranscriptRowKind::ResponseFooter(turn_id, index))
             .or_else(|| self.transcript_row_kinds.borrow().iter().find(|kind| {
@@ -813,7 +1021,15 @@ pub(super) fn single_project_prompt_context(
 pub(super) enum TranscriptRowKind {
     BossHistory(Uuid, BossHistoryRow),
     BossHistoryBoundary(Uuid),
+    /// The top edge of a bounded transcript window: older entries exist on
+    /// the daemon but have not been paged in. Renders as a quiet load row;
+    /// scrolling to it fetches the previous window.
+    HistoryBoundary,
+    /// The bottom edge of a window materialized mid-transcript (find
+    /// reveal): newer retained entries page in behind the slice.
+    FutureBoundary,
     Message(usize),
+    PendingPrompt(Uuid),
     TurnBlock(usize),
     TurnFold(Uuid),
     /// Actions and completion time for one settled response. This is a turn
@@ -841,6 +1057,105 @@ pub(super) enum TranscriptRowKind {
     /// It reads `boss_ui`, not the session, so it is never history content
     /// and never journals.
     QueuedEmployee,
+    /// A Counsel recommendation card pinned at its originating position —
+    /// after the Counsel message it was proposed from. The id is the
+    /// recommendation record's; content and status read live from
+    /// `boss_ui.states`, so revisions and resolutions update in place while
+    /// the row keeps its seat in history.
+    CounselRecommendation(Uuid),
+}
+
+/// Counsel recommendation cards live at their originating position: each
+/// record renders right after the Counsel message it was proposed from.
+/// Records from before anchoring — or whose anchor has been compacted out
+/// of the window — tail the transcript in record order, and superseded or
+/// resolved records keep their seats so the advice trail stays reviewable.
+pub(super) fn splice_counsel_rows(
+    rows: &mut Vec<TranscriptRowKind>,
+    session: &AgentSession,
+    recommendations: &[waku_protocol::counsel::CounselRecommendation],
+    partial: bool,
+) {
+    if recommendations.is_empty() {
+        return;
+    }
+    let messages: HashMap<_, _> = session.messages.iter().enumerate()
+        .map(|(index, message)| (message.id, (index, message.turn_id)))
+        .collect();
+    let mut message_rows = HashMap::new();
+    let mut turn_ends = HashMap::new();
+    for (position, row) in rows.iter().copied().enumerate() {
+        if let TranscriptRowKind::Message(index) = row {
+            message_rows.insert(index, position);
+        }
+        if let Some(turn) = row_turn_id(session, row) {
+            turn_ends.insert(turn, position);
+        }
+    }
+    let mut cards = HashMap::<usize, Vec<_>>::new();
+    for record in recommendations {
+        if partial && record.anchor.is_some_and(|anchor| !messages.contains_key(&anchor)) {
+            continue;
+        }
+        let at = record.anchor.and_then(|anchor| {
+            let (message, turn) = messages.get(&anchor)?;
+            message_rows.get(message).copied().or_else(|| {
+                // Hidden openers and folded messages may have no row of
+                // their own. Keep their cards in the originating turn.
+                turn.and_then(|turn| turn_ends.get(&turn).copied())
+            })
+        }).map_or(rows.len(), |position| position + 1);
+        cards.entry(at).or_default().push(TranscriptRowKind::CounselRecommendation(record.id));
+    }
+    let row_count = rows.len();
+    let mut merged = Vec::with_capacity(row_count + recommendations.len());
+    for (index, row) in rows.drain(..).enumerate() {
+        if let Some(cards) = cards.remove(&index) {
+            merged.extend(cards);
+        }
+        merged.push(row);
+    }
+    if let Some(cards) = cards.remove(&row_count) {
+        merged.extend(cards);
+    }
+    *rows = merged;
+}
+
+/// Translate a visible anchor when a retained window refreshes into full detail.
+/// Row indexes are local to the old slice; message/activity ids survive rebasing.
+pub(super) fn transcript_row_after_refresh(
+    row: TranscriptRowKind,
+    existing: &AgentSession,
+    refreshed: &AgentSession,
+) -> Option<TranscriptRowKind> {
+    let message_index = |index: usize| {
+        let id = existing.messages.get(index)?.id;
+        refreshed
+            .messages
+            .iter()
+            .position(|message| message.id == id)
+    };
+    Some(match row {
+        TranscriptRowKind::Message(index) => TranscriptRowKind::Message(message_index(index)?),
+        TranscriptRowKind::ResponseFooter(turn, index) => {
+            TranscriptRowKind::ResponseFooter(turn, message_index(index)?)
+        }
+        TranscriptRowKind::TurnBlock(index) => {
+            let id = existing
+                .transcript_blocks
+                .get(index)?
+                .activities
+                .first()?
+                .id;
+            TranscriptRowKind::TurnBlock(
+                refreshed
+                    .transcript_blocks
+                    .iter()
+                    .position(|block| block.activities.iter().any(|activity| activity.id == id))?,
+            )
+        }
+        row => row,
+    })
 }
 
 /// Session-local content keys keep disclosure anchors stable as historical
@@ -868,7 +1183,11 @@ impl BossHistoryRow {
             TranscriptRowKind::BossTrigger(a) => Self::BossTrigger(a),
             TranscriptRowKind::BossHistory(..)
             | TranscriptRowKind::BossHistoryBoundary(_)
-            | TranscriptRowKind::QueuedEmployee => {
+            | TranscriptRowKind::HistoryBoundary
+            | TranscriptRowKind::FutureBoundary
+            | TranscriptRowKind::PendingPrompt(_)
+            | TranscriptRowKind::QueuedEmployee
+            | TranscriptRowKind::CounselRecommendation(_) => {
                 return None;
             }
         })
@@ -1028,7 +1347,8 @@ pub(super) struct QueuedCardFade {
 pub(super) struct TranscriptNavigationTurn {
     pub message_id: Uuid,
     pub message_index: usize,
-    pub row_index: usize,
+    /// Absent until this prompt's content window is materialized.
+    pub row_index: Option<usize>,
     pub prompt: String,
     pub response: String,
 }
@@ -1108,7 +1428,7 @@ pub(super) fn transcript_navigation_turns(
         turns.push(TranscriptNavigationTurn {
             message_id: message.id,
             message_index,
-            row_index,
+            row_index: Some(row_index),
             prompt: if message.visible_content().trim().is_empty() {
                 message
                     .attachments
@@ -1126,6 +1446,55 @@ pub(super) fn transcript_navigation_turns(
         });
     }
     turns
+}
+
+/// Cached row-to-tick projection. Unloaded prompts before the content window
+/// share its top boundary; selecting one still fetches its own entry.
+#[derive(Default)]
+pub(super) struct TranscriptNavigationPositions {
+    rows: Vec<usize>,
+    indexes: Vec<usize>,
+    turn_count: usize,
+}
+
+impl TranscriptNavigationPositions {
+    pub(super) fn new(
+        turns: &[TranscriptNavigationTurn],
+        message_base: usize,
+        window_start: usize,
+    ) -> Self {
+        let mut positions = Self {
+            turn_count: turns.len(),
+            ..Self::default()
+        };
+        for (index, turn) in turns.iter().enumerate() {
+            let row = turn
+                .row_index
+                .or_else(|| (turn.message_index < message_base).then_some(window_start));
+            if let Some(row) = row {
+                if positions.rows.last() == Some(&row) {
+                    // Only the most recent prompt at the window boundary
+                    // can be active; keep this projection bounded by the
+                    // materialized rows rather than the full history.
+                    if let Some(last) = positions.indexes.last_mut() {
+                        *last = index;
+                    }
+                } else {
+                    positions.rows.push(row);
+                    positions.indexes.push(index);
+                }
+            }
+        }
+        positions
+    }
+
+    pub(super) fn active(&self, scroll_top_row: usize, at_end: bool) -> Option<usize> {
+        if at_end {
+            return self.turn_count.checked_sub(1);
+        }
+        active_navigation_turn_index(&self.rows, scroll_top_row, false)
+            .map(|index| self.indexes[index])
+    }
 }
 
 pub(super) fn navigation_preview_snippet(content: &str, max_graphemes: usize) -> String {
@@ -1285,7 +1654,11 @@ pub(super) fn assistant_response_footer(
                 | TranscriptRowKind::BossTrigger(_)
                 | TranscriptRowKind::BossHistory(..)
                 | TranscriptRowKind::BossHistoryBoundary(_)
-                | TranscriptRowKind::QueuedEmployee => None,
+                | TranscriptRowKind::HistoryBoundary
+                | TranscriptRowKind::FutureBoundary
+                | TranscriptRowKind::PendingPrompt(_)
+                | TranscriptRowKind::QueuedEmployee
+                | TranscriptRowKind::CounselRecommendation(_) => None,
             })
             .filter(|part| !part.content.trim().is_empty())
             .map(|part| part.content.as_str())
@@ -1323,9 +1696,9 @@ pub(super) fn response_footer_message_index(
     response_footer_message_index_from_rows(session, &rows)
 }
 
-pub(super) fn transcript_row_splice(
-    previous: &[TranscriptRowKind],
-    next: &[TranscriptRowKind],
+pub(super) fn transcript_row_splice<T: PartialEq>(
+    previous: &[T],
+    next: &[T],
 ) -> Option<(Range<usize>, usize)> {
     let prefix = previous
         .iter()
@@ -1894,7 +2267,11 @@ fn response_footer_message_index_from_rows(
         | TranscriptRowKind::BossTrigger(_)
         | TranscriptRowKind::BossHistory(..)
         | TranscriptRowKind::BossHistoryBoundary(_)
-        | TranscriptRowKind::QueuedEmployee => None,
+        | TranscriptRowKind::HistoryBoundary
+        | TranscriptRowKind::FutureBoundary
+        | TranscriptRowKind::PendingPrompt(_)
+        | TranscriptRowKind::QueuedEmployee
+        | TranscriptRowKind::CounselRecommendation(_) => None,
     })?;
     let message = session.messages.get(message_index)?;
     if message.streaming {
@@ -1912,7 +2289,11 @@ fn response_footer_message_index_from_rows(
             | TranscriptRowKind::BossTrigger(_)
             | TranscriptRowKind::BossHistory(..)
             | TranscriptRowKind::BossHistoryBoundary(_)
-            | TranscriptRowKind::QueuedEmployee => None,
+            | TranscriptRowKind::HistoryBoundary
+            | TranscriptRowKind::FutureBoundary
+            | TranscriptRowKind::PendingPrompt(_)
+            | TranscriptRowKind::QueuedEmployee
+            | TranscriptRowKind::CounselRecommendation(_) => None,
         })
         .any(|message| !message.content.trim().is_empty())
         .then_some(message_index)
@@ -1939,7 +2320,11 @@ fn turn_answer_start(session: &AgentSession, turn_rows: &[TranscriptRowKind]) ->
         | TranscriptRowKind::BossTrigger(_)
         | TranscriptRowKind::BossHistory(..)
         | TranscriptRowKind::BossHistoryBoundary(_)
-        | TranscriptRowKind::QueuedEmployee => false,
+        | TranscriptRowKind::HistoryBoundary
+        | TranscriptRowKind::FutureBoundary
+        | TranscriptRowKind::PendingPrompt(_)
+        | TranscriptRowKind::QueuedEmployee
+        | TranscriptRowKind::CounselRecommendation(_) => false,
     };
     let Some(last_text) = turn_rows.iter().rposition(is_answer_text) else {
         return turn_rows.len();
@@ -1981,7 +2366,11 @@ pub(super) fn row_turn_id(session: &AgentSession, row: TranscriptRowKind) -> Opt
         TranscriptRowKind::WorkingIndicator
         | TranscriptRowKind::BossHistory(..)
         | TranscriptRowKind::BossHistoryBoundary(_)
-        | TranscriptRowKind::QueuedEmployee => None,
+        | TranscriptRowKind::HistoryBoundary
+        | TranscriptRowKind::FutureBoundary
+        | TranscriptRowKind::PendingPrompt(_)
+        | TranscriptRowKind::QueuedEmployee
+        | TranscriptRowKind::CounselRecommendation(_) => None,
     }
 }
 
@@ -2000,7 +2389,11 @@ pub(super) fn response_row_turn_id(session: &AgentSession, row: TranscriptRowKin
         TranscriptRowKind::WorkingIndicator
         | TranscriptRowKind::BossHistory(..)
         | TranscriptRowKind::BossHistoryBoundary(_)
-        | TranscriptRowKind::QueuedEmployee => None,
+        | TranscriptRowKind::HistoryBoundary
+        | TranscriptRowKind::FutureBoundary
+        | TranscriptRowKind::PendingPrompt(_)
+        | TranscriptRowKind::QueuedEmployee
+        | TranscriptRowKind::CounselRecommendation(_) => None,
         // The marker precedes the response it woke — like the prompt it
         // stands in for, it is not part of the response's hover group.
         TranscriptRowKind::BossTrigger(_) => None,
@@ -2018,7 +2411,7 @@ pub(super) fn turn_fold_label(session: &AgentSession, turn_id: Uuid) -> String {
     let seconds = turn
         .completed_at
         .unwrap_or_else(unix_time)
-        .saturating_sub(turn.started_at)
+        .saturating_sub(turn.provider_started_at.unwrap_or(turn.started_at))
         .max(1);
     let duration = format_worked_duration(seconds);
     if turn.status == TurnStatus::Interrupted {
@@ -2521,5 +2914,88 @@ mod history_row_target_tests {
             TranscriptRowKind::BossHistory(session, BossHistoryRow::TurnFold(turn)),
             TranscriptRowKind::TurnFold(Uuid::new_v4()),
         ));
+    }
+}
+
+#[cfg(test)]
+mod counsel_row_splice_tests {
+    use super::*;
+    use waku_protocol::counsel::{CounselRecommendation, CounselStatus};
+
+    fn record(id: u128, anchor: Option<Uuid>, status: CounselStatus) -> CounselRecommendation {
+        CounselRecommendation {
+            id: Uuid::from_u128(id),
+            revision: 1,
+            title: "t".into(),
+            reason: "r".into(),
+            instruction: "i".into(),
+            sources: Vec::new(),
+            status,
+            created_at: 0,
+            updated_at: 0,
+            boss_session_id: None,
+            completion_evidence: None,
+            anchor,
+            delivery_error: None,
+            approved_revision: None,
+        }
+    }
+
+    #[test]
+    fn counsel_card_with_hidden_anchor_stays_in_its_originating_turn() {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.begin_hidden_turn("Review recent work");
+        let anchor = session.messages.last().unwrap().id;
+        session.push_message(MessageRole::Assistant, "Check the build.");
+        session.finish_active_turn(TurnStatus::Completed);
+        session.begin_turn("Next question");
+
+        let card = record(1, Some(anchor), CounselStatus::Later);
+        let mut rows = folded_transcript_row_kinds(&session, &HashSet::new(), None);
+        splice_counsel_rows(&mut rows, &session, std::slice::from_ref(&card), false);
+        let card_position = rows.iter().position(|row| {
+            *row == TranscriptRowKind::CounselRecommendation(card.id)
+        }).unwrap();
+        let followup_position = rows.iter().position(|row| {
+            *row == TranscriptRowKind::Message(2)
+        }).unwrap();
+        assert!(card_position < followup_position);
+    }
+
+    #[test]
+    fn counsel_cards_seat_after_their_anchor_and_keep_order() {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.push_message(MessageRole::User, "what next");
+        let answer = session.messages.last().unwrap().id;
+        session.push_message(MessageRole::Assistant, "check the audit");
+        let anchor_message = session.messages.last().unwrap().id;
+        let mut rows = vec![
+            TranscriptRowKind::Message(0),
+            TranscriptRowKind::Message(1),
+        ];
+        let recommendations = vec![
+            record(1, Some(anchor_message), CounselStatus::Proposed),
+            record(2, Some(anchor_message), CounselStatus::Dismissed),
+            record(3, Some(answer), CounselStatus::Sent),
+            // A record whose anchor fell out of the window tails the list.
+            record(4, Some(Uuid::new_v4()), CounselStatus::Completed),
+            record(5, None, CounselStatus::Proposed),
+        ];
+        let mut partial = rows.clone();
+        splice_counsel_rows(&mut partial, &session, &recommendations, true);
+        assert!(!partial.contains(&TranscriptRowKind::CounselRecommendation(Uuid::from_u128(4))));
+        splice_counsel_rows(&mut rows, &session, &recommendations, false);
+        assert_eq!(
+            rows,
+            vec![
+                TranscriptRowKind::Message(0),
+                TranscriptRowKind::CounselRecommendation(Uuid::from_u128(3)),
+                TranscriptRowKind::Message(1),
+                TranscriptRowKind::CounselRecommendation(Uuid::from_u128(1)),
+                TranscriptRowKind::CounselRecommendation(Uuid::from_u128(2)),
+                TranscriptRowKind::CounselRecommendation(Uuid::from_u128(4)),
+                TranscriptRowKind::CounselRecommendation(Uuid::from_u128(5)),
+            ]
+        );
     }
 }

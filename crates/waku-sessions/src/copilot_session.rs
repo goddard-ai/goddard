@@ -287,6 +287,7 @@ pub fn provider_session_history(
                     turn_count: history.turns.len() + 1,
                     status: TurnStatus::Completed,
                     provider_turn_started: true,
+                    provider_started_at: None,
                     provider_resume_at: event.get("id").and_then(Value::as_str).map(str::to_owned),
                     interruption: None,
                     started_at: timestamp,

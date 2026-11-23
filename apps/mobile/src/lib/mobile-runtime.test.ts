@@ -147,6 +147,28 @@ describe('mobile runtime projection', () => {
     });
   });
 
+  test('queued prompts retain each selected configuration across later picker changes', () => {
+    let id = 0;
+    const clock = { nowSeconds: () => 99, randomUUID: () => `queued-${++id}` };
+    const first = queueSubmission(session({
+      provider: 'claude', status: 'working', model: 'first-model',
+      reasoning_effort: 'high', runtime_mode: 'ask',
+    }), 'first prompt', clock);
+    const changed = applySessionOptions(first, { model: 'latest-model' }, clock);
+    const second = queueSubmission(changed, 'second prompt', clock);
+    expect(second.model).toBe('latest-model');
+    expect(second.queued_messages?.map((message) => message.configuration)).toEqual([
+      { provider: 'claude', options: {
+        mode: 'ask', model: 'first-model', reasoningEffort: 'high',
+        serviceTier: null, contextWindow: null,
+      } },
+      { provider: 'claude', options: {
+        mode: 'ask', model: 'latest-model', reasoningEffort: 'high',
+        serviceTier: null, contextWindow: null,
+      } },
+    ]);
+  });
+
   test('queues a submission while a turn is live', () => {
     let id = 0;
     const busy = session({ status: 'working' });
@@ -160,6 +182,10 @@ describe('mobile runtime projection', () => {
       content: 'follow up',
       display_content: null,
       attachments: [],
+      configuration: { provider: 'codex', options: {
+        mode: 'fullAccess', model: null, reasoningEffort: null,
+        serviceTier: null, contextWindow: null,
+      } },
       created_at: 99,
     }]);
     expect(queued.updated_at).toBe(99);
@@ -187,6 +213,10 @@ describe('mobile runtime projection', () => {
       content: 'steer mid-turn',
       display_content: null,
       attachments: [],
+      configuration: { provider: 'codex', options: {
+        mode: 'fullAccess', model: null, reasoningEffort: null,
+        serviceTier: null, contextWindow: null,
+      } },
       created_at: 99,
     }]);
     expect(parked.messages.at(-1)).toMatchObject({
@@ -243,6 +273,10 @@ describe('mobile runtime projection', () => {
       content: '@/daemon/file.png',
       display_content: '',
       attachments: [attachment],
+      configuration: { provider: 'codex', options: {
+        mode: 'fullAccess', model: null, reasoningEffort: null,
+        serviceTier: null, contextWindow: null,
+      } },
       created_at: 99,
     }]);
   });

@@ -11,6 +11,7 @@ use super::usage_page::format_tokens_compact;
 use super::*;
 use crate::theme::{ThemeName, ThemeSettings};
 use crate::ui::ActivationExt;
+use crate::ui::shortcut::ShortcutHint;
 use gpui::{ElementId, HighlightStyle, KeyBinding, StyledText, Svg, actions};
 use waku_protocol::auto_prompts::{AutoPromptQuestion, AutoPromptRule};
 use waku_protocol::boss::AvatarStyle;
@@ -232,6 +233,8 @@ pub(super) struct CustomCommandEditor {
 
 pub(super) struct SuggestedPromptEditor {
     id: &'static str,
+    label: Entity<TextInput>,
+    condition: Entity<TextInput>,
     input: Entity<TextInput>,
     error: Option<String>,
 }
@@ -349,6 +352,7 @@ pub(super) const SETTINGS_SEARCH_TITLES: &[(SettingsPage, &[&str])] = &[
             "settings.default_workspace",
             "settings.dormant_after",
             "settings.starred_idle_before_unseen",
+            "settings.prefer_starred_when_nothing_unread",
             "settings.sidebar_shortcut_tags",
             "settings.sidebar_composer_drafts",
             "settings.composer_enter_steers",
@@ -372,7 +376,6 @@ pub(super) const SETTINGS_SEARCH_TITLES: &[(SettingsPage, &[&str])] = &[
             "daemon.agent_tools_title",
             "daemon.agent_settings_title",
             "daemon.new_task_environment",
-            "daemon.qa_branch_title",
         ],
     ),
     (
@@ -468,6 +471,7 @@ pub(super) const SETTINGS_SEARCH_TITLES: &[(SettingsPage, &[&str])] = &[
             "experiments.subagents_title",
             "experiments.automations_title",
             "experiments.boss_title",
+            "experiments.counsel_title",
             "experiments.wireframes_title",
             "settings.composer_dictation",
             "experiments.composer_drafts_title",
@@ -486,6 +490,7 @@ pub(super) const SETTINGS_SEARCH_TITLES: &[(SettingsPage, &[&str])] = &[
             "experiments.github_activity_title",
             "experiments.projects_page_title",
             "experiments.review_queue_title",
+            "daemon.qa_branch_title",
             "experiments.big_picture_title",
             "experiments.friends_title",
             "experiments.sidebar_dock_title",
@@ -1660,7 +1665,7 @@ impl Waku {
                     }),
             )
             .child(match page {
-                SettingsPage::General => self.render_general_settings(&search, cx),
+                SettingsPage::General => self.render_general_settings(&search, window, cx),
                 SettingsPage::Boss => self.render_boss_settings(&search, cx),
                 SettingsPage::Providers => self.render_providers_settings(&search, cx),
                 SettingsPage::Skills => self.render_skills_settings(cx),
@@ -1795,7 +1800,7 @@ impl Waku {
                     .visiting(cx.entity().downgrade());
                 search.source_filter = Some(source);
                 let content = match page {
-                    SettingsPage::General => self.render_general_settings(&search, cx),
+                    SettingsPage::General => self.render_general_settings(&search, window, cx),
                     SettingsPage::Boss => self.render_boss_settings(&search, cx),
                     SettingsPage::Appearance => self.render_appearance_settings(&search, cx),
                     SettingsPage::Providers => self.render_providers_settings(&search, cx),
@@ -1973,8 +1978,16 @@ impl Waku {
     fn render_general_settings(
         &self,
         search: &SettingSearch,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let unread_action = tr!("command_palette.go_to_next_unread_completion");
+        let unread_action = ShortcutHint::action(&GoToNextUnreadCompletion)
+            .resolve(window, cx)
+            .map_or_else(
+                || unread_action.clone(),
+                |keys| format!("{unread_action} ({keys})"),
+            );
         let page_search = search;
         let theme = Theme::current(cx);
         let updater_available = cx
@@ -2132,6 +2145,27 @@ impl Waku {
             },
             self.sandbox_default_card(theme, search, cx),
             setting_card(
+                "icons/folder-clock.svg",
+                tr!("settings.recent_transcript_limit"),
+                tr!("settings.recent_transcript_limit_description"),
+                self.setting_selector(
+                    "recent-transcript-limit-selector",
+                    (0..=20)
+                        .chain([50, 100])
+                        .chain([self.state.recent_transcript_limit])
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .into_iter()
+                        .map(|count| (count, count.to_string()))
+                        .collect(),
+                    self.state.recent_transcript_limit,
+                    100.0,
+                    cx,
+                    |this, count, _, cx| this.set_recent_transcript_limit(count, cx),
+                ),
+                theme,
+                search,
+            ),
+            setting_card(
                 "icons/hourglass.svg",
                 tr!("settings.sidebar_day_start"),
                 tr!("settings.sidebar_day_start_description"),
@@ -2198,7 +2232,7 @@ impl Waku {
                 tr!("settings.starred_idle_before_unseen"),
                 tr!(
                     "settings.starred_idle_before_unseen_description",
-                    keys = crate::platform::primary_shortcut("⌘D", "Ctrl+D")
+                    keys = unread_action.clone()
                 ),
                 toggle_switch(
                     "starred-idle-before-unseen-toggle",
@@ -2209,6 +2243,27 @@ impl Waku {
                     {
                         let enabled = self.state.starred_idle_before_unseen;
                         move |this, _, cx| this.set_starred_idle_before_unseen(!enabled, cx)
+                    },
+                ),
+                theme,
+                search,
+            ),
+            setting_card(
+                "icons/star.svg",
+                tr!("settings.prefer_starred_when_nothing_unread"),
+                tr!(
+                    "settings.prefer_starred_when_nothing_unread_description",
+                    action = unread_action
+                ),
+                toggle_switch(
+                    "prefer-starred-when-nothing-unread-toggle",
+                    self.state.prefer_starred_when_nothing_unread,
+                    false,
+                    theme,
+                    cx,
+                    {
+                        let enabled = self.state.prefer_starred_when_nothing_unread;
+                        move |this, _, cx| this.set_prefer_starred_when_nothing_unread(!enabled, cx)
                     },
                 ),
                 theme,
@@ -2529,7 +2584,6 @@ impl Waku {
                 theme,
                 search,
             ),
-            self.qa_branch_card(theme, search),
         ]
         .into_iter()
         .flatten()
@@ -5750,6 +5804,17 @@ impl Waku {
             },
             ExperimentDef {
                 group: ExperimentGroup::Sessions,
+                id: "counsel-experiment-toggle",
+                icon: "icons/compass.svg",
+                title_key: "experiments.counsel_title",
+                description_key: "experiments.counsel_description",
+                enabled: self.state.counsel_experiment_enabled,
+                set: Self::set_counsel_experiment_enabled,
+                eval_backed: false,
+                tuning: None,
+            },
+            ExperimentDef {
+                group: ExperimentGroup::Sessions,
                 id: "wireframes-experiment-toggle",
                 icon: "icons/panel-left.svg",
                 title_key: "experiments.wireframes_title",
@@ -6007,7 +6072,13 @@ impl Waku {
             let cards: Vec<AnyElement> = experiments
                 .iter()
                 .filter(|experiment| experiment.group == group)
-                .filter_map(|experiment| self.experiment_card(experiment, theme, search, cx))
+                .flat_map(|experiment| {
+                    let card = self.experiment_card(experiment, theme, search, cx);
+                    let qa_branch = (experiment.id == "review-queue-experiment-toggle")
+                        .then(|| self.qa_branch_card(theme, search))
+                        .flatten();
+                    card.into_iter().chain(qa_branch)
+                })
                 .collect();
             settings_group(tr!(group.title_key()), cards, theme)
         });
@@ -7102,7 +7173,7 @@ impl Waku {
         };
         let input = cx.new(|cx| {
             let mut input = TextInput::new(window, cx)
-                .tab_index(0)
+                .tab_index(1)
                 .multi_line()
                 .auto_height()
                 .max_lines(10)
@@ -7110,9 +7181,43 @@ impl Waku {
             input.set_content(prompt, cx);
             input
         });
-        let focus = input.read(cx).focus_handle(cx);
+        let label = cx.new(|cx| {
+            let mut input = TextInput::new(window, cx)
+                .tab_index(0)
+                .accessibility_label(tr!("suggestions.label"));
+            input.set_content(
+                self.state
+                    .suggested_prompt_labels
+                    .get(id)
+                    .cloned()
+                    .or_else(|| action_predictions::suggested_action_title(id))
+                    .unwrap_or_default(),
+                cx,
+            );
+            input
+        });
+        let condition = cx.new(|cx| {
+            let mut input = TextInput::new(window, cx)
+                .tab_index(2)
+                .multi_line()
+                .auto_height()
+                .max_lines(10)
+                .accessibility_label(tr!("suggestions.condition"));
+            input.set_content(
+                self.state
+                    .suggested_prompt_conditions
+                    .get(id)
+                    .cloned()
+                    .unwrap_or_else(|| action_predictions::default_prompt_condition(id).to_owned()),
+                cx,
+            );
+            input
+        });
+        let focus = label.read(cx).focus_handle(cx);
         self.suggested_prompt_editor = Some(SuggestedPromptEditor {
             id,
+            label,
+            condition,
             input,
             error: None,
         });
@@ -7126,6 +7231,19 @@ impl Waku {
         };
         let id = editor.id;
         let prompt = editor.input.read(cx).content().trim().to_owned();
+        let label = editor.label.read(cx).content().trim().to_owned();
+        let condition = editor.condition.read(cx).content().trim().to_owned();
+        if label.is_empty()
+            || label.chars().count() > 96
+            || condition.is_empty()
+            || condition.chars().count() > 2_000
+        {
+            self.suggested_prompt_editor.as_mut().unwrap().error =
+                Some(tr!("suggestions.fields_invalid"));
+            cx.notify();
+            return;
+        }
+
         if !action_predictions::valid_suggested_prompt(id, &prompt) {
             self.suggested_prompt_editor.as_mut().unwrap().error =
                 Some(tr!("suggestions.prompt_invalid"));
@@ -7147,6 +7265,20 @@ impl Waku {
         } else {
             self.state.suggested_prompts.insert(id.to_owned(), prompt);
         }
+        if action_predictions::suggested_action_title(id).as_deref() == Some(label.as_str()) {
+            self.state.suggested_prompt_labels.remove(id);
+        } else {
+            self.state
+                .suggested_prompt_labels
+                .insert(id.to_owned(), label);
+        }
+        if action_predictions::default_prompt_condition(id) == condition {
+            self.state.suggested_prompt_conditions.remove(id);
+        } else {
+            self.state
+                .suggested_prompt_conditions
+                .insert(id.to_owned(), condition);
+        }
         self.suggested_prompt_editor = None;
         self.save();
         cx.notify();
@@ -7154,6 +7286,8 @@ impl Waku {
 
     fn reset_suggested_prompt(&mut self, id: &'static str, cx: &mut Context<Self>) {
         self.state.suggested_prompts.remove(id);
+        self.state.suggested_prompt_labels.remove(id);
+        self.state.suggested_prompt_conditions.remove(id);
         if self
             .suggested_prompt_editor
             .as_ref()
@@ -7173,9 +7307,9 @@ impl Waku {
     ) -> Option<AnyElement> {
         let search = &search.for_group(&tr!("jev.group_prompts"));
         let entries = action_predictions::CANNED_PROMPTS.iter().copied();
-        let mut editor_visible = !search.active();
-        let rows = entries
-            .map(|(id, _label_key)| {
+        let mut cards = Vec::new();
+        for (id, _label_key) in entries {
+            let row = (|| {
                 let (_, chip_label) = self.suggestion_parts(id)?;
                 let title = action_predictions::visible_suggestion_label(&chip_label);
                 let prompt =
@@ -7203,7 +7337,9 @@ impl Waku {
                     .child(settings_button(
                         format!("reset-suggested-prompt-{id}"),
                         tr!("suggestions.reset_prompt"),
-                        self.state.suggested_prompts.contains_key(id),
+                        self.state.suggested_prompts.contains_key(id)
+                            || self.state.suggested_prompt_labels.contains_key(id)
+                            || self.state.suggested_prompt_conditions.contains_key(id),
                         false,
                         true,
                         theme,
@@ -7218,23 +7354,18 @@ impl Waku {
                     theme,
                     search,
                 );
-                if row.is_some()
-                    && self
-                        .suggested_prompt_editor
-                        .as_ref()
-                        .is_some_and(|editor| editor.id == id)
-                {
-                    editor_visible = true;
-                }
                 row
-            })
-            .collect::<Vec<_>>();
-        let mut cards = Vec::new();
-        if let Some(rows) = settings_row_card(rows, theme) {
-            cards.push(rows.into_any_element());
-        }
-        if editor_visible {
-            if let Some(editor) = &self.suggested_prompt_editor {
+            })();
+            let visible = row.is_some();
+            if let Some(row) = row {
+                cards.push(row);
+            }
+            if visible
+                && let Some(editor) = self
+                    .suggested_prompt_editor
+                    .as_ref()
+                    .filter(|editor| editor.id == id)
+            {
                 let form = div()
                     .w_full()
                     .px(px(20.0))
@@ -7257,18 +7388,54 @@ impl Waku {
                             .text_color(theme.text_tertiary)
                             .child(tr!("suggestions.prompt_editor_description")),
                     )
-                    .child(
-                        div()
-                            .w_full()
-                            .px(px(8.0))
-                            .py(px(6.0))
-                            .rounded(px(8.0))
-                            .border(hairline())
-                            .border_color(theme.border_strong)
-                            .bg(theme.inset)
-                            .text_size(sp(12.5))
-                            .line_height(sp(17.0))
-                            .child(editor.input.clone()),
+                    .children(
+                        [
+                            (
+                                tr!("suggestions.label"),
+                                tr!("suggestions.label_help"),
+                                editor.label.clone(),
+                            ),
+                            (
+                                tr!("suggestions.prompt_text"),
+                                tr!("suggestions.prompt_help"),
+                                editor.input.clone(),
+                            ),
+                            (
+                                tr!("suggestions.condition"),
+                                if matches!(editor.id, "approve-plan" | "address-review" | "fix-ci")
+                                {
+                                    tr!("suggestions.workflow_condition_help")
+                                } else {
+                                    tr!("suggestions.condition_help")
+                                },
+                                editor.condition.clone(),
+                            ),
+                        ]
+                        .into_iter()
+                        .map(|(title, help, input)| {
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(5.0))
+                                .child(div().text_color(theme.text).child(title))
+                                .child(
+                                    div()
+                                        .text_size(sp(12.0))
+                                        .text_color(theme.text_tertiary)
+                                        .child(help),
+                                )
+                                .child(
+                                    div()
+                                        .w_full()
+                                        .px(px(8.0))
+                                        .py(px(6.0))
+                                        .rounded(px(8.0))
+                                        .border(hairline())
+                                        .border_color(theme.border_strong)
+                                        .bg(theme.inset)
+                                        .child(input),
+                                )
+                        }),
                     )
                     .when_some(editor.error.as_ref(), |card, error| {
                         card.child(
@@ -7310,6 +7477,9 @@ impl Waku {
                 cards.push(form.into_any_element());
             }
         }
+        let cards = settings_row_card(cards.into_iter().map(Some).collect(), theme)
+            .map(|card| vec![card.into_any_element()])
+            .unwrap_or_default();
         settings_group(tr!("jev.group_prompts"), cards, theme)
             .map(|group| div().mt(px(15.0)).child(group).into_any_element())
     }
@@ -8134,6 +8304,17 @@ impl Waku {
         cx.notify();
     }
 
+    /// Counsel's opt-in rides on the Boss experiment — the combined gate
+    /// lives in `counsel_enabled_on`. Its state is pull-only inside the
+    /// Boss document, so toggling needs no fetch or unmount of its own;
+    /// the sidebar row drops out through the fingerprint and a running
+    /// Counsel chat stays in history untouched.
+    fn set_counsel_experiment_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.counsel_experiment_enabled = enabled;
+        self.save();
+        cx.notify();
+    }
+
     /// The Computer Use experiment opt-in also decides whether its dedicated
     /// settings page appears in navigation. Disabling the experiment turns the
     /// feature flag itself off so new sessions stop registering the Cua bridge.
@@ -8217,6 +8398,16 @@ impl Waku {
         }
         self.state.action_predictions_enabled = enabled;
         self.close_jev_page_if_unused();
+        self.save();
+        cx.notify();
+    }
+
+    fn set_title_rewrites_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.title_rewrites_enabled = enabled;
+        self.close_jev_page_if_unused();
+        if enabled {
+            self.seed_inference_inputs(cx);
+        }
         self.save();
         cx.notify();
     }
@@ -9960,9 +10151,11 @@ impl Waku {
         let needs_credential = credential_missing
             && (mode != AutoModelRouting::Disabled
                 || self.state.status_markers_enabled
-                || self.state.action_predictions_enabled);
+                || self.state.action_predictions_enabled
+                || self.state.title_rewrites_enabled);
         let markers_enabled = self.state.status_markers_enabled;
         let actions_enabled = self.state.action_predictions_enabled;
+        let title_rewrites_enabled = self.state.title_rewrites_enabled;
         let rows = vec![
             settings_row(
                 "icons/fork.svg",
@@ -10010,6 +10203,27 @@ impl Waku {
                     theme,
                     cx,
                     move |this, _, cx| this.set_action_predictions_enabled(!actions_enabled, cx),
+                ),
+                theme,
+                search,
+            ),
+            settings_row(
+                "icons/file-text.svg",
+                tr!("jev.title_rewrites_title"),
+                tr!("jev.title_rewrites_description"),
+                settings_button(
+                    "title-rewrites-toggle",
+                    if title_rewrites_enabled {
+                        tr!("auto_prompts.disable")
+                    } else {
+                        tr!("auto_prompts.enable")
+                    },
+                    true,
+                    false,
+                    true,
+                    theme,
+                    cx,
+                    move |this, _, cx| this.set_title_rewrites_enabled(!title_rewrites_enabled, cx),
                 ),
                 theme,
                 search,
@@ -10200,7 +10414,6 @@ impl Waku {
                                 Self::probes_on(&this.probes, waku_client::DaemonKey::Local),
                                 &this.state.disabled_providers,
                                 None,
-                                this.daemon.is_remote(),
                                 kind,
                             ) {
                                 this.refresh_provider_model_discovery(kind);
@@ -10249,7 +10462,6 @@ impl Waku {
             .trim()
             .to_ascii_lowercase();
         let searching = !normalized_query.is_empty();
-        let remote = self.daemon.is_remote();
         let probes = Self::probes_on(&self.probes, waku_client::DaemonKey::Local).to_vec();
         let disabled_providers = self.state.disabled_providers.clone();
         let current = current.cloned();
@@ -10346,7 +10558,7 @@ impl Waku {
                     ProviderKind::ALL
                         .into_iter()
                         .filter(|kind| {
-                            picker_lists_provider(&probes, &disabled_providers, None, remote, *kind)
+                            picker_lists_provider(&probes, &disabled_providers, None, *kind)
                                 && section_rows.iter().any(|row| {
                                     picker_row_section(row) == PickerSection::Provider(*kind)
                                 })
@@ -10480,7 +10692,7 @@ impl Waku {
                                 cx.notify();
                             }
                         }),
-                        on_confirm: Rc::new(move |this, rows, cx| {
+                        on_confirm: Rc::new(move |this, rows, _, cx| {
                             if let Some(row) = rows
                                 .get(this.route_class_picker.highlight.unwrap_or(0))
                                 .cloned()
@@ -10584,7 +10796,7 @@ impl Waku {
                 }
             }
             // The class spec never lists the route row.
-            PickerRow::Policy(PolicyRowId::Auto) => {}
+            PickerRow::Policy(PolicyRowId::Auto | PolicyRowId::AutoFavorite(_)) => {}
         }
         self.save();
         cx.notify();
@@ -12762,6 +12974,19 @@ impl Waku {
         cx.notify();
     }
 
+    pub(super) fn set_recent_transcript_limit(&mut self, count: usize, cx: &mut Context<Self>) {
+        self.state.recent_transcript_limit = count.min(100);
+        if let Some(id) = self.state.selected_session {
+            self.remember_transcript_visit(id);
+        }
+        self.viewed_transcripts
+            .truncate(self.state.recent_transcript_limit);
+        self.sync_task_views();
+        self.save();
+        self.trim_resident_transcripts();
+        cx.notify();
+    }
+
     fn set_render_math(&mut self, enabled: bool, cx: &mut Context<Self>) {
         if self.state.render_math == enabled {
             return;
@@ -12834,6 +13059,15 @@ impl Waku {
             return;
         }
         self.state.employee_chat_search_days = days;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_prefer_starred_when_nothing_unread(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.prefer_starred_when_nothing_unread == enabled {
+            return;
+        }
+        self.state.prefer_starred_when_nothing_unread = enabled;
         self.save();
         cx.notify();
     }
@@ -14293,7 +14527,7 @@ impl Waku {
                                     cx.notify();
                                 }
                             }),
-                            on_confirm: Rc::new(move |this, rows, cx| {
+                            on_confirm: Rc::new(move |this, rows, _, cx| {
                                 if let Some(row) =
                                     rows.get(this.route_class_picker.highlight.unwrap_or(0))
                                 {

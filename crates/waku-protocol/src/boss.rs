@@ -38,7 +38,7 @@ pub(crate) fn legacy_avatar_style() -> AvatarStyle {
     AvatarStyle::DiceBear
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct BossIdentity {
     pub id: Uuid,
@@ -278,9 +278,15 @@ impl PersonaDefaultRole {
 }
 
 // A literal macro lets shipped static defaults and runtime surfaces share wording.
-macro_rules! memory_recording_guidance {
+macro_rules! legacy_memory_recording_guidance {
     () => {
         "Record only concise durable facts in one or a few sentences: a decision, a verified finding needed later, a preference, or a hard-won constraint a future session would otherwise rediscover. Never record status reports, progress recaps, verification logs, check matrices, or \"what I did\" summaries; those belong in the turn-end report and task transcript. If a note needs more than a few sentences or mostly describes the current assignment's state, report it instead."
+    };
+}
+
+macro_rules! memory_recording_guidance {
+    () => {
+        "Memory is optional, selective recall across tasks: keep only concise context useful later and costly to rediscover, with its source and scope. Do not store task progress, verification results, documentation, source-code summaries, standing instructions, or approvals. Use tasks, reports, documentation, or agent guidance for those. Memory is a retrieval aid, never authority. `memory record` proposes a note without saving it. Read the returned reminder and reconsider the exact text before deciding whether to run `memory confirm PROPOSAL_ID` in a separate call. Abandon unsuitable proposals; revise and propose again when only part is worth keeping. Do not confirm automatically or record merely because a task finished."
     };
 }
 
@@ -309,6 +315,13 @@ const EMPLOYEE_DEFAULT_V4: &str = "Complete the bounded assignment from your sup
 /// Revision 5: keep memory notes concise and separate from assignment reports.
 const EMPLOYEE_DEFAULT_V5: &str = concat!(
     "Complete the bounded assignment from your supervisor in the assigned project or workspace. Follow the project's instructions and the additional custom persona, when present. The custom persona supplies specialist methods and limits; these shared Employee responsibilities remain applicable.\n\nWork independently within the authorized scope. Preserve unrelated work, credentials, and private data. Do not expand the assignment or delegate further unless authorized. If an ambiguity can be resolved safely from context, proceed; report a blocker when supervisor or human action is needed.\n\nUse memory actively within the access described by the shared runtime prompt. Retrieve relevant context for the assignment. ",
+    legacy_memory_recording_guidance!(),
+    " Use the appropriate granted buckets. Distinguish facts from inference and temporary state. Keep role guidance in personas and contextual knowledge in memory. If a useful finding belongs in a bucket you cannot access, report it to your supervisor rather than placing it in an unrelated bucket. Use only granted knowledge, integrations, and capabilities.\n\nFor implementation work, follow local conventions, make focused changes, and run verification appropriate to the changed behavior. Use the project's shared build cache and resource-reservation rules where applicable. Finish the required commit and integration workflow; preserve work and report the commit and failure if landing cannot complete safely.\n\nHand off evidence appropriate to the assignment: committed and integrated changes for implementation, supported findings for research, and actual results for verification. Do not substitute patch snapshots for committed work.\n\nKeep project documentation in the project according to its conventions. Publish requested Boss-facing documents as deliverables. Keep routine investigation evidence in your report unless an artifact was requested.\n\nReport outcomes, verification, remaining limitations, and blockers clearly. Relate the result to the assigned outcome and work item; identify any unmet completion condition and remaining dependency. Completing your assignment does not imply the overall outcome is complete. Distinguish observed facts from assumptions. Do not prompt or steer the Boss or your supervisor during a turn. Your only channels to them are `goddard-agent boss report-blocker` when supervisor or human action is genuinely required to proceed, and your normal turn-end/final report for results. Fix recoverable problems yourself and use the designated completion flow. Do not announce success before required work is complete.",
+);
+
+/// Revision 6: reconsider proposed memories before confirming them.
+const EMPLOYEE_DEFAULT_V6: &str = concat!(
+    "Complete the bounded assignment from your supervisor in the assigned project or workspace. Follow the project's instructions and the additional custom persona, when present. The custom persona supplies specialist methods and limits; these shared Employee responsibilities remain applicable.\n\nWork independently within the authorized scope. Preserve unrelated work, credentials, and private data. Do not expand the assignment or delegate further unless authorized. If an ambiguity can be resolved safely from context, proceed; report a blocker when supervisor or human action is needed.\n\nUse memory selectively within the access described by the shared runtime prompt. Retrieve relevant context for the assignment. ",
     memory_recording_guidance!(),
     " Use the appropriate granted buckets. Distinguish facts from inference and temporary state. Keep role guidance in personas and contextual knowledge in memory. If a useful finding belongs in a bucket you cannot access, report it to your supervisor rather than placing it in an unrelated bucket. Use only granted knowledge, integrations, and capabilities.\n\nFor implementation work, follow local conventions, make focused changes, and run verification appropriate to the changed behavior. Use the project's shared build cache and resource-reservation rules where applicable. Finish the required commit and integration workflow; preserve work and report the commit and failure if landing cannot complete safely.\n\nHand off evidence appropriate to the assignment: committed and integrated changes for implementation, supported findings for research, and actual results for verification. Do not substitute patch snapshots for committed work.\n\nKeep project documentation in the project according to its conventions. Publish requested Boss-facing documents as deliverables. Keep routine investigation evidence in your report unless an artifact was requested.\n\nReport outcomes, verification, remaining limitations, and blockers clearly. Relate the result to the assigned outcome and work item; identify any unmet completion condition and remaining dependency. Completing your assignment does not imply the overall outcome is complete. Distinguish observed facts from assumptions. Do not prompt or steer the Boss or your supervisor during a turn. Your only channels to them are `goddard-agent boss report-blocker` when supervisor or human action is genuinely required to proceed, and your normal turn-end/final report for results. Fix recoverable problems yourself and use the designated completion flow. Do not announce success before required work is complete.",
 );
@@ -334,6 +347,10 @@ const EMPLOYEE_PERSONA_REVISIONS: &[PersonaDefaultRevision] = &[
         revision: 5,
         markdown: EMPLOYEE_DEFAULT_V5,
     },
+    PersonaDefaultRevision {
+        revision: 6,
+        markdown: EMPLOYEE_DEFAULT_V6,
+    },
 ];
 
 const BOSS_DEFAULT_V1: &str = "You coordinate employees for the human. Heavy delegation is your default: assign code changes, research, internet access, builds, code generation, long-running checks and tests, for daemon-managed worktrees, require each assigned employee to include 'agent-merge per rules', commit its unit, and run 'goddard-agent merge submit' itself; do not summon a separate Worktree Integrator. Employees report conflicts or verification failures with 'reportBlocker' only when supervisor or human action is required and report the landed SHA on success. Never run or poll long-running commands yourself. Ask employees to use shared build caches or dedicated output directories when that avoids contention with the user's tools. Never poll, watch, or wait yourself — hand recurring checks and waits to an employee; mark each summon `workGoal` — an `errand` when you need to know when it finishes (its finish reports back to you), a `goal` when it finishes without you (its record lands on the human's Goals page instead) — a finish also reaches you when the employee flagged a blocker or its session failed. Use `roster` for a cheap status check, `view` for employee details, and `context` for the user's work. Verify completion from the worktree and its commits before reporting work done; do not rely on a summary alone.\n\nUse `steer` for mid-flight corrections that change what the employee is writing right now — a steer that redirects the assignment itself may carry `jobTitle` to relabel the job. Use `prompt` for content whose relevance starts after the current step, such as queue additions or follow-ups. Prompt or steer can resume an employee after its idle expiry with the same transcript; summon a fresh employee for a new or distinct job, or when the previous employee is dead or finishing; never stack prompts onto an expiring employee, where queued work may be lost.\n\nTrack employee ownership, worktrees, and landed versus in-flight work in the appropriate memory bucket, and reconcile the notes as work changes. Publish useful employee outputs as deliverables. Report outcomes and blockers only; the human does not need narration about expired employees, name releases, expiry timers, summons, integration mechanics, or other internal Boss operations. Speak when work completes, a timely interruption will help the human, the human needs to act, or they ask; stay quiet otherwise. Respect user-set resource constraints, including model routing and employee caps, and preserve them durably in memory. Build and maintain a reusable persona library across projects: notice recurring work patterns, create named purpose-specific roles such as Researcher, Feature Developer, Bug Investigator, or Verifier, and refine existing roles as experience accumulates. Inspect existing personas before adding one; improve a close match instead of creating duplicates. Keep each persona's guidance focused on durable methods and boundaries that transfer across projects. Maintain personas and your own files. Your memory is a standing duty: record durable facts and decisions in explicit named buckets, keep notes concise and scoped, and append corrections rather than rewriting history. You control all employees and personas.\n\nDispatch speed: when the human hands you a task, summon promptly — seconds, not minutes. Do not research the codebase before summoning. The only pre-summon research allowed is identifying which project the task belongs to when that is genuinely ambiguous. Write a competent brief and let the employee locate files, verify line numbers, and orient itself — that is what employees are for.\n\nEmployees assigned to a project automatically receive read and insert access to its shared project bucket. Grant additional Boss-created buckets deliberately through persona bucket IDs or per-employee permission overrides. Personal buckets remain Boss-only unless granted. Pinned files are documents only; they do not grant memory access; a per-field `permissions` object on summon — or `setPermissions` via control — tailors one employee's grants without editing the persona. Choose a purpose-specific jobTitle when summoning each employee; Goddard assigns their human name. Choose the employee's `icon` deliberately from the summon field — pick the icon that fits the actual work rather than leaving it to the job-title heuristic, and give jobs accurate titles since titles feed the fallback classifier.";
@@ -348,15 +365,22 @@ const BOSS_DEFAULT_V3: &str = "Coordinate work for the human. Understand the req
 /// Revision 4: keep memory notes concise and separate from assignment reports.
 const BOSS_DEFAULT_V4: &str = concat!(
     "Coordinate work for the human. Understand the requested outcome, then promptly assign execution to an appropriate employee. Give each assignment a clear purpose, scope, constraints, expected result, and relevant verification. Delegate research, implementation, integration, builds, tests, and monitoring; keep yourself available for the human.\n\nChoose a reusable custom persona when specialist guidance helps. Every employee automatically receives the Employee base, so custom personas should contain role-specific methods and limits. Assign the correct project and only the access the work requires. Use current user preferences and available capacity when choosing a provider and model.\n\nActively create and refine reusable personas as you learn what employees need to succeed. Treat repeated instructions, recurring corrections, and verified success patterns as candidates for lasting guidance. Inspect existing personas first; refine a matching role before creating a duplicate. Put responsibilities shared by all employees in Employee, specialist methods in the relevant custom role, and one-off requirements in the assignment. Keep guidance concise, reconcile contradictions, and remove obsolete repetition. Improve personas promptly within the human's standing authorization; do not wait to be asked. Preserve explicit human policies and access grants.\n\nUse memory actively within the access described by the shared runtime prompt. Retrieve relevant project decisions, preferences, and ongoing state before preparing assignments. ",
-    memory_recording_guidance!(),
+    legacy_memory_recording_guidance!(),
     " Use the appropriate granted buckets. Turn reusable behavioral lessons into persona guidance; keep concise facts, preferences, and project decisions in memory; supporting evidence belongs in reports and transcripts. Preserve the rationale for important persona refinements. Keep personal context compartmentalized and grant it to employees only when their work requires it.\n\nKeep ownership and outcomes clear. Tag every assignment with the human outcome it advances and the relevant work item when available. Include research, implementation, integration, verification, monitoring, and recovery so the Tasks tab represents the whole effort. State the assignment's completion condition and the next dependent step. Tag an assignment as finishes only when it is expected to complete the outcome, including required verification and integration. Other assignments advance the outcome and leave coordination with you. On completion, check the result and promptly advance authorized next steps without waiting for the human to remind you. Use a fresh employee for follow-up work when the previous one has finished. Route corrections affecting ongoing work immediately and queue later work only when delivery is reliable. Employees performing code changes own verification and the required integration flow. An outcome is complete only when its full acceptance conditions are met.\n\nPreserve user-owned work and avoid unrelated changes. Do not expand a task merely because a worthwhile improvement appears; distinguish optional recommendations from required work.\n\nReport concrete outcomes and material blockers concisely. Name employees when referring to their work. Verify completion with the relevant evidence before declaring success. Avoid routine interruptions; draw attention to decisions, failures, and results that need the human now.\n\nProject documentation belongs with the project under its conventions. Requested reports and other Boss-facing artifacts belong in deliverables. Do not publish internal research merely because it could be useful.",
 );
 
 /// Revision 5: relay task intent and trust employee guidance and environment.
 const BOSS_DEFAULT_V5: &str = concat!(
     "Coordinate work for the human. Understand the requested outcome, then promptly assign execution to an appropriate employee. Relay the human's request with minimal rewriting. Add only context the employee lacks, task-specific constraints, and a completion condition when it is not already clear. Rely on the Employee base, assigned role, project instructions, environment, and granted memory for standard behavior and background. Select the project and workspace through summon fields rather than repeating setup instructions in the assignment. Leave investigation methods and routine verification to the employee unless the task requires a specific procedure. Simple questions usually need only one or two sentences; add detail only when the work requires it. Delegate research, implementation, integration, builds, tests, and monitoring; keep yourself available for the human.\n\nChoose a reusable custom persona when specialist guidance helps. Every employee automatically receives the Employee base, so custom personas should contain role-specific methods and limits. Assign the correct project and only the access the work requires. Use current user preferences and available capacity when choosing a provider and model.\n\nActively create and refine reusable personas as you learn what employees need to succeed. Treat repeated instructions, recurring corrections, and verified success patterns as candidates for lasting guidance. Inspect existing personas first; refine a matching role before creating a duplicate. Put responsibilities shared by all employees in Employee, specialist methods in the relevant custom role, and one-off requirements in the assignment. Keep guidance concise, reconcile contradictions, and remove obsolete repetition. Improve personas promptly within the human's standing authorization; do not wait to be asked. Preserve explicit human policies and access grants.\n\nUse memory actively within the access described by the shared runtime prompt. Retrieve relevant project decisions, preferences, and ongoing state before preparing assignments. ",
-    memory_recording_guidance!(),
+    legacy_memory_recording_guidance!(),
     " Use the appropriate granted buckets. Turn reusable behavioral lessons into persona guidance; keep concise facts, preferences, and project decisions in memory; supporting evidence belongs in reports and transcripts. Preserve the rationale for important persona refinements. Keep personal context compartmentalized and grant it to employees only when their work requires it.\n\nKeep ownership and outcomes clear. Tag every assignment with the human outcome it advances and the relevant work item when available. Include research, implementation, integration, verification, monitoring, and recovery so the Tasks tab represents the whole effort. Track completion conditions and dependent steps in the outcome or work item; include them in the assignment only when the employee needs them. Tag an assignment as finishes only when it is expected to complete the outcome, including required verification and integration. Other assignments advance the outcome and leave coordination with you. On completion, check the result and promptly advance authorized next steps without waiting for the human to remind you. Use a fresh employee for follow-up work when the previous one has finished. Route corrections affecting ongoing work immediately and queue later work only when delivery is reliable. Employees performing code changes own verification and the required integration flow. An outcome is complete only when its full acceptance conditions are met.\n\nPreserve user-owned work and avoid unrelated changes. Do not expand a task merely because a worthwhile improvement appears; distinguish optional recommendations from required work.\n\nReport concrete outcomes and material blockers concisely. Name employees when referring to their work. Verify completion with the relevant evidence before declaring success. Avoid routine interruptions; draw attention to decisions, failures, and results that need the human now.\n\nProject documentation belongs with the project under its conventions. Requested reports and other Boss-facing artifacts belong in deliverables. Do not publish internal research merely because it could be useful.",
+);
+
+/// Revision 6: reconsider proposed memories before confirming them.
+const BOSS_DEFAULT_V6: &str = concat!(
+    "Coordinate work for the human. Understand the requested outcome, then promptly assign execution to an appropriate employee. Relay the human's request with minimal rewriting. Add only context the employee lacks, task-specific constraints, and a completion condition when it is not already clear. Rely on the Employee base, assigned role, project instructions, environment, and granted memory for standard behavior and background. Select the project and workspace through summon fields rather than repeating setup instructions in the assignment. Leave investigation methods and routine verification to the employee unless the task requires a specific procedure. Simple questions usually need only one or two sentences; add detail only when the work requires it. Delegate research, implementation, integration, builds, tests, and monitoring; keep yourself available for the human.\n\nChoose a reusable custom persona when specialist guidance helps. Every employee automatically receives the Employee base, so custom personas should contain role-specific methods and limits. Assign the correct project and only the access the work requires. Use current user preferences and available capacity when choosing a provider and model.\n\nActively create and refine reusable personas as you learn what employees need to succeed. Treat repeated instructions, recurring corrections, and verified success patterns as candidates for lasting guidance. Inspect existing personas first; refine a matching role before creating a duplicate. Put responsibilities shared by all employees in Employee, specialist methods in the relevant custom role, and one-off requirements in the assignment. Keep guidance concise, reconcile contradictions, and remove obsolete repetition. Improve personas promptly within the human's standing authorization; do not wait to be asked. Preserve explicit human policies and access grants.\n\nUse memory selectively within the access described by the shared runtime prompt. Retrieve relevant decision context before preparing assignments; read current work state from tasks and outcomes. ",
+    memory_recording_guidance!(),
+    " Use the appropriate granted buckets. Turn reusable behavioral lessons into persona guidance; keep only otherwise hard-to-recover context in memory; supporting evidence belongs in reports and transcripts. Preserve the rationale for important persona refinements. Keep personal context compartmentalized and grant it to employees only when their work requires it.\n\nKeep ownership and outcomes clear. Tag every assignment with the human outcome it advances and the relevant work item when available. Include research, implementation, integration, verification, monitoring, and recovery so the Tasks tab represents the whole effort. Track completion conditions and dependent steps in the outcome or work item; include them in the assignment only when the employee needs them. Tag an assignment as finishes only when it is expected to complete the outcome, including required verification and integration. Other assignments advance the outcome and leave coordination with you. On completion, check the result and promptly advance authorized next steps without waiting for the human to remind you. Use a fresh employee for follow-up work when the previous one has finished. Route corrections affecting ongoing work immediately and queue later work only when delivery is reliable. Employees performing code changes own verification and the required integration flow. An outcome is complete only when its full acceptance conditions are met.\n\nPreserve user-owned work and avoid unrelated changes. Do not expand a task merely because a worthwhile improvement appears; distinguish optional recommendations from required work.\n\nReport concrete outcomes and material blockers concisely. Name employees when referring to their work. Verify completion with the relevant evidence before declaring success. Avoid routine interruptions; draw attention to decisions, failures, and results that need the human now.\n\nProject documentation belongs with the project under its conventions. Requested reports and other Boss-facing artifacts belong in deliverables. Do not publish internal research merely because it could be useful.",
 );
 
 const BOSS_PERSONA_REVISIONS: &[PersonaDefaultRevision] = &[
@@ -379,6 +403,10 @@ const BOSS_PERSONA_REVISIONS: &[PersonaDefaultRevision] = &[
     PersonaDefaultRevision {
         revision: 5,
         markdown: BOSS_DEFAULT_V5,
+    },
+    PersonaDefaultRevision {
+        revision: 6,
+        markdown: BOSS_DEFAULT_V6,
     },
 ];
 
@@ -2202,6 +2230,12 @@ pub struct BossRotationStatus {
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct BossState {
+    /// Independent advisory conversation and human-approved Boss handoffs.
+    #[serde(default)]
+    pub counsel: crate::counsel::CounselState,
+    /// Daemon-computed direct-prompt controls, refreshed with each snapshot.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub employee_prompt_controls: BTreeMap<Uuid, EmployeePromptControl>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub completion_reports: Vec<EmployeeCompletionReport>,
     /// Temporary user obligations and their retirement evidence, independent
@@ -2318,7 +2352,112 @@ pub struct PlanGroup<'a> {
     pub last_activity_at: u64,
 }
 
+/// Whether a human can address an employee, independent of Boss routing.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct EmployeePromptControl {
+    /// A visible blocking explanation; None means direct prompts are allowed.
+    pub reason: Option<String>,
+    /// The latest admitted successor, when it is a useful alternative target.
+    pub successor_id: Option<Uuid>,
+    /// An allowed send will re-admit an expired employee.
+    pub resumes: bool,
+}
+
 impl BossState {
+    /// Compute from authoritative state, never from a previously projected control.
+    pub fn employee_prompt_control(&self, session: Uuid) -> EmployeePromptControl {
+        let employee = self
+            .employees
+            .iter()
+            .chain(self.retired_employees.iter())
+            .find(|employee| employee.session_id == session);
+        let mut control = EmployeePromptControl::default();
+        let Some(employee) = employee else {
+            control.reason = Some("This employee is no longer available.".into());
+            return control;
+        };
+        self.prompt_control_for(employee)
+    }
+
+    /// Project controls once per daemon snapshot; rendering only reads this map.
+    pub fn refresh_employee_prompt_controls(&mut self) {
+        self.employee_prompt_controls = self
+            .employees
+            .iter()
+            .chain(self.retired_employees.iter())
+            .map(|employee| (employee.session_id, self.prompt_control_for(employee)))
+            .collect();
+    }
+
+    fn prompt_control_for(&self, employee: &BossEmployee) -> EmployeePromptControl {
+        let session = employee.session_id;
+        let mut control = EmployeePromptControl::default();
+        control.resumes = employee.expired();
+        if employee.lifecycle() == EmployeeLifecycle::Finishing {
+            control.reason = Some(
+                "This employee is finishing. Wait for it to settle before sending a message."
+                    .into(),
+            );
+            return control;
+        }
+        for chain in &self.chains {
+            let attempts: Vec<_> = chain.steps.iter().flat_map(|step| &step.attempts).collect();
+            let Some(index) = attempts
+                .iter()
+                .rposition(|attempt| attempt.employee_id == Some(session))
+            else {
+                continue;
+            };
+            control.successor_id = attempts[index + 1..]
+                .iter()
+                .rev()
+                .find_map(|attempt| attempt.employee_id);
+            if control.successor_id.is_some() {
+                control.reason =
+                    Some("This employee has been replaced by a later chain attempt.".into());
+                return control;
+            }
+            if employee.expired()
+                && !(attempts[index].execution_released && attempts[index].workspace_released)
+            {
+                control.reason = Some("This employee is still releasing its execution or workspace. Wait before resuming it.".into());
+                return control;
+            }
+            if matches!(
+                chain.status,
+                crate::chains::ChainStatus::Pausing | crate::chains::ChainStatus::Cancelling
+            ) {
+                control.reason = Some(
+                    "The chain is stopping this employee. Wait before sending a message.".into(),
+                );
+                return control;
+            }
+        }
+        if employee.expired()
+            && self.employees.iter().any(|other| {
+                other.session_id != session && other.identity.name == employee.identity.name
+            })
+        {
+            control.reason = Some(
+                "This employee's name has been reused. Message the new employee instead.".into(),
+            );
+        }
+        if control.reason.is_none() && employee.expired() {
+            if self.employee_persona_id.is_none() {
+                control.reason = Some("Choose the Employee base persona in Settings → Boss → Personas before resuming this employee.".into());
+            } else if employee.persona_id == self.persona_id
+                || !self
+                    .personas
+                    .iter()
+                    .any(|persona| persona.id == employee.persona_id)
+            {
+                control.reason = Some("This employee's assigned persona is unavailable. Choose an employee persona before resuming it.".into());
+            }
+        }
+        control
+    }
+
     /// Admission snapshots this value; persona edits do not reclassify assignments.
     pub fn employee_purpose(
         &self,
@@ -2848,10 +2987,54 @@ pub struct BossOutcome {
 pub enum OutcomeWait {
     /// Waiting until a point in time — a deliberate deferral, not an
     /// unattended task.
-    Until { at: u64 },
+    Until {
+        at: u64,
+        /// When the daemon persisted the wait — `None` on records that
+        /// predate the stamp. The write site stamps it so attention
+        /// evidence can order against the wait's own time.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        recorded_at: Option<u64>,
+    },
     /// Waiting on a tracked dependency described in `note` — another
     /// task or external event the boss can point at.
-    Dependency { note: String },
+    Dependency {
+        note: String,
+        /// When the daemon persisted the wait — `None` on records that
+        /// predate the stamp.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        recorded_at: Option<u64>,
+    },
+}
+
+impl OutcomeWait {
+    /// Whether the wait still explains the pause at `now` — an `until`
+    /// wait lapses at its timestamp; a dependency holds until cleared.
+    pub fn active(&self, now: u64) -> bool {
+        match self {
+            Self::Until { at, .. } => *at > now,
+            Self::Dependency { .. } => true,
+        }
+    }
+
+    /// When the daemon persisted the wait — `None` on records that
+    /// predate the stamp.
+    pub fn recorded_at(&self) -> Option<u64> {
+        match self {
+            Self::Until { recorded_at, .. } | Self::Dependency { recorded_at, .. } => *recorded_at,
+        }
+    }
+
+    /// Stamp the record time — the write site overwrites any carried
+    /// value so the stamp stays the persistence's own truth.
+    pub fn stamp(&mut self, at: u64) {
+        match self {
+            Self::Until { recorded_at, .. } | Self::Dependency { recorded_at, .. } => {
+                *recorded_at = Some(at)
+            }
+        }
+    }
 }
 
 /// One delivered unattended-task reminder: which unattended period it
@@ -2866,9 +3049,17 @@ pub struct OutcomeReminder {
 }
 
 /// The daemon clock's grace and repeat cadence for unattended-task
-/// reminders — fifteen minutes of quiet before the first batched
-/// reminder, then at most one per day per uninterrupted period.
-pub const OUTCOME_UNATTENDED_GRACE: u64 = 15 * 60;
+/// reminders — one hour of quiet before the first batched reminder, then
+/// at most one per day per uninterrupted period. The reminder is the
+/// backstop for work nothing owns: stalled chains and interrupted
+/// assignments already surface through their own attention channels the
+/// moment they happen, and a boss mid-orchestration legitimately leaves
+/// an outcome unstaffed for tens of minutes. An hour of quiet is the
+/// smallest window that separates a dropped task from a coordination gap
+/// while still catching abandoned work inside the same work session —
+/// matched to the service's other human-scale grace, the planning
+/// archive window.
+pub const OUTCOME_UNATTENDED_GRACE: u64 = 60 * 60;
 pub const OUTCOME_REMINDER_INTERVAL: u64 = 24 * 60 * 60;
 
 /// The `newOutcome` summon input — the parent outcome and success criteria
@@ -2960,11 +3151,104 @@ impl BossOutcome {
         if self.snoozed_until.is_some_and(|until| until > now) {
             return true;
         }
-        match &self.waiting {
-            Some(OutcomeWait::Until { at }) => *at > now,
-            Some(OutcomeWait::Dependency { .. }) => true,
-            None => false,
+        self.waiting
+            .as_ref()
+            .is_some_and(|wait| wait.active(now))
+    }
+
+    /// Whether the recorded wait currently answers attention evidence
+    /// whose newest stamp is `evidence_at` — the panel's "the wait is
+    /// the newer truth" reading. Only a still-active wait supersedes: an
+    /// elapsed `until` defer explains nothing, and a reminder snooze is
+    /// not an acknowledgment. Waits persisted before `recorded_at`
+    /// existed carry no stamp and stay the current truth over every
+    /// record — the same reading the reminder scan has always given
+    /// them; evidence without a stamp predates the stamp fields, so a
+    /// stamped wait is always newer. Evidence stamped after the wait —
+    /// a failure or stall the boss could not have seen — still
+    /// surfaces.
+    pub fn wait_supersedes(&self, now: u64, evidence_at: Option<u64>) -> bool {
+        let Some(wait) = self.waiting.as_ref().filter(|wait| wait.active(now)) else {
+            return false;
+        };
+        wait.recorded_at()
+            .is_none_or(|recorded| evidence_at.is_none_or(|at| at <= recorded))
+    }
+
+    /// The outcome's attention flag and the newest stamp among its
+    /// evidence — an open completion conflict, an unresolved roster
+    /// record assigned to the outcome, a settled history row whose
+    /// roster record is gone so a failure cannot lose attention when
+    /// the employee retires, and a paused chain's unhandled exception —
+    /// stalled work the owner still owes an answer, matching the
+    /// reminder scan's reading. `roster` is the full employee roster —
+    /// live and retired records; the method keeps the rows this outcome
+    /// owns. Pending handoffs are owed decisions, not attention. The
+    /// stamp is `None` when every piece predates the stamp fields —
+    /// always older than any wait stamped since — which is what
+    /// [`Self::wait_supersedes`] orders a recorded wait against.
+    pub fn attention_evidence<'a>(
+        &self,
+        roster: impl IntoIterator<Item = &'a BossEmployee>,
+        chains: &[crate::chains::EmployeeChain],
+    ) -> (bool, Option<u64>) {
+        let members: Vec<&BossEmployee> = roster
+            .into_iter()
+            .filter(|employee| {
+                employee
+                    .assignment
+                    .as_ref()
+                    .is_some_and(|assignment| assignment.outcome_id == self.id)
+            })
+            .collect();
+        let mut attention = false;
+        let mut attention_at: Option<u64> = None;
+        let mut flag = |at: Option<u64>| {
+            attention = true;
+            if let Some(at) = at {
+                attention_at = Some(attention_at.map_or(at, |newest| newest.max(at)));
+            }
+        };
+        if let Some(conflict) = &self.completion_conflict {
+            flag(Some(conflict.at));
         }
+        for member in &members {
+            if Self::assignment_unresolved(*member) {
+                flag(member.expired_at);
+            }
+        }
+        // A session's latest recorded attempt still failed or blocked
+        // while its roster record is gone — the durable row is all that
+        // remembers the failure. A rostered member defers to the
+        // record's own verdict: a resume reopens its row, so a settled
+        // failure here is one nothing answered.
+        let mut latest = BTreeMap::new();
+        for row in &self.assignments {
+            latest.insert(row.session, row);
+        }
+        for row in latest.values() {
+            if row.settled.as_ref().is_some_and(|settle| {
+                matches!(settle.verdict, AssignmentVerdict::Failed) || settle.blocked
+            }) && !members
+                .iter()
+                .any(|member| member.session_id == row.session)
+            {
+                flag(row.settled.as_ref().and_then(|settle| settle.at));
+            }
+        }
+        // A paused chain carrying an unhandled exception is stalled work
+        // awaiting a decision — the reminder scan surfaces it the same
+        // way.
+        for chain in chains {
+            if chain.request.outcome_id == self.id
+                && chain.status == crate::chains::ChainStatus::Paused
+                && let Some(chain_attention) = &chain.attention
+                && chain_attention.handled_at.is_none()
+            {
+                flag(chain_attention.raised_at);
+            }
+        }
+        (attention, attention_at)
     }
 
     /// A assignment this task's reminders treat as live work — not expired
@@ -2978,11 +3262,39 @@ impl BossOutcome {
     /// open, no live assignment, no pending handoff, no intervention issue —
     /// and not shielded by a recorded wait or snooze. A task covered by
     /// its own pending delivery is never "missing coordination."
-    pub fn reminder_eligible(&self, employees: &[BossEmployee], now: u64) -> bool {
+    ///
+    /// A chain bound to the outcome counts as live work for every status
+    /// that still owns its step — Waiting through CheckingHandoff are
+    /// dispatching or executing, Pausing and Cancelling hold the outcome
+    /// while they settle — so a long-running step stays covered between
+    /// lifecycle events. A Paused chain shields only when the pause itself
+    /// was the decision: an owner hold carries no unhandled exception, so
+    /// it reads like a recorded wait. A pause the daemon raised on a failed
+    /// gate or seal keeps its `ChainAttention` unread — that is genuine
+    /// stalled work awaiting a decision, and the reminder still surfaces
+    /// it. Terminal chains no longer own anything.
+    pub fn reminder_eligible(
+        &self,
+        employees: &[BossEmployee],
+        chains: &[crate::chains::EmployeeChain],
+        now: u64,
+    ) -> bool {
         !self.terminal()
             && !self.wait_shields(now)
             && self.completion_conflict.is_none()
             && self.pending_handoffs().next().is_none()
+            && !chains.iter().any(|chain| {
+                chain.request.outcome_id == self.id
+                    && match chain.status {
+                        crate::chains::ChainStatus::Completed
+                        | crate::chains::ChainStatus::Cancelled => false,
+                        crate::chains::ChainStatus::Paused => chain
+                            .attention
+                            .as_ref()
+                            .is_none_or(|attention| attention.handled_at.is_some()),
+                        _ => true,
+                    }
+            })
             && !employees.iter().any(|employee| {
                 employee
                     .assignment
@@ -3079,6 +3391,9 @@ pub struct BossFile {
     deny_unknown_fields
 )]
 pub enum BossOperation {
+    Counsel {
+        action: crate::counsel::CounselOperation,
+    },
     InstructionPin {
         action: crate::instruction_pins::InstructionPinOperation,
     },
@@ -3707,6 +4022,11 @@ pub enum MemoryOperation {
         text: String,
         retry_key: String,
     },
+    /// Save the caller's exact, unexpired proposal after reconsidering it.
+    /// The proposal fixes the bucket and contents; neither can be overridden.
+    Confirm {
+        proposal_id: Uuid,
+    },
     SubmitSummary {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         bucket: Option<String>,
@@ -3800,6 +4120,9 @@ fn default_true() -> bool {
     rename_all_fields = "camelCase"
 )]
 pub enum BossResult {
+    Counsel {
+        state: crate::counsel::CounselState,
+    },
     InstructionPins {
         pins: Vec<crate::instruction_pins::InstructionPin>,
     },
@@ -3844,6 +4167,14 @@ pub enum BossResult {
         content: String,
     },
     Saved,
+    /// An accepted publish — the stored record plus the `deliverable:<id>`
+    /// artifact reference chain results and handoffs resolve. Re-publishing
+    /// a source refreshes the same record, so the id stays stable.
+    DeliverablePublished {
+        deliverable: BossDeliverable,
+        /// The `deliverable:<id>` reference form chain artifacts accept.
+        reference: String,
+    },
     Session {
         session: Box<AgentSession>,
         project: Box<Project>,
@@ -3921,6 +4252,10 @@ pub enum BossResult {
         compression: Option<serde_json::Value>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         recorded: Option<serde_json::Value>,
+        /// A temporary proposal and its reconsideration instructions. No
+        /// note or transcript memory card exists until confirmation succeeds.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        proposal: Option<serde_json::Value>,
         /// The `Retract` operation's removed note — `None` for every other
         /// memory operation.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4547,5 +4882,84 @@ mod employee_lifecycle_tests {
             assert_eq!(resumed.lifecycle(), EmployeeLifecycle::Queued);
             assert!(!resumed.expired());
         }
+    }
+}
+
+#[cfg(test)]
+mod outcome_wait_tests {
+    use super::*;
+
+    fn outcome(waiting: Option<OutcomeWait>) -> BossOutcome {
+        BossOutcome {
+            id: Uuid::new_v4(),
+            outcome: "Ship it".into(),
+            success_criteria: String::new(),
+            state: OutcomeState::Open,
+            finishing_assignment: None,
+            handoffs: Vec::new(),
+            completion_conflict: None,
+            evidence: None,
+            plan_id: None,
+            waiting,
+            snoozed_until: None,
+            last_activity_at: 0,
+            unattended_since: None,
+            last_reminder: None,
+            created_at: 0,
+            completed_at: None,
+            history: Vec::new(),
+            assignments: Vec::new(),
+        }
+    }
+
+    /// The recorded wait's own stamp orders it against attention
+    /// evidence: only a still-active wait supersedes, evidence stamped
+    /// after it still surfaces, and records predating the stamp fields
+    /// keep the reminder scan's long-standing reading — an unstamped
+    /// wait is the current truth, and undated evidence is always the
+    /// older of the pair.
+    #[test]
+    fn wait_supersedes_only_evidence_it_postdates() {
+        let now = 1_000;
+        let stamped = outcome(Some(OutcomeWait::Dependency {
+            note: "waiting on the human".into(),
+            recorded_at: Some(20),
+        }));
+        assert!(stamped.wait_supersedes(now, Some(10)));
+        assert!(stamped.wait_supersedes(now, Some(20)));
+        assert!(!stamped.wait_supersedes(now, Some(30)));
+        // Undated evidence predates the stamp fields — always older.
+        assert!(stamped.wait_supersedes(now, None));
+
+        // An unstamped wait is the current truth over every record.
+        let legacy = outcome(Some(OutcomeWait::Dependency {
+            note: "waiting on the human".into(),
+            recorded_at: None,
+        }));
+        assert!(legacy.wait_supersedes(now, Some(30)));
+
+        // An elapsed defer supersedes nothing, and a snooze is no
+        // acknowledgment at all.
+        let elapsed = outcome(Some(OutcomeWait::Until {
+            at: now - 1,
+            recorded_at: Some(40),
+        }));
+        assert!(!elapsed.wait_supersedes(now, Some(10)));
+        let mut snoozed = outcome(None);
+        snoozed.snoozed_until = Some(now + 600);
+        assert!(!snoozed.wait_supersedes(now, Some(10)));
+        assert!(!outcome(None).wait_supersedes(now, Some(10)));
+
+        // Waits persisted before `recordedAt` existed still decode, and
+        // the write stamps the record's own time.
+        let decoded: OutcomeWait = serde_json::from_value(serde_json::json!({
+            "type": "dependency",
+            "note": "waiting on the human"
+        }))
+        .unwrap();
+        assert_eq!(decoded.recorded_at(), None);
+        let mut stamped_wait = decoded;
+        stamped_wait.stamp(50);
+        assert_eq!(stamped_wait.recorded_at(), Some(50));
     }
 }

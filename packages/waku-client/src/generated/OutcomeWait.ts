@@ -6,4 +6,15 @@
  * clears at its timestamp, a `dependency` wait clears when the boss
  * clears it or the named work resolves.
  */
-export type OutcomeWait = { "type": "until", at: number, } | { "type": "dependency", note: string, };
+export type OutcomeWait = { "type": "until", at: number,
+/**
+ * When the daemon persisted the wait — `None` on records that
+ * predate the stamp. The write site stamps it so attention
+ * evidence can order against the wait's own time.
+ */
+recordedAt?: number, } | { "type": "dependency", note: string,
+/**
+ * When the daemon persisted the wait — `None` on records that
+ * predate the stamp.
+ */
+recordedAt?: number, };

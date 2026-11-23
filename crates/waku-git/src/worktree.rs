@@ -248,7 +248,46 @@ fn resolve_repository(project_path: &Path) -> anyhow::Result<(PathBuf, PathBuf, 
     Ok((project_path, repository, project_relative))
 }
 
-/// The name-allocation and checkout loop both creation entry points share.
+/// Restore a saved task snapshot into a new checkout after an explicit repair.
+/// Keep its recorded HEAD and replay saved edits as uncommitted files.
+pub fn create_from_snapshot(
+    project_path: &Path,
+    snapshot: &str,
+    recorded_base: Option<&str>,
+) -> anyhow::Result<CreatedWorktree> {
+    let (_, repository, project_relative) = resolve_repository(project_path)?;
+    let commit = git_stdout(
+        &repository,
+        &["rev-parse", "--verify", &format!("{snapshot}^{{commit}}")],
+    )?;
+    let parent = git_stdout(&repository, &["rev-list", "--parents", "-n", "1", &commit])?
+        .split_whitespace()
+        .nth(1)
+        .map(str::to_owned);
+    let base = match parent {
+        Some(parent) => parent,
+        None => {
+            let recorded_base = recorded_base.context("the saved snapshot has no recorded commit history; choose an existing worktree instead")?;
+            git_stdout(
+                &repository,
+                &[
+                    "rev-parse",
+                    "--verify",
+                    &format!("{recorded_base}^{{commit}}"),
+                ],
+            )?
+        }
+    };
+    add_named(
+        &repository,
+        &project_relative,
+        None,
+        base.trim(),
+        Some(commit.trim()),
+    )
+}
+
+/// The name-allocation and checkout loop shared by creation entry points.
 /// `carried_state`, when set, is a commit whose difference from `base_ref` is
 /// replayed into the new checkout as unstaged work.
 fn add_named(
@@ -1434,6 +1473,52 @@ mod tests {
             "feature\ninitial"
         );
 
+        fs::remove_dir_all(repository.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn a_clean_archive_restores_commits_without_discarded_changes() {
+        let repository = repository();
+        let project = repository.join("packages/app");
+        let created = create(&project, Some("Clean archive"), Some("feature"), false, &[]).unwrap();
+        let original = fs::read(created.path.join("README.md")).unwrap();
+        fs::write(created.path.join("README.md"), "dirty\n").unwrap();
+        fs::write(created.path.join("staged.txt"), "staged\n").unwrap();
+        git_stdout(&created.path, &["add", "staged.txt"]).unwrap();
+        fs::write(created.path.join("notes.txt"), "untracked\n").unwrap();
+        let status_before = git_stdout(&created.path, &["status", "--porcelain"]).unwrap();
+
+        let git_ref = crate::checkpoint::archive_ref(Uuid::new_v4());
+        crate::checkpoint::capture_committed_ref(&created.path, &git_ref).unwrap();
+        assert!(crate::checkpoint::has_ref(&created.path, &git_ref));
+        // Capturing must not mutate files or the real index before removal.
+        assert_eq!(
+            git_stdout(&created.path, &["status", "--porcelain"]).unwrap(),
+            status_before
+        );
+        assert_eq!(
+            fs::read_to_string(created.path.join("README.md")).unwrap(),
+            "dirty\n"
+        );
+        remove(&created.path, true).unwrap();
+
+        ensure(&project, &created.path, None, Some(&git_ref)).unwrap();
+        assert_eq!(fs::read(created.path.join("README.md")).unwrap(), original);
+        assert!(!created.path.join("staged.txt").exists());
+        assert!(!created.path.join("notes.txt").exists());
+        assert!(
+            git_stdout(&created.path, &["status", "--porcelain"])
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            git_stdout(&created.path, &["rev-parse", "HEAD"]).unwrap(),
+            git_stdout(&repository, &["rev-parse", "feature"]).unwrap()
+        );
+        assert_eq!(
+            git_stdout(&created.path, &["log", "--format=%s", "HEAD"]).unwrap(),
+            "feature\ninitial"
+        );
         fs::remove_dir_all(repository.parent().unwrap()).ok();
     }
 

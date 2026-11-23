@@ -941,6 +941,15 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         builtin_label: None,
     },
     CommandDescriptor {
+        id: "sidebar.release_group_alt",
+        action: || Box::new(crate::app::ReleaseSidebarGroupAlt),
+        title_key: "shortcuts.dismiss",
+        title_index: None,
+        category: C::Workspace,
+        editability: EDITABLE,
+        builtin_label: None,
+    },
+    CommandDescriptor {
         id: "bigpicture.dismiss",
         action: || Box::new(crate::app::DismissBigPicture),
         title_key: "shortcuts.dismiss",
@@ -1870,8 +1879,8 @@ pub static COMMANDS: &[CommandDescriptor] = &[
     CommandDescriptor {
         id: "model.favorite.1",
         action: || Box::new(crate::SelectFavoriteModel { index: 0 }),
-        title_key: "keyboard_options.automatic_routing",
-        title_index: None,
+        title_key: "keybind.command.favorite_model",
+        title_index: Some(1),
         category: C::Workspace,
         editability: EDITABLE,
         builtin_label: None,
@@ -1880,7 +1889,7 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         id: "model.favorite.2",
         action: || Box::new(crate::SelectFavoriteModel { index: 1 }),
         title_key: "keybind.command.favorite_model",
-        title_index: Some(1),
+        title_index: Some(2),
         category: C::Workspace,
         editability: EDITABLE,
         builtin_label: None,
@@ -1889,7 +1898,7 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         id: "model.favorite.3",
         action: || Box::new(crate::SelectFavoriteModel { index: 2 }),
         title_key: "keybind.command.favorite_model",
-        title_index: Some(2),
+        title_index: Some(3),
         category: C::Workspace,
         editability: EDITABLE,
         builtin_label: None,
@@ -1898,7 +1907,7 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         id: "model.favorite.4",
         action: || Box::new(crate::SelectFavoriteModel { index: 3 }),
         title_key: "keybind.command.favorite_model",
-        title_index: Some(3),
+        title_index: Some(4),
         category: C::Workspace,
         editability: EDITABLE,
         builtin_label: None,
@@ -1907,7 +1916,7 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         id: "model.favorite.5",
         action: || Box::new(crate::SelectFavoriteModel { index: 4 }),
         title_key: "keybind.command.favorite_model",
-        title_index: Some(4),
+        title_index: Some(5),
         category: C::Workspace,
         editability: EDITABLE,
         builtin_label: None,
@@ -1916,7 +1925,7 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         id: "model.favorite.6",
         action: || Box::new(crate::SelectFavoriteModel { index: 5 }),
         title_key: "keybind.command.favorite_model",
-        title_index: Some(5),
+        title_index: Some(6),
         category: C::Workspace,
         editability: EDITABLE,
         builtin_label: None,
@@ -1925,7 +1934,7 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         id: "model.favorite.7",
         action: || Box::new(crate::SelectFavoriteModel { index: 6 }),
         title_key: "keybind.command.favorite_model",
-        title_index: Some(6),
+        title_index: Some(7),
         category: C::Workspace,
         editability: EDITABLE,
         builtin_label: None,
@@ -1934,7 +1943,7 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         id: "model.favorite.8",
         action: || Box::new(crate::SelectFavoriteModel { index: 7 }),
         title_key: "keybind.command.favorite_model",
-        title_index: Some(7),
+        title_index: Some(8),
         category: C::Workspace,
         editability: EDITABLE,
         builtin_label: None,
@@ -1943,7 +1952,7 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         id: "model.favorite.9",
         action: || Box::new(crate::SelectFavoriteModel { index: 8 }),
         title_key: "keybind.command.favorite_model",
-        title_index: Some(8),
+        title_index: Some(9),
         category: C::Workspace,
         editability: EDITABLE,
         builtin_label: None,
@@ -2748,6 +2757,7 @@ pub static ENTRIES: &[CatalogEntry] = &[
     ),
     // === app::init_big_picture_keys ===================================================
     e("bigpicture.dismiss", All, "escape", BigPicture),
+    e("bigpicture.dismiss", All, "escape", RushModal),
     e("bigpicture.left", All, "left", BigPicture),
     e("bigpicture.right", All, "right", BigPicture),
     e("bigpicture.confirm", All, "enter", BigPicture),
@@ -2814,6 +2824,7 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("dialog.image_preview.dismiss", All, "escape", ImagePreview),
     // === app::init_sidebar_keys =============================================================
     e("sidebar.cancel_rename", All, "escape", SessionRenameField),
+    e("sidebar.release_group_alt", All, "escape", SidebarGroupAlt),
     // === app::init_skills_keys ================================================================
     e("menu.select_next", All, "down", SkillsSearch),
     e("menu.select_previous", All, "up", SkillsSearch),
@@ -3074,13 +3085,13 @@ pub static ENTRIES: &[CatalogEntry] = &[
         "terminal.maximize_restore",
         All,
         "secondary-shift-enter",
-        StandaloneTerminal,
+        TerminalMaximizeScope,
     ),
     e(
         "workspace.push_base",
         All,
         "secondary-shift-enter",
-        WorkspaceNotStandaloneTerminal,
+        WorkspaceNotTerminalMaximize,
     ),
     e("workspace.pin_task", All, "secondary-alt-p", Workspace),
     e("workspace.copy_selection", All, "secondary-c", Workspace),
@@ -3092,6 +3103,12 @@ pub static ENTRIES: &[CatalogEntry] = &[
     ),
     e("find.open", All, "secondary-f", Workspace),
     e("find.open", All, "secondary-f", WorkspaceTextInput),
+    e("find.open", All, "secondary-f", "Terminal"),
+    e("find.open", All, "secondary-f", "TerminalFind > TextInput"),
+    e("find.next", All, "enter", "TerminalFind > TextInput"),
+    e("find.previous", All, "shift-enter", "TerminalFind > TextInput"),
+    e("find.close", All, "escape", "TerminalFind > TextInput"),
+    e("find.close", All, "escape", "TerminalFind"),
     e("find.open_replace", All, "secondary-alt-f", Workspace),
     e("find.next", All, "secondary-g", Workspace),
     e("find.previous", All, "secondary-shift-g", Workspace),
@@ -3175,6 +3192,7 @@ mod ctx {
     pub const PushBaseDialog: &str = "PushBaseDialog";
     pub const ResetCreditDialog: &str = "ResetCreditDialog";
     pub const BigPicture: &str = "BigPicture";
+    pub const RushModal: &str = "RushModal";
     pub const GoalInput: &str = "GoalDialog > TextInput";
     pub const GoalDialog: &str = "GoalDialog";
     pub const SendFileInput: &str = "SendFileDialog > TextInput";
@@ -3184,6 +3202,7 @@ mod ctx {
     pub const PastedText: &str = "PastedText";
     pub const ImagePreview: &str = "ImagePreview";
     pub const SessionRenameField: &str = "SessionRename > TextInput";
+    pub const SidebarGroupAlt: &str = "SidebarGroupAlt";
     pub const SkillsSearch: &str = "SkillsPane > TextInput";
     pub const ShortcutsDialog: &str = "ShortcutsDialog";
     pub const TerminalBarInput: &str = "TerminalCommandBar > TextInput";
@@ -3192,7 +3211,7 @@ mod ctx {
     /// The floating terminal card — Escape hides it, but an open command
     /// bar or context menu inside keeps its own dismiss first.
     pub const DockedTerminalNotCommandBar: &str = "DockedTerminal && !TerminalCommandBar && !Menu";
-    pub const StandaloneTerminal: &str = "StandaloneTerminal";
+    pub const TerminalMaximizeScope: &str = "StandaloneTerminal || (RightPanel > Terminal)";
     pub const NotTerminal: &str = "!Terminal";
     /// The ⌘⌥←/⌘⌥→ session sweep — the experiment flag keeps a disabled Big
     /// Picture from eating the chords; !Terminal and !Menu spare their input.
@@ -3206,7 +3225,8 @@ mod ctx {
     pub const InboxPage: &str = "InboxPage";
     pub const DraftsPage: &str = "DraftsPage";
     pub const WorkspaceNotTerminal: &str = "Workspace && !Terminal";
-    pub const WorkspaceNotStandaloneTerminal: &str = "Workspace && !StandaloneTerminal";
+    pub const WorkspaceNotTerminalMaximize: &str =
+        "Workspace && !StandaloneTerminal && !(RightPanel > Terminal)";
     /// Where the composer exists — the session surface mounts its lane, and
     /// Big Picture remounts it. Pages and terminal views never carry the
     /// context, so their own chords (tab switching, pty input) can't lose to

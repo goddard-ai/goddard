@@ -38,6 +38,24 @@ pub(super) enum SessionStartPlan {
     Routed(Box<RouteStartPlan>),
 }
 
+const ROUTE_RESPONSE_FAILED: &str = "route-response-failed";
+const ROUTED_PROVIDER_UNAVAILABLE: &str = "routed-provider-unavailable";
+
+pub(super) fn is_start_fallback(decision: &RouteDecision) -> bool {
+    matches!(
+        decision.reason.as_str(),
+        ROUTE_RESPONSE_FAILED | ROUTED_PROVIDER_UNAVAILABLE
+    )
+}
+
+/// Older tasks could start on the draft's provider with Auto still set.
+/// The optimistic first turn alone is not evidence of a provider start.
+pub(super) fn pending_auto_route(session: &AgentSession) -> bool {
+    session.auto_route
+        && session.provider_cursor.is_none()
+        && !session.turns.iter().any(|turn| turn.provider_turn_started)
+}
+
 /// Everything needed to route a draft's first prompt and start the resolved
 /// provider, captured while the session's own state is still on the UI
 /// thread. Provider/model-dependent request fields resolve after the daemon
@@ -77,31 +95,75 @@ pub(super) struct RouteStartPlan {
     fallback: anyhow::Result<DriverStartRequest>,
 }
 
+pub(super) struct StartedRoute {
+    pub decision: RouteDecision,
+    pub service_tier: Option<String>,
+    pub context_window: Option<String>,
+}
+
 impl RouteStartPlan {
-    /// Route the prompt, then start the resolved provider — the blocking
-    /// half of an Auto submission, run on the background executor inside
-    /// `prepare_submission`. The decision rides back for the session record;
-    /// `None` means the route call failed and the draft's own provider
-    /// started instead.
+    /// Route the prompt, then start either the resolved provider or the
+    /// draft's fallback. Return the decision for the request that started.
     pub(super) fn route_and_start(
         self,
         cwd: PathBuf,
         stage: &StageReporter,
-    ) -> anyhow::Result<(Option<RouteDecision>, PreparedDriver)> {
+        task_registration: Option<(Project, AgentSession)>,
+    ) -> anyhow::Result<(StartedRoute, PreparedDriver)> {
         SubmissionStage::Routing.report(stage);
-        let routed = self.route().map(|decision| {
-            self.start_request(&decision.target)
-                .map(|request| (decision, request))
+        let routed = self
+            .route()
+            .map_err(|_| ROUTE_RESPONSE_FAILED)
+            .and_then(|decision| {
+                self.start_request(&decision.target)
+                    .map(|request| (decision, request))
+                    .map_err(|_| ROUTED_PROVIDER_UNAVAILABLE)
+            });
+        let (mut decision, request) = match routed {
+            Ok(routed) => routed,
+            Err(reason) => {
+                eprintln!(
+                    "Auto routing fallback for task {}: {reason}",
+                    self.session_id
+                );
+                let request = self.fallback?;
+                let decision = RouteDecision {
+                    target: RouteTarget {
+                        provider: request.provider,
+                        model: None,
+                        effort: None,
+                    },
+                    class: None,
+                    applied_class: None,
+                    class_confidence: None,
+                    phased: false,
+                    reason: reason.to_owned(),
+                    backend: None,
+                    eval_latency_ms: None,
+                };
+                (decision, request)
+            }
+        };
+        decision.target.model.clone_from(&request.options.model);
+        decision
+            .target
+            .effort
+            .clone_from(&request.options.reasoning_effort);
+        // Registration must precede startup. Keep Auto pending in that row
+        // until startup succeeds and the desktop commits the outcome.
+        let task_registration = task_registration.map(|(project, mut session)| {
+            if session.provider != decision.target.provider {
+                session.agent_preset = None;
+            }
+            (project, session)
         });
-        let (decision, request) = match routed {
-            Ok(Ok((decision, request))) => (Some(decision), request),
-            // A route call that cannot answer, or a resolved provider with no
-            // binary, still owes the user a running session — the draft's own
-            // provider stands in, the way an unrouted submission would start.
-            Ok(Err(_)) | Err(_) => (None, self.fallback?),
+        let started_route = StartedRoute {
+            decision,
+            service_tier: request.options.service_tier.clone(),
+            context_window: request.options.context_window.clone(),
         };
         SubmissionStage::Starting.report(stage);
-        start_driver(request, cwd).map(|driver| (decision, driver))
+        start_driver(request, cwd, task_registration).map(|driver| (started_route, driver))
     }
 
     fn route(&self) -> anyhow::Result<RouteDecision> {
@@ -444,7 +506,10 @@ impl Waku {
         if self.managed_session_is_boss(self.daemons.session_owner(session.id), session.id) {
             return None;
         }
-        let owner = session.route_decision.as_ref()?;
+        let owner = session
+            .route_decision
+            .as_ref()
+            .filter(|decision| !is_start_fallback(decision))?;
         let daemon = self.daemons.daemon_for_session(session.id)?;
         if !daemon.settings().eval_ready() {
             return None;
@@ -517,7 +582,6 @@ impl Waku {
         &mut self,
         session_id: Uuid,
         decision: TurnRouteDecision,
-        driver: &waku_client::driver::DriverHandle,
         cx: &mut Context<Self>,
     ) {
         let Some(session) = self
@@ -571,24 +635,9 @@ impl Waku {
         } else if let Some(effort) = effort {
             session.reasoning_effort = Some(effort);
         }
-        let applied = self
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-            .map(|session| self.session_options(session))
-            .is_some_and(|options| driver.apply_options(options));
-        if !applied {
-            if let Some(session) = self.state.session_mut(session_id) {
-                (
-                    session.model,
-                    session.reasoning_effort,
-                    session.service_tier,
-                    session.context_window,
-                ) = previous;
-            }
-            return;
-        }
+        // The configured-prompt command validates this selection before
+        // provider execution. Applying it here would block the UI on IPC
+        // and could silently fall back to settings the prompt did not select.
         let mut class_record = None;
         if let Some(session) = self.state.session_mut(session_id) {
             session.updated_at = unix_time();
@@ -612,6 +661,7 @@ impl Waku {
                 }
             }
         }
+        self.record_selected_configuration(session_id);
         self.state.mark_session_dirty(session_id);
         if let Some((class, provider_map, target)) = class_record {
             self.record_route_class(session_id, class, provider_map, target, cx);

@@ -1,4 +1,4 @@
-import type { AgentSession, QueuedMessage } from './generated'
+import type { AgentSession, PromptConfiguration, QueuedMessage } from './generated'
 
 /** Adopt acknowledged metadata without replacing a loaded transcript with a list row. */
 export function reconcileSavedSession(local: AgentSession, saved?: AgentSession): AgentSession {
@@ -8,8 +8,19 @@ export function reconcileSavedSession(local: AgentSession, saved?: AgentSession)
   return {
     ...(saved.detail_loaded === false ? local : saved),
     metadata_revision: metadata.metadata_revision,
+    provider: metadata.provider,
+    runtime_mode: metadata.runtime_mode,
+    model: metadata.model,
+    reasoning_effort: metadata.reasoning_effort,
+    service_tier: metadata.service_tier,
+    context_window: metadata.context_window,
+    auto_route: metadata.auto_route,
+    route_decision: metadata.route_decision,
     title: metadata.title,
     auto_title: metadata.auto_title,
+    auto_title_is_prompt: metadata.detail_loaded !== false
+      ? metadata.auto_title_is_prompt
+      : local.auto_title === metadata.auto_title && local.auto_title_is_prompt,
     agent_rename_allowed: metadata.agent_rename_allowed,
     pinned_at: metadata.pinned_at,
     archived_at: metadata.archived_at,
@@ -17,6 +28,31 @@ export function reconcileSavedSession(local: AgentSession, saved?: AgentSession)
     dormant_exempt_until: metadata.dormant_exempt_until,
     updated_at: metadata.updated_at,
   }
+}
+
+/** Snapshot the user-selected settings when a prompt is admitted. */
+export function promptConfigurationForSession(session: AgentSession): PromptConfiguration {
+  return {
+    provider: session.provider,
+    options: {
+      mode: session.runtime_mode,
+      model: session.model ?? null,
+      reasoningEffort: session.reasoning_effort ?? null,
+      serviceTier: session.service_tier ?? null,
+      contextWindow: session.context_window ?? null,
+    },
+  }
+}
+
+/** Refresh live transcript state without silently changing a prompt's selected options. */
+export function sameSessionRuntimeOptions(left: AgentSession, right: AgentSession): boolean {
+  return left.provider === right.provider
+    && left.runtime_mode === right.runtime_mode
+    && (left.model ?? null) === (right.model ?? null)
+    && (left.reasoning_effort ?? null) === (right.reasoning_effort ?? null)
+    && (left.service_tier ?? null) === (right.service_tier ?? null)
+    && (left.context_window ?? null) === (right.context_window ?? null)
+    && (left.agent_preset ?? null) === (right.agent_preset ?? null)
 }
 
 /** Whether the session has a provider conversation whose provider must be preserved. */

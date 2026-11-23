@@ -83,6 +83,12 @@ pub struct DaemonSettings {
     /// personas, and plans surfaces. Defaults on in development builds and
     /// opt-in in release builds.
     pub boss_experiment_enabled: bool,
+    /// Experimental opt-in for Counsel — the human's persistent adviser
+    /// chat, its recommendations, and its Boss handoffs, nested under the
+    /// Boss experiment: both flags must be on before Counsel opens or
+    /// operates. Off by default in every build, development included.
+    #[serde(default)]
+    pub counsel_experiment_enabled: bool,
     /// Disable automatic rotation of settled Boss chats. Off by default, including release builds.
     #[serde(default)]
     pub boss_rotation_disabled: bool,
@@ -207,6 +213,7 @@ impl Default for DaemonSettings {
             provider_route_classes: ProviderRouteClassMap::new(),
             auto_prompts: crate::auto_prompts::default_rules(),
             boss_experiment_enabled: default_experiment_enabled(),
+            counsel_experiment_enabled: false,
             boss_rotation_disabled: false,
             boss_rotation_context_threshold: default_boss_rotation_threshold(),
             employee_chat_search_days: default_employee_chat_search_days(),

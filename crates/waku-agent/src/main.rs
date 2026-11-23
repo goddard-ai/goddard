@@ -19,6 +19,7 @@
 //! user.
 
 mod boss_contract;
+mod counsel;
 mod help;
 mod instruction_pins;
 mod resources;
@@ -140,6 +141,7 @@ static HELP_JSON_OUTPUT: AtomicBool = AtomicBool::new(false);
 /// leaf in `schema()` must resolve through one of these. Regression guard:
 /// the tests assert every schema leaf's action is listed here.
 const BOSS_ACTIONS: &[&str] = &[
+    "counsel",
     "summon",
     "prompt",
     "transcript",
@@ -337,6 +339,26 @@ fn leaf_schema(path: &str) -> serde_json::Value {
         .filter_map(|icon| serde_json::to_value(icon).ok()?.as_str().map(str::to_owned))
         .collect::<Vec<_>>();
     let (inputs, output, example) = match path {
+        "boss counsel view" => (
+            json!({}),
+            json!({"json":{"type":"counsel","state":"persistent Counsel conversation and recommendation decisions"}}),
+            "goddard-agent boss counsel view".to_owned(),
+        ),
+        "boss counsel propose" => (
+            json!({"--json|--json-file":{"required":true,"exactlyOne":true,"type":"object: title, reason, instruction, sources (session UUIDs), optional replaces (pending recommendation UUID)"}}),
+            json!({"json":{"type":"counsel","state":"recommendations awaiting human approval; never sends to Boss"}}),
+            "goddard-agent boss counsel propose --json-file proposal.json".to_owned(),
+        ),
+        "boss counsel handoff" => (
+            json!({"--text|--file":{"required":true,"exactlyOne":true,"type":"human-directed message for Boss"}}),
+            json!({"json":{"type":"saved","meaning":"Boss handoff accepted for delivery"}}),
+            "goddard-agent boss counsel handoff --text 'Check the build and report the result'".to_owned(),
+        ),
+        "boss counsel complete" => (
+            json!({"ID":{"positional":true,"required":true,"type":"recommendation UUID"},"--revision":{"required":true,"type":"integer"},"--evidence":{"required":true,"type":"concrete reported completion evidence"}}),
+            json!({"json":{"type":"counsel","state":"recommendation completion with reported evidence"}}),
+            "goddard-agent boss counsel complete ID --revision 2 --evidence 'Boss reported the remaining check passed'".to_owned(),
+        ),
         "boss instructions list" => (
             json!({"--all":{"optional":true,"type":"boolean flag","notes":"include retired and superseded pins"}}),
             json!({"json":{"type":"instructionPins","pins":"source-backed instruction records, states and revisions"}}),
@@ -586,7 +608,7 @@ fn leaf_schema(path: &str) -> serde_json::Value {
         "boss memory create" => (
             json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"name":{"required":true},"purpose":{"optional":true}}}}),
             json!({"json":{"type":"memory","buckets":"created bucket metadata"}}),
-            "goddard-agent boss memory create --json '{\"name\":\"Operating rules\",\"purpose\":\"Boss-owned guidance\"}'".to_owned(),
+            "goddard-agent boss memory create --json '{\"name\":\"Decision context\",\"purpose\":\"Concise rationale costly to rediscover\"}'".to_owned(),
         ),
         "boss memory overview" => (
             json!({"BUCKET":{"positional":true,"required":"optional — omit with --project or to use the caller's project bucket","type":"named bucket ID"},"--project":{"optional":true,"type":"registered project name/id or absolute project root; resolves to the project's shared bucket"}}),
@@ -595,8 +617,13 @@ fn leaf_schema(path: &str) -> serde_json::Value {
         ),
         "boss memory record" => (
             json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"bucket":{"optional":"bucket id; omit with project or to use the caller's project bucket"},"project":{"optional":true,"type":"registered project name/id or absolute project root"},"kind":{"required":true,"enum":["fact","observation","question"]},"text":{"required":true,"notes":waku_protocol::boss::MEMORY_RECORDING_GUIDANCE},"retryKey":{"required":true}}},"--project":{"optional":true,"type":"registered project name/id or absolute project root; injected as the payload's project"}}),
-            json!({"json":{"type":"memory","recorded":"original note","compression":"optional agent-written summary request"}}),
+            json!({"json":{"type":"memory","proposal":"not saved: exact proposed text, reconsideration instructions, proposal id and confirm command; expires after ten minutes or daemon restart"}}),
             "goddard-agent boss memory record --project octane --json-file note.json".to_owned(),
+        ),
+        "boss memory confirm" => (
+            json!({"PROPOSAL_ID":{"positional":true,"required":true,"type":"UUID returned by record to this caller; fixes exact text and bucket"}}),
+            json!({"json":{"type":"memory","recorded":"confirmed original note","compression":"optional agent-written summary request"}}),
+            "goddard-agent boss memory confirm PROPOSAL_ID".to_owned(),
         ),
         "boss memory summary" => (
             json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"bucket":{"optional":"bucket id; omit with project or to use the caller's project bucket"},"project":{"optional":true,"type":"registered project name/id or absolute project root"},"start":{"required":true,"type":"integer note index"},"end":{"required":true,"type":"integer note index"},"text":{"required":true,"type":"agent-written summary"}}},"--project":{"optional":true,"type":"registered project name/id or absolute project root; injected as the payload's project"}}),
@@ -619,7 +646,7 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             "goddard-agent boss memory retract --project octane 3-a1b2c3".to_owned(),
         ),
         "boss memory migrate" => (
-            json!({"BUCKET":{"positional":true,"required":true,"type":"existing named bucket ID"},"SOURCE":{"positional":true,"required":true,"type":"'boss' or absolute project root"},"--dry-run":{"type":"boolean","default":true,"notes":"false appends candidates; source files are never modified"}}),
+            json!({"BUCKET":{"positional":true,"required":true,"type":"existing named bucket ID"},"SOURCE":{"positional":true,"required":true,"type":"'boss' or absolute project root"},"--dry-run":{"type":"boolean","default":true,"notes":"false is human-only; agents must propose and confirm individual notes; source files are never modified"}}),
             json!({"json":{"type":"memory","migration":{"dryRun":"candidate list when true; imported count when false","candidates":"inspectable source paths and original note text"}}}),
             "goddard-agent boss memory migrate project-abc boss".to_owned(),
         ),
@@ -635,8 +662,13 @@ fn leaf_schema(path: &str) -> serde_json::Value {
         ),
         "memory record" => (
             json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"bucket":{"optional":"bucket id; omit with project or to use this session's project bucket"},"project":{"optional":true,"type":"registered project name/id or absolute project root"},"kind":{"required":true,"enum":["fact","observation","question"]},"text":{"required":true,"notes":waku_protocol::boss::MEMORY_RECORDING_GUIDANCE},"retryKey":{"required":true}}},"--project":{"optional":true,"type":"registered project name/id or absolute project root; injected as the payload's project"}}),
-            json!({"json":{"type":"memory","recorded":"original note","compression":"optional agent-written summary request"}}),
+            json!({"json":{"type":"memory","proposal":"not saved: exact proposed text, reconsideration instructions, proposal id and confirm command; expires after ten minutes or daemon restart"}}),
             "goddard-agent memory record --json-file note.json".to_owned(),
+        ),
+        "memory confirm" => (
+            json!({"PROPOSAL_ID":{"positional":true,"required":true,"type":"UUID returned by record to this caller; fixes exact text and bucket"}}),
+            json!({"json":{"type":"memory","recorded":"confirmed original note","compression":"optional agent-written summary request"}}),
+            "goddard-agent memory confirm PROPOSAL_ID".to_owned(),
         ),
         "memory summary" => (
             json!({"--json|--json-file":{"required":true,"exactlyOne":true,"object":{"bucket":{"optional":"bucket id; omit with project or to use this session's project bucket"},"project":{"optional":true,"type":"registered project name/id or absolute project root"},"start":{"required":true,"type":"integer note index"},"end":{"required":true,"type":"integer note index"},"text":{"required":true,"type":"agent-written summary"}}},"--project":{"optional":true,"type":"registered project name/id or absolute project root; injected as the payload's project"}}),
@@ -685,7 +717,7 @@ fn leaf_schema(path: &str) -> serde_json::Value {
         ),
         "boss deliverable publish" => (
             json!({"PATH":{"positional":true,"required":true,"type":"absolute file or directory path","notes":"Publishes to the human-facing Deliverables UI; use only for artifacts the human explicitly or implicitly requested. Internal reports belong in employee transcripts."},"--name":{"type":"optional descriptive title for the human"},"--reference":{"type":"flag; keep a live path instead of copying the file into the daemon's store"}}),
-            json!({"json":{"type":"saved"}}),
+            json!({"json":{"type":"deliverablePublished","deliverable":"the stored BossDeliverable record — id is durable and stable across re-publish","reference":"deliverable:<id> — the artifact-reference form chain results accept"}}),
             "goddard-agent boss deliverable publish /abs/report.md --name Report".to_owned(),
         ),
         "boss deliverable dismiss" => (
@@ -808,6 +840,16 @@ fn leaf_schema(path: &str) -> serde_json::Value {
             json!({"json":{"landed":"true after the worktree is rebased, verified, and landed","sha":"landed commit SHA"}}),
             "goddard-agent merge submit".to_owned(),
         ),
+        "scratch" => (
+            json!({"NAME":{"positional":true,"optional":true,"type":"folder name, 1–64 of [A-Za-z0-9._-]; omitted selects the task's scratch root"},"--name":{"optional":true,"type":"same as positional NAME"},"description":"Returns the absolute path of a daemon-owned folder that survives machine restarts and is deleted when this task is archived or removed. Contents are reproducible by contract — the daemon drops them without the worktree's uncommitted-work check, so keep anything worth keeping in git. Reclaim Disk Space may also delete an idle task's pool."}),
+            json!({"json":{"path":"absolute scratch directory path"}}),
+            "goddard-agent scratch fixtures".to_owned(),
+        ),
+        "scratch list" => (
+            json!({}),
+            json!({"json":{"path":"this task's scratch pool root","entries":"named scratch folders that already exist"}}),
+            "goddard-agent scratch list".to_owned(),
+        ),
         "wireframe" => (
             json!({"PATH":{"positional":true,"required":true,"type":"workspace-relative .wireframe.html or .wireframe.json file"},"description":"Write the document, then validate it and request a right-panel preview. HTML previews use the active Goddard theme on macOS and Windows. Requires Settings → Experiments → Wireframes. See formatGuide for authoring and anchored comments."}),
             json!({"accepted":{"ok":true},"meaning":"document validated and preview request broadcast; does not confirm a client opened it"}),
@@ -910,6 +952,10 @@ fn schema() -> serde_json::Value {
         "boss projects resolve",
         "boss view",
         "boss context",
+        "boss counsel view",
+        "boss counsel propose",
+        "boss counsel handoff",
+        "boss counsel complete",
         "boss instructions list",
         "boss instructions show",
         "boss instructions pin",
@@ -945,6 +991,7 @@ fn schema() -> serde_json::Value {
         "boss memory create",
         "boss memory overview",
         "boss memory record",
+        "boss memory confirm",
         "boss memory summary",
         "boss memory scan",
         "boss memory zoom",
@@ -953,6 +1000,7 @@ fn schema() -> serde_json::Value {
         "memory buckets",
         "memory overview",
         "memory record",
+        "memory confirm",
         "memory summary",
         "memory scan",
         "memory zoom",
@@ -992,6 +1040,8 @@ fn schema() -> serde_json::Value {
         "command upsert",
         "command remove",
         "merge submit",
+        "scratch",
+        "scratch list",
     ];
     let commands = paths
         .into_iter()
@@ -1344,6 +1394,26 @@ fn run() -> anyhow::Result<()> {
         #[cfg(unix)]
         "__resource_exec" => resources::exec_child(arguments),
         "command" => command_flags(arguments.collect()),
+        "scratch" => {
+            let operation = scratch_operation(arguments.collect())?;
+            let list = matches!(operation, waku_protocol::scratch::ScratchOperation::List);
+            match connect()?.request(
+                request_session_id(),
+                Uuid::nil(),
+                Command::AgentScratch { operation },
+            )? {
+                ResponsePayload::AgentScratch { path, entries } => {
+                    let output = if list {
+                        json!({ "path": path, "entries": entries })
+                    } else {
+                        json!({ "path": path })
+                    };
+                    println!("{}", serde_json::to_string_pretty(&output)?);
+                    Ok(())
+                }
+                other => bail!("daemon returned an unexpected response: {other:?}"),
+            }
+        }
         "wireframe" | "rename" | "archive" | "ask" => {
             let args: Vec<String> = arguments.collect();
             let command = match subcommand.as_str() {
@@ -1599,6 +1669,7 @@ fn read_content_file(path: &str) -> anyhow::Result<String> {
 fn boss_everyday(action: &str, args: Vec<String>) -> anyhow::Result<()> {
     use waku_protocol::boss::BossOperation;
     match action {
+        "counsel" => counsel::run(args),
         "chain" => {
             let (_, opts) = flags(args, &["json", "json-file"], false)?;
             let payload = json_input(&opts)?;
@@ -1956,7 +2027,7 @@ fn boss_admin(group: &str, mut args: Vec<String>) -> anyhow::Result<()> {
         }
         (
             "memory",
-            "buckets" | "create" | "overview" | "record" | "summary" | "scan" | "zoom" | "retract",
+            "buckets" | "create" | "overview" | "record" | "confirm" | "summary" | "scan" | "zoom" | "retract",
         ) => {
             let memory = memory_leaf("boss memory", &operation, args)?;
             print_boss(boss_request(Op::Memory { operation: memory })?)
@@ -2316,6 +2387,12 @@ fn memory_leaf(
         let project = opts.get("project");
         let value = match operation {
             "buckets" if pos.is_empty() && project.is_none() => json!({"type":kind}),
+            "confirm" => {
+                if pos.len() != 1 || project.is_some() {
+                    bail!("usage: {command} confirm PROPOSAL_ID");
+                }
+                json!({"type":kind,"proposalId":pos[0].parse::<Uuid>().context("invalid memory proposal id")?})
+            }
             "overview" => match (pos.len(), project) {
                 (0, Some(project)) => json!({"type":kind,"project":project}),
                 (0, None) => json!({"type":kind}),
@@ -2981,13 +3058,13 @@ fn task_memory(args: Vec<String>) -> anyhow::Result<()> {
     use waku_protocol::boss::BossOperation;
     let operation = args.first().cloned().unwrap_or_default();
     match operation.as_str() {
-        "buckets" | "overview" | "record" | "summary" | "scan" | "zoom" | "retract" => {
+        "buckets" | "overview" | "record" | "confirm" | "summary" | "scan" | "zoom" | "retract" => {
             let memory = memory_leaf("memory", &operation, args[1..].to_vec())?;
             print_boss(boss_request(BossOperation::Memory { operation: memory })?)
         }
         "create" | "migrate" => bail!("`memory {operation}` is a Boss-only operation"),
         _ => bail!(
-            "usage: goddard-agent memory buckets|overview|record|summary|scan|zoom|retract; each leaf documents its flags under --help"
+            "usage: goddard-agent memory buckets|overview|record|confirm|summary|scan|zoom|retract; each leaf documents its flags under --help"
         ),
     }
 }
@@ -3041,7 +3118,24 @@ fn project_selector(
 }
 
 fn print_boss(result: waku_protocol::boss::BossResult) -> anyhow::Result<()> {
-    println!("{}", serde_json::to_string_pretty(&result)?);
+    if !JSON_OUTPUT.load(Ordering::Relaxed)
+        && let waku_protocol::boss::BossResult::Memory {
+            proposal: Some(proposal),
+            bucket_name,
+            ..
+        } = &result
+    {
+        println!(
+            "Proposed note for {}:\n\n{}\n\n{}\n\nTo confirm after reconsidering: {}\nExpires in {} seconds; proposing a different note replaces this proposal.",
+            bucket_name.as_deref().unwrap_or("this bucket"),
+            proposal["text"].as_str().unwrap_or_default(),
+            proposal["review"].as_str().unwrap_or_default(),
+            proposal["confirmCommand"].as_str().unwrap_or_default(),
+            proposal["expiresInSeconds"],
+        );
+    } else {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+    }
     Ok(())
 }
 
@@ -3160,6 +3254,26 @@ fn print_view_section(state: &waku_protocol::boss::BossState, section: &str) -> 
     };
     println!("{}", serde_json::to_string_pretty(&value)?);
     Ok(())
+}
+
+/// `scratch [NAME | --name NAME] | scratch list` — the daemon owns the
+/// folder and its lifecycle; this only chooses which operation to ask for.
+fn scratch_operation(
+    args: Vec<String>,
+) -> anyhow::Result<waku_protocol::scratch::ScratchOperation> {
+    if args.first().is_some_and(|arg| arg == "list") {
+        if args.len() > 1 {
+            bail!("usage: goddard-agent scratch list");
+        }
+        return Ok(waku_protocol::scratch::ScratchOperation::List);
+    }
+    let (pos, opts) = flags(args, &["name"], true)?;
+    if pos.len() > 1 {
+        bail!("usage: goddard-agent scratch [NAME | --name NAME] | scratch list");
+    }
+    Ok(waku_protocol::scratch::ScratchOperation::Get {
+        name: opts.get("name").cloned().or_else(|| pos.into_iter().next()),
+    })
 }
 
 fn computer_command(arguments: &[String]) -> anyhow::Result<Command> {
@@ -4142,6 +4256,31 @@ mod tests {
     }
 
     #[test]
+    fn memory_confirmation_requires_only_the_returned_proposal_id() {
+        let id = Uuid::new_v4();
+        for command in ["memory", "boss memory"] {
+            assert!(
+                matches!(memory_leaf(command, "confirm", vec![id.to_string()]).unwrap(),
+                waku_protocol::boss::MemoryOperation::Confirm { proposal_id } if proposal_id == id)
+            );
+            for args in [
+                vec![id.to_string(), "--yes".into()],
+                vec![id.to_string(), "--project".into(), "other".into()],
+                vec!["invented".into()],
+            ] {
+                assert!(memory_leaf(command, "confirm", args).is_err());
+            }
+            assert!(!leaf_schema(&format!("{command} confirm")).is_null());
+        }
+        assert!(
+            serde_json::from_value::<waku_protocol::boss::MemoryOperation>(
+                json!({"type":"confirm","proposalId":id,"text":"replacement"})
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn discovery_serves_local_read_only_documentation() {
         // Root orientation — the audited --help/-h/help and bare-command
         // failures all resolve locally, before any daemon contact.
@@ -4329,5 +4468,34 @@ mod tests {
         assert_eq!(aggregate["contractFormat"], boss_contract::FORMAT);
         let _: serde_json::Value =
             serde_json::from_str(&serde_json::to_string(&aggregate).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn scratch_args_map_to_get_or_list() {
+        use waku_protocol::scratch::ScratchOperation;
+        assert!(matches!(
+            super::scratch_operation(vec![]).unwrap(),
+            ScratchOperation::Get { name: None }
+        ));
+        assert!(matches!(
+            super::scratch_operation(vec!["fixtures".into()]).unwrap(),
+            ScratchOperation::Get { name: Some(ref name) } if name == "fixtures"
+        ));
+        assert!(matches!(
+            super::scratch_operation(vec!["--name".into(), "cache".into()]).unwrap(),
+            ScratchOperation::Get { name: Some(ref name) } if name == "cache"
+        ));
+        assert!(matches!(
+            super::scratch_operation(vec!["list".into()]).unwrap(),
+            ScratchOperation::List
+        ));
+        // The daemon validates the name itself — the CLI only rejects
+        // malformed invocations.
+        for args in [
+            vec!["list".into(), "extra".into()],
+            vec!["a".into(), "b".into()],
+        ] {
+            assert!(super::scratch_operation(args).is_err());
+        }
     }
 }

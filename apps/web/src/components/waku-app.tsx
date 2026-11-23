@@ -1,3 +1,5 @@
+import { LandingCanceledError } from '@waku/client';
+import { LandingStatus } from './landing-status';
 import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { Popover } from '@base-ui/react/popover'
@@ -761,7 +763,7 @@ export function WakuApp() {
     }
     const base = session.workspace.baseBranch ?? null
     try {
-      const outcome = await landWorkspace(client, sessionCwd(session, currentProject), base)
+      const outcome = await landWorkspace(client, sessionCwd(session, currentProject), base, session.id)
       if ('landed' in outcome) {
         toast.success(t('git_panel.landed', { base: outcome.landed.base }))
         return
@@ -784,6 +786,7 @@ export function WakuApp() {
         signal: (previous?.signal ?? 0) + 1,
       }))
     } catch (error) {
+      if (error instanceof LandingCanceledError) { toast(t('git_panel.land_canceled')); return }
       toast.error(errorMessage(error))
     }
   }
@@ -1184,6 +1187,7 @@ export function WakuApp() {
             />
             {currentProject && (
               <div aria-busy={!selectedReady} className="shrink-0" inert={!selectedReady}>
+                {client && <LandingStatus client={client} taskId={current.id} cwd={sessionCwd(current, currentProject)} />}
                 <Composer
                   focusSignal={focusComposerSignal}
                   initialComposerDraft={composerDraftFor(composerDraftState.current, {

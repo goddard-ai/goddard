@@ -3,6 +3,8 @@
 #[path = "plan_contract.rs"]
 mod plan_contract;
 
+#[path = "sqlite_storage.rs"]
+mod sqlite_storage;
 #[path = "state_storage.rs"]
 mod state_storage;
 
@@ -190,7 +192,8 @@ fn memory_bucket_ref(
         | MemoryOperation::Retract {
             bucket, project, ..
         } => Some((bucket, project)),
-        MemoryOperation::ListBuckets
+        MemoryOperation::Confirm { .. }
+        | MemoryOperation::ListBuckets
         | MemoryOperation::CreateBucket { .. }
         | MemoryOperation::Feed
         | MemoryOperation::MigrateLegacy { .. } => None,
@@ -419,6 +422,21 @@ const MAX_BLOCKER_CHARS: usize = 1_000;
 #[derive(Default)]
 struct BossEval;
 
+// Proposals are deliberately process-local: restarting the daemon abandons
+// them. One per caller and a global bound keep abandoned drafts inexpensive.
+const MEMORY_PROPOSAL_TTL: std::time::Duration = std::time::Duration::from_secs(600);
+const MAX_MEMORY_PROPOSALS: usize = 128;
+
+struct PendingMemory {
+    id: Uuid,
+    bucket: String,
+    kind: waku_protocol::boss::MemoryNoteKind,
+    text: String,
+    retry_key: String,
+    created: std::time::Instant,
+    recorded: Option<serde_json::Value>,
+}
+
 pub struct BossService {
     root: PathBuf,
     active: std::sync::atomic::AtomicBool,
@@ -441,17 +459,27 @@ pub struct BossService {
     /// updates touch employees, not personas, so unchanged files skip
     /// their write+fsync entirely.
     persona_writes: Mutex<std::collections::HashMap<Uuid, String>>,
+    memory_proposals: Mutex<std::collections::HashMap<Option<Uuid>, PendingMemory>>,
 }
 
 impl BossService {
     /// A process-local empty service used when the Boss experiment is off.
     /// It deliberately does not inspect or create the Boss data directory.
     pub fn disabled(root: PathBuf) -> Self {
+        Self::disabled_with_storage(root, Default::default())
+    }
+
+    /// A disabled coordinator that imports legacy data into the task database on activation.
+    pub fn disabled_database(root: PathBuf, database: PathBuf) -> Self {
+        Self::disabled_with_storage(root, state_storage::StateStorage::database(database))
+    }
+
+    fn disabled_with_storage(root: PathBuf, storage: state_storage::StateStorage) -> Self {
         Self {
             root,
             active: std::sync::atomic::AtomicBool::new(false),
             state: Mutex::new(disabled_state()),
-            storage: Default::default(),
+            storage,
             notifier: Mutex::new(None),
             operation_lock: Mutex::new(()),
             finish_employee: Mutex::new(None),
@@ -466,6 +494,7 @@ impl BossService {
             evals: Mutex::new(BossEval::default()),
             project_catalog: Mutex::new(None),
             persona_writes: Mutex::new(std::collections::HashMap::new()),
+            memory_proposals: Mutex::new(std::collections::HashMap::new()),
         }
     }
 
@@ -479,6 +508,7 @@ impl BossService {
         fs::create_dir_all(self.root.join("files/memory"))?;
         let mut state = self.storage.load(&self.root)?.unwrap_or_else(fresh_state);
         let now = waku_protocol::model::unix_time();
+        reconcile_identity_names(&mut state);
         reconcile_persona_defaults(&mut state);
         for employee in &mut state.employees {
             if employee.expired() && employee.expired_at.is_none() {
@@ -508,6 +538,7 @@ impl BossService {
         use std::sync::atomic::Ordering;
         *self.state.lock() = disabled_state();
         self.interrupted.lock().clear();
+        self.memory_proposals.lock().clear();
         self.projects.lock().clear();
         self.injected.lock().clear();
         *self.router.lock() = BossRouter::default();
@@ -518,10 +549,22 @@ impl BossService {
     }
 
     pub fn open(root: PathBuf) -> anyhow::Result<Self> {
+        Self::open_with_storage(root, Default::default())
+    }
+
+    /// Open transactional Boss records in the same database as task history.
+    /// Existing JSON and employee-history files are retained as import backups.
+    pub fn open_database(root: PathBuf, database: PathBuf) -> anyhow::Result<Self> {
+        Self::open_with_storage(root, state_storage::StateStorage::database(database))
+    }
+
+    fn open_with_storage(
+        root: PathBuf,
+        storage: state_storage::StateStorage,
+    ) -> anyhow::Result<Self> {
         fs::create_dir_all(root.join("files/memory"))?;
         // Loading either the active document or referenced history fails
         // closed; missing history must never silently erase retired identities.
-        let storage = state_storage::StateStorage::default();
         let mut state = storage.load(&root)?.unwrap_or_else(fresh_state);
         for index in 0..state.employees.len() {
             if state.employees[index].job_title.is_empty() {
@@ -532,11 +575,15 @@ impl BossService {
                     .enumerate()
                     .filter(|(other_index, _)| *other_index != index)
                     .map(|(_, employee)| employee.identity.name.as_str())
+                    .chain(leadership_names(&state))
                     .collect::<Vec<_>>();
+                let mut cursor = state.name_cursor;
                 state.employees[index].identity.name =
-                    employee_human_name(existing_names, &mut state.name_cursor);
+                    employee_human_name(existing_names, &mut cursor);
+                state.name_cursor = cursor;
             }
         }
+        reconcile_identity_names(&mut state);
         reconcile_persona_defaults(&mut state);
         // Older documents recorded only the expired flag, not when the
         // employee finished. Give those entries a full reuse window after
@@ -576,6 +623,7 @@ impl BossService {
             evals: Mutex::new(BossEval::default()),
             project_catalog: Mutex::new(None),
             persona_writes: Mutex::new(std::collections::HashMap::new()),
+            memory_proposals: Mutex::new(std::collections::HashMap::new()),
         };
         service.migrate_plan_documents();
         service.sweep_deliverable_store(&service.state.lock());
@@ -584,7 +632,9 @@ impl BossService {
     }
 
     pub fn document(&self) -> BossState {
-        self.state.lock().clone()
+        let mut state = self.state.lock().clone();
+        state.refresh_employee_prompt_controls();
+        state
     }
 
     /// Whether any outcome records exist — the scheduler's cheap check
@@ -645,6 +695,65 @@ impl BossService {
         })
     }
 
+    pub fn uses_database(&self) -> bool {
+        self.storage.uses_database()
+    }
+
+    /// Commit the new chat identity together with the host's session rows.
+    pub fn set_session_id_with(
+        &self,
+        id: Uuid,
+        host: &mut dyn crate::SessionCommit,
+    ) -> anyhow::Result<()> {
+        self.update_with_session(
+            |state| {
+                state.session_id = Some(id);
+                Ok(())
+            },
+            host,
+        )
+    }
+
+    pub(crate) fn update_with_session(
+        &self,
+        change: impl FnOnce(&mut BossState) -> anyhow::Result<()>,
+        host: &mut dyn crate::SessionCommit,
+    ) -> anyhow::Result<()> {
+        let mut state = self.state.lock();
+        let mut next = state.clone();
+        change(&mut next)?;
+        crate::instruction_pins::reconcile(&mut next, waku_protocol::model::unix_time());
+        // The revision advances only when the Boss half changed; the shared
+        // commit still owns the session rows either way.
+        if !self.storage.unchanged(&next)? {
+            next.revision = next.revision.saturating_add(1);
+        }
+        if let Err(error) = self.storage.save_with(&next, host) {
+            if let Some(conflict) = sqlite_storage::revision_conflict(&error) {
+                eprintln!(
+                    "Boss database changed under this host (expected revision {:?}, observed {:?}); reloading committed state",
+                    conflict.expected, conflict.observed
+                );
+                self.reload_state(&mut state)?;
+                drop(state);
+                if let Some(notifier) = self.notifier.lock().clone() {
+                    notifier();
+                }
+            }
+            return Err(error);
+        }
+        *state = next;
+        // The host holds its task-state lease until it publishes the matching
+        // session projection, then calls notify_session_commit outside that lease.
+        Ok(())
+    }
+
+    pub fn notify_session_commit(&self) {
+        if let Some(notifier) = self.notifier.lock().clone() {
+            notifier();
+        }
+    }
+
     /// Publish the Boss chat's live rotation position. The reconciler is
     /// the only writer; `update` skips the write when nothing moved.
     pub fn set_rotation_status(
@@ -672,6 +781,7 @@ impl BossService {
     pub fn add_employee(&self, employee: BossEmployee) -> anyhow::Result<()> {
         let now = waku_protocol::model::unix_time();
         self.update(|state| {
+            validate_employee_name(state, &employee.identity.name)?;
             state.employees.push(employee.clone());
             record_assignment_admission(state, &employee, now);
             Ok(())
@@ -913,6 +1023,10 @@ impl BossService {
         self.state.lock().session_id == Some(session)
     }
 
+    pub fn is_counsel(&self, session: Uuid) -> bool {
+        self.state.lock().counsel.session_id == Some(session)
+    }
+
     /// The boss chat itself — a planning session is the same principal
     /// working in a dedicated session, so owner-level operations and the
     /// boss persona apply to both.
@@ -988,7 +1102,10 @@ impl BossService {
     }
 
     pub fn is_managed(&self, session: Uuid) -> bool {
-        self.is_boss(session) || self.is_employee(session) || self.is_planning(session)
+        self.is_boss(session)
+            || self.is_counsel(session)
+            || self.is_employee(session)
+            || self.is_planning(session)
     }
 
     /// The planning record for a session, or for a plan file when the
@@ -1453,11 +1570,13 @@ impl BossService {
                 actor,
             });
             updated = Some(entry.clone());
-            if state != OutcomeState::Open {
-                for chain in &mut doc.chains {
-                    if chain.request.outcome_id == outcome {
-                        chain.finisher_reserved = false;
-                    }
+            // Every accepted explicit transition — close or reopen —
+            // retires the finishing authority chains reserved under the
+            // prior state. A reopen must stay meaningful: a finished
+            // chain's normalization pass never re-asserts completion.
+            for chain in &mut doc.chains {
+                if chain.request.outcome_id == outcome {
+                    chain.finisher_reserved = false;
                 }
             }
             Ok(())
@@ -1583,7 +1702,12 @@ impl BossService {
                 .iter_mut()
                 .find(|entry| entry.id == outcome)
                 .ok_or_else(|| anyhow!("unknown outcome {outcome}"))?;
-            entry.waiting = waiting;
+            entry.waiting = waiting.map(|mut wait| {
+                // The stamp is the persistence's own truth — a carried
+                // `recorded_at` never survives the write.
+                wait.stamp(now);
+                wait
+            });
             entry.snoozed_until = snoozed_until;
             entry.last_activity_at = now;
             updated = Some(entry.clone());
@@ -1976,7 +2100,7 @@ impl BossService {
         let mut due = Vec::new();
         self.update(|state| {
             for task in state.outcomes.iter_mut() {
-                let eligible = task.reminder_eligible(&state.employees, now);
+                let eligible = task.reminder_eligible(&state.employees, &state.chains, now);
                 match (eligible, task.unattended_since) {
                     (true, None) => task.unattended_since = Some(now),
                     (false, Some(_)) => task.unattended_since = None,
@@ -2122,7 +2246,7 @@ impl BossService {
         let Some(caller) = caller else {
             return Ok(());
         };
-        if caller == target || self.has_boss_authority(caller) {
+        if caller == target || self.is_counsel(caller) || self.has_boss_authority(caller) {
             return Ok(());
         }
         let state = self.document();
@@ -2328,13 +2452,16 @@ impl BossService {
         let id = Uuid::new_v4();
         let mut name = String::new();
         self.update(|state| {
+            let mut cursor = state.name_cursor;
             name = employee_human_name(
                 state
                     .employees
                     .iter()
-                    .map(|employee| employee.identity.name.as_str()),
-                &mut state.name_cursor,
+                    .map(|employee| employee.identity.name.as_str())
+                    .chain(leadership_names(state)),
+                &mut cursor,
             );
+            state.name_cursor = cursor;
             Ok(())
         })?;
         Ok(BossEmployee {
@@ -2673,6 +2800,9 @@ impl BossService {
     }
 
     pub fn prompt_with_context(&self, session: Uuid, prompt: String) -> String {
+        if self.is_counsel(session) {
+            return self.counsel_prompt(prompt);
+        }
         let prompt = self.prepend_persona_default_notice(session, prompt);
         if !self.is_managed(session) || !self.injected.lock().insert(session) {
             return prompt;
@@ -2794,14 +2924,14 @@ impl BossService {
             )
         } else {
             format!(
-                "You are {}, the boss for this daemon. Your persona instructions above are the canonical Boss default; they stay authoritative every turn and the daemon re-injects them when they change. When you need to discover capabilities or correct usage, call `goddard-agent boss --help` first. It gives the complete Boss guide and relevant companion operations in one call. Use a command's `--schema` only when you need its precise machine contract, or `goddard-agent boss --schema` for the complete contract. Invoke operations using command paths, positionals, and flags; do not pass a whole-operation JSON payload. JSON is for documented structured inputs and outputs. Follow the actual installed CLI syntax; capability documentation does not override role limits, human authorization, or workflow policy. This is demand-driven, not a mandatory call every turn: use already-known correct commands immediately and dispatch employees promptly without mandatory browsing or research. Your dedicated tools use runnable paths such as `goddard-agent boss context`, `goddard-agent boss roster`, `goddard-agent boss summon --title 'Research task' --icon search --text 'Research only; report findings.'`, and `goddard-agent boss file read plans/design.md`. Advanced scripting uses `goddard-agent boss script --file script.rhai` or `--text 'RHAI_SOURCE'`; `help()` inside a script lists bindings. Scripting function names below are not CLI leaf commands; generic operations use `op(#{{type: OPERATION, ...}})` inside that script.\n\nSummon interface: `goddard-agent boss summon` uses `--persona`, `--title`, `--icon`, `--workspace`, `--base-branch`, `--adopt-worktree`, `--effort`, `--work-goal`, `--plan`, `--item`, `--request-id`, `--needs-attention`, and `--boss-authority` with `--text` or `--file` for the assignment. Advanced fields without CLI flags use the Rhai binding `summon(#{{jobTitle: TITLE, prompt: PROMPT, project: PROJECT, ...}})` through `boss script`; the following camelCase names describe that scripting map, not CLI flags. Summon fields: `personaId` selects an employee role layered on the shared Employee base — a shipped specialist (Researcher, Feature Developer, Bug Investigator, Verifier) or a custom persona — omit it for the base alone, and the Boss persona cannot be an employee role; `jobTitle` names the job — choose a purpose-specific title since Goddard assigns the human name and titles feed the fallback classifier; `icon` picks the employee icon that fits the actual work; `workspace: \"worktree\"` + `baseBranch` runs the employee in a daemon-managed Git worktree, `\"adopt\"` + `adoptWorktree` hands it a finished employee's worktree; `reasoningEffort` pins an effort the resolved model supports or the summon fails; `workGoal` fixes how its finish lands — `errand` (default) reports to you, `goal` expires silently on the human's Goals page, and a finish still reaches you on a blocker report, `alwaysReport`, or a session failure; `resources` reserves host capacity (`{{\"native_builds\": 1}}` for a device build, `exclusive` `ios:<UDID>`/`android:<AVD>`/`linux:<name>` plus `resident_devices`, `desktop_input` for shared input) — the employee's `resource run` calls borrow subsets of the granted set and a contested set queues the ticket rather than erroring; `allowBurst` spends burst slots above `liveLimit` but never past `hardCap`; `groupId` joins a wave whose single report lands when every member finishes; `priority` is stored but the FIFO scheduler does not reorder on it; `requestId` is an idempotency key; `needsAttention` flags the employee for the human's attention — its sidebar entry stays unread once finished and is never swept by roster retirement, so use it for completions the user must not miss rather than routine work; `bossAuthority` grants the employee Boss-level operation authority for its admission only — use it sparingly for a deputy that must run Boss-authorized operations itself, since the grant cannot be narrowed, revoked early, or passed on. Outcome tagging: `outcomeId` or `newOutcome` attaches the assignment to an outcome, `afterSuccess` records your follow-up intent, `finishesOutcome` designates the assignment the outcome's finisher — it requires explicit success criteria and a single live finisher — and `prerequisites` lists sibling assignment session ids that must finish before it dispatches; `plan`/`item` tag the assignment to a plan work item. A summon that returns without error succeeded — a `queued` state waits for capacity, never an error — and the dispatch notice or next context snapshot carries the employee's name, so do not call `view` just to confirm.\n\nControl and lifecycle: use `goddard-agent boss prompt EMPLOYEE_ID --text 'Correction'` for immediate corrections and followups (explicit `--delivery queue` also delivers immediately), `goddard-agent boss stop EMPLOYEE_ID`, and `goddard-agent boss resume EMPLOYEE_ID`. Employee configuration uses `goddard-agent boss employee model`, `permissions`, `workspace`, `resources`, and `plan` with their documented inputs. Advanced control uses Rhai `control(EMPLOYEE_ID, #{{type: ACTION, ...}})` through `boss script`; its actions are `prompt`, `steer` (mid-flight correction; a redirecting steer may carry `jobTitle` to relabel the job), `stop`, `setModel` (one atomic reconfigure — an open turn is interrupted intentionally, never marked failed, and the assignment resumes on the new selection), `setPermissions` (per-field grant overrides; an employee summoner stays clamped to its own grants), `setPersona` (replace an employee's custom role or pass `null` for the base alone — the deliberate fix when an assigned role is unavailable), `setWorkspace` (one atomic move between the primary checkout and a fresh worktree; a failure leaves the employee running in its old workspace), `setResources` (a queued ticket re-enters admission on the new set, a running employee swaps once capacity frees), and `setPlan` (re-tag the plan/item links). A prompt or steer to a finished employee re-enters admission with the same transcript; `resume` revives an interrupted one in place. Boss corrections and followups use `goddard-agent boss prompt`: default and explicit queue delivery steer the active turn immediately, with cancellation and delivery after settlement when steering is unsupported. Idle or expired employees resume through admission; queued assignments still wait for capacity. Previously parked messages are retained, not bulk-replayed or discarded.\n\nFor daemon-managed worktrees, require each assigned employee to commit its unit and run `goddard-agent merge submit` itself; do not summon a separate Worktree Integrator, and never create Git worktrees yourself — summon `--workspace worktree --base-branch BRANCH` and `goddard-agent boss employee workspace` cover employee worktree needs. For builds and code generation, ask employees to use the repository's shared build cache or a dedicated output directory when that avoids contention with the user's tools. Require employee-reported completion evidence before reporting a task done: changed paths or delivered artifacts, checks performed and their results, unverified conditions, remaining blockers, and commit and submission evidence when applicable. Delegate repository-state and commit verification to employees; a summary without supporting evidence does not establish completion. Distinguish implemented, committed, submitted, landed, and behavior verified; a commit is not proof of landing, and compilation is not proof of behavior. Never claim behavior verified without reported checks that establish it.\n\nMemory: `goddard-agent boss memory` subcommands reach every named bucket — a project's name resolves to its shared bucket — through `buckets`, `overview`, `scan`, `zoom`, `record`, and `summary`; contents are never loaded automatically. Buckets are append-only: corrections are new notes and a repeated retry key never duplicates one. Project-assigned employees have automatic read and insert access to that project's shared bucket; grant additional buckets deliberately through persona `bucketIds` or per-employee permission overrides, and pinned files are documents only — they do not grant memory access. Personal buckets remain private unless you grant them deliberately.\n\nPersonas and files: `goddard-agent boss persona upsert` creates or edits a custom role — the Employee base composes automatically beneath it, so role text carries only specialist methods and limits; `goddard-agent boss persona defaults` inspects the shipped default instructions — the Boss and Employee base roles plus the shipped specialist roles — it returns full shipped text, revision labels, and saved-versus-shipped diffs; `goddard-agent boss persona reset` and `goddard-agent boss persona undo` replace or restore a default's instructions on a clear human request; `goddard-agent boss persona propose` drafts an update for the human's review (`goddard-agent boss persona keep` and `goddard-agent boss persona adopt` are human-only). Your persona is {}. Your persistent files root is {} — plan documents live under `plans/` and every employee can read them.\n\nSurfaces: `goddard-agent boss terminal --title TITLE --cwd DIRECTORY` (optionally `--file STARTUP_SCRIPT`) creates a pinned standalone terminal — choose an existing directory and use it only for yourself or a planning session, never an employee. `goddard-agent boss automation` subcommands manage user automations; employees cannot use it. `goddard-agent boss script` runs Rhai inside the daemon with operations bound as functions — batch related operations into one call; variables exist only within that invocation. Scripting-only outcome operations (`createOutcome`, `setOutcomeState`, `setOutcomeWaiting`, `attachPlan`, `resolveHandoff`) use `op(#{{type: OPERATION, ...}})`; these are not standalone function bindings or CLI leaves. The same route exposes `setProjectSubmissions` and `setProjectQaBranch`. Use the installed help/schema for their precise contracts; scripting preserves each operation's authorization. `goddard-agent boss context` returns a snapshot of the human's projects, tasks, and automations — check it whenever a message concerns their work and no snapshot was already attached. `goddard-agent search` scans every project's task transcripts — `project:` narrows to one — and `goddard-agent read` opens any task it surfaces. `goddard-agent boss browse URL` (optionally `--title TITLE`) opens an http(s) page in the boss chat's right panel for the user. `goddard-agent boss speak --text TEXT` voices an utterance through connected clients when voice is on — split it into reusable fragments so generated clips are reused and later utterances stay instant. `goddard-agent boss plan create` opens a design session that drafts a product design for the human's approval — it launches on codex/gpt-6.1-sol at medium effort unless you pass provider/model/reasoningEffort overrides — and a finalized planning session answers questions about its design but does not implement.\n\nBoss must not conduct codebase research directly: delegate all source discovery, code search, source or diff inspection, caller and dependency analysis, repository-history investigation, and technical verification to employees. This boundary applies before dispatch, during planning, when answering code questions, and when checking completion; neither a quick lookup nor unavailable employee capacity is an exception. You may identify the relevant project, read planning documents, review employee reports and supplied evidence, and ask employees to resolve gaps; project identification must not become codebase exploration. If no employee can perform the research, report the limitation and its consequence rather than doing it yourself. Broader filesystem editing and internet access outside codebase research are discouraged, not forbidden. Never wait, watch, or poll yourself — no transcript read loops, no sleep-and-recheck cycles, no blocking resource waits: when a job needs a wait, summon an employee to watch and report, then return to the human. Respect user-set resource rules, including model routing and employee caps, and record durable constraints in memory so delegation stays within them. There are no managers.",
+                "You are {}, the boss for this daemon. Your persona instructions above are the canonical Boss default; they stay authoritative every turn and the daemon re-injects them when they change. When you need to discover capabilities or correct usage, call `goddard-agent boss --help` first. It gives the complete Boss guide and relevant companion operations in one call. Use a command's `--schema` only when you need its precise machine contract, or `goddard-agent boss --schema` for the complete contract. Invoke operations using command paths, positionals, and flags; do not pass a whole-operation JSON payload. JSON is for documented structured inputs and outputs. Follow the actual installed CLI syntax; capability documentation does not override role limits, human authorization, or workflow policy. This is demand-driven, not a mandatory call every turn: use already-known correct commands immediately and dispatch employees promptly without mandatory browsing or research. Your dedicated tools use runnable paths such as `goddard-agent boss context`, `goddard-agent boss roster`, `goddard-agent boss summon --title 'Research task' --icon search --text 'Research only; report findings.'`, and `goddard-agent boss file read plans/design.md`. Advanced scripting uses `goddard-agent boss script --file script.rhai` or `--text 'RHAI_SOURCE'`; `help()` inside a script lists bindings. Scripting function names below are not CLI leaf commands; generic operations use `op(#{{type: OPERATION, ...}})` inside that script.\n\nSummon interface: `goddard-agent boss summon` uses `--persona`, `--title`, `--icon`, `--workspace`, `--base-branch`, `--adopt-worktree`, `--effort`, `--work-goal`, `--plan`, `--item`, `--request-id`, `--needs-attention`, and `--boss-authority` with `--text` or `--file` for the assignment. Advanced fields without CLI flags use the Rhai binding `summon(#{{jobTitle: TITLE, prompt: PROMPT, project: PROJECT, ...}})` through `boss script`; the following camelCase names describe that scripting map, not CLI flags. Summon fields: `personaId` selects an employee role layered on the shared Employee base — a shipped specialist (Researcher, Feature Developer, Bug Investigator, Verifier) or a custom persona — omit it for the base alone, and the Boss persona cannot be an employee role; `jobTitle` names the job — choose a purpose-specific title since Goddard assigns the human name and titles feed the fallback classifier; `icon` picks the employee icon that fits the actual work; `workspace: \"worktree\"` + `baseBranch` runs the employee in a daemon-managed Git worktree, `\"adopt\"` + `adoptWorktree` hands it a finished employee's worktree; `reasoningEffort` pins an effort the resolved model supports or the summon fails; `workGoal` fixes how its finish lands — `errand` (default) reports to you, `goal` expires silently on the human's Goals page, and a finish still reaches you on a blocker report, `alwaysReport`, or a session failure; `resources` reserves host capacity (`{{\"native_builds\": 1}}` for a device build, `exclusive` `ios:<UDID>`/`android:<AVD>`/`linux:<name>` plus `resident_devices`, `desktop_input` for shared input) — the employee's `resource run` calls borrow subsets of the granted set and a contested set queues the ticket rather than erroring; `allowBurst` spends burst slots above `liveLimit` but never past `hardCap`; `groupId` joins a wave whose single report lands when every member finishes; `priority` is stored but the FIFO scheduler does not reorder on it; `requestId` is an idempotency key; `needsAttention` flags the employee for the human's attention — its sidebar entry stays unread once finished and is never swept by roster retirement, so use it for completions the user must not miss rather than routine work; `bossAuthority` grants the employee Boss-level operation authority for its admission only — use it sparingly for a deputy that must run Boss-authorized operations itself, since the grant cannot be narrowed, revoked early, or passed on. Outcome tagging: `outcomeId` or `newOutcome` attaches the assignment to an outcome, `afterSuccess` records your follow-up intent, `finishesOutcome` designates the assignment the outcome's finisher — it requires explicit success criteria and a single live finisher — and `prerequisites` lists sibling assignment session ids that must finish before it dispatches; `plan`/`item` tag the assignment to a plan work item. A summon that returns without error succeeded — a `queued` state waits for capacity, never an error — and the dispatch notice or next context snapshot carries the employee's name, so do not call `view` just to confirm.\n\nControl and lifecycle: use `goddard-agent boss prompt EMPLOYEE_ID --text 'Correction'` for immediate corrections and followups (explicit `--delivery queue` also delivers immediately), `goddard-agent boss stop EMPLOYEE_ID`, and `goddard-agent boss resume EMPLOYEE_ID`. Employee configuration uses `goddard-agent boss employee model`, `permissions`, `workspace`, `resources`, and `plan` with their documented inputs. Advanced control uses Rhai `control(EMPLOYEE_ID, #{{type: ACTION, ...}})` through `boss script`; its actions are `prompt`, `steer` (mid-flight correction; a redirecting steer may carry `jobTitle` to relabel the job), `stop`, `setModel` (one atomic reconfigure — an open turn is interrupted intentionally, never marked failed, and the assignment resumes on the new selection), `setPermissions` (per-field grant overrides; an employee summoner stays clamped to its own grants), `setPersona` (replace an employee's custom role or pass `null` for the base alone — the deliberate fix when an assigned role is unavailable), `setWorkspace` (one atomic move between the primary checkout and a fresh worktree; a failure leaves the employee running in its old workspace), `setResources` (a queued ticket re-enters admission on the new set, a running employee swaps once capacity frees), and `setPlan` (re-tag the plan/item links). A prompt or steer to a finished employee re-enters admission with the same transcript; `resume` revives an interrupted one in place. Boss corrections and followups use `goddard-agent boss prompt`: default and explicit queue delivery steer the active turn immediately, with cancellation and delivery after settlement when steering is unsupported. Idle or expired employees resume through admission; queued assignments still wait for capacity. Previously parked messages are retained, not bulk-replayed or discarded.\n\nFor daemon-managed worktrees, require each assigned employee to commit its unit and run `goddard-agent merge submit` itself; do not summon a separate Worktree Integrator, and never create Git worktrees yourself — summon `--workspace worktree --base-branch BRANCH` and `goddard-agent boss employee workspace` cover employee worktree needs. For builds and code generation, ask employees to use the repository's shared build cache or a dedicated output directory when that avoids contention with the user's tools. Require employee-reported completion evidence before reporting a task done: changed paths or delivered artifacts, checks performed and their results, unverified conditions, remaining blockers, and commit and submission evidence when applicable. Delegate repository-state and commit verification to employees; a summary without supporting evidence does not establish completion. Distinguish implemented, committed, submitted, landed, and behavior verified; a commit is not proof of landing, and compilation is not proof of behavior. Never claim behavior verified without reported checks that establish it.\n\nMemory: `goddard-agent boss memory` subcommands reach every named bucket — a project's name resolves to its shared bucket — through `buckets`, `overview`, `scan`, `zoom`, `record`, and `summary`; contents are never loaded automatically. Buckets are append-only: corrections are new notes and a repeated retry key never duplicates one. Project-assigned employees have automatic read and insert access to that project's shared bucket; grant additional buckets deliberately through persona `bucketIds` or per-employee permission overrides, and pinned files are documents only — they do not grant memory access. Personal buckets remain private unless you grant them deliberately.\n\nPersonas and files: `goddard-agent boss persona upsert` creates or edits a custom role — the Employee base composes automatically beneath it, so role text carries only specialist methods and limits; `goddard-agent boss persona defaults` inspects the shipped default instructions — the Boss and Employee base roles plus the shipped specialist roles — it returns full shipped text, revision labels, and saved-versus-shipped diffs; `goddard-agent boss persona reset` and `goddard-agent boss persona undo` replace or restore a default's instructions on a clear human request; `goddard-agent boss persona propose` drafts an update for the human's review (`goddard-agent boss persona keep` and `goddard-agent boss persona adopt` are human-only). Your persona is {}. Your persistent files root is {} — plan documents live under `plans/` and every employee can read them.\n\nSurfaces: `goddard-agent boss terminal --title TITLE --cwd DIRECTORY` (optionally `--file STARTUP_SCRIPT`) creates a pinned standalone terminal — choose an existing directory and use it only for yourself or a planning session, never an employee. `goddard-agent boss automation` subcommands manage user automations; employees cannot use it. `goddard-agent boss script` runs Rhai inside the daemon with operations bound as functions — batch related operations into one call; variables exist only within that invocation. Scripting-only outcome operations (`createOutcome`, `setOutcomeState`, `setOutcomeWaiting`, `attachPlan`, `resolveHandoff`) use `op(#{{type: OPERATION, ...}})`; these are not standalone function bindings or CLI leaves. The same route exposes `setProjectSubmissions` and `setProjectQaBranch`. Use the installed help/schema for their precise contracts; scripting preserves each operation's authorization. `goddard-agent boss context` returns project and task detail on demand — request it when the current work summary is insufficient; use targeted project, roster, transcript, or automation commands when possible. `goddard-agent search` scans every project's task transcripts — `project:` narrows to one — and `goddard-agent read` opens any task it surfaces. `goddard-agent boss browse URL` (optionally `--title TITLE`) opens an http(s) page in the boss chat's right panel for the user. `goddard-agent boss speak --text TEXT` voices an utterance through connected clients when voice is on — split it into reusable fragments so generated clips are reused and later utterances stay instant. `goddard-agent boss plan create` opens a design session that drafts a product design for the human's approval — it launches on codex/gpt-6.1-sol at medium effort unless you pass provider/model/reasoningEffort overrides — and a finalized planning session answers questions about its design but does not implement.\n\nBoss must not conduct codebase research directly: delegate all source discovery, code search, source or diff inspection, caller and dependency analysis, repository-history investigation, and technical verification to employees. This boundary applies before dispatch, during planning, when answering code questions, and when checking completion; neither a quick lookup nor unavailable employee capacity is an exception. You may identify the relevant project, read planning documents, review employee reports and supplied evidence, and ask employees to resolve gaps; project identification must not become codebase exploration. If no employee can perform the research, report the limitation and its consequence rather than doing it yourself. Broader filesystem editing and internet access outside codebase research are discouraged, not forbidden. Never wait, watch, or poll yourself — no transcript read loops, no sleep-and-recheck cycles, no blocking resource waits: when a job needs a wait, summon an employee to watch and report, then return to the human. Respect user-set resource rules, including model routing and employee caps, and record durable constraints in memory so delegation stays within them. There are no managers.",
                 state.identity.name,
                 state.persona_id,
                 self.root.join("files").display()
             )
         };
         let pin_guidance = if self.is_boss(session) {
-            "\nTemporary user obligations: `goddard-agent boss instructions list` shows brief pins and review candidates; `show ID` reads one source-backed record. Capture instructions governing future turns before acknowledging them, with a scope and a retirement condition. Activate a candidate with `edit ID --revision N --text INSTRUCTION --retire-when CONDITION`, or create a pin with `pin --text INSTRUCTION --retire-when CONDITION --source-session SESSION --source-message MESSAGE`. Retire with `retire ID --revision N --evidence EVIDENCE`; unknown conditions stay active. Only `--retire-outcome ID` opts into automatic release when that outcome completes with evidence, and must represent the entire release condition. Pins complement personas and memory buckets; do not copy all transcript history or use pins as task status bookkeeping.\n"
+            "\nTemporary user obligations: capture instructions governing future turns before acknowledging them, with a scope and retirement condition. Keep unknown release conditions active; automatic outcome retirement must cover the entire release condition. Use `goddard-agent boss instructions --help` for pin management. Pins complement personas and memory; do not use them as task status bookkeeping.\n"
         } else {
             ""
         };
@@ -3490,14 +3620,35 @@ impl BossService {
     /// partially admitted finishing assignment.
     pub fn enqueue_assignment(
         &self,
+        employee: BossEmployee,
+        ticket: SummonTicket,
+        new_outcome: Option<NewOutcome>,
+        finishes_outcome: bool,
+        after_success: Option<String>,
+        prerequisites: Vec<Uuid>,
+    ) -> anyhow::Result<BossEmployee> {
+        self.enqueue_assignment_with(
+            employee,
+            ticket,
+            new_outcome,
+            finishes_outcome,
+            after_success,
+            prerequisites,
+            None,
+        )
+    }
+
+    pub fn enqueue_assignment_with(
+        &self,
         mut employee: BossEmployee,
         mut ticket: SummonTicket,
         new_outcome: Option<NewOutcome>,
         finishes_outcome: bool,
         after_success: Option<String>,
         prerequisites: Vec<Uuid>,
+        host: Option<&mut dyn crate::SessionCommit>,
     ) -> anyhow::Result<BossEmployee> {
-        self.update(|state| {
+        let change = |state: &mut BossState| {
             employee.assignment = Self::resolve_assignment(
                 state,
                 ticket.outcome_id,
@@ -3522,7 +3673,12 @@ impl BossService {
                 outcome.completion_conflict = None;
             }
             Self::enqueue_employee(state, &mut employee, ticket)
-        })?;
+        };
+        if let Some(host) = host {
+            self.update_with_session(change, host)?;
+        } else {
+            self.update(change)?;
+        }
         Ok(employee)
     }
 
@@ -3532,6 +3688,7 @@ impl BossService {
         mut ticket: SummonTicket,
     ) -> anyhow::Result<()> {
         let now = waku_protocol::model::unix_time();
+        validate_employee_name(state, &employee.identity.name)?;
         plan_contract::validate_binding(state, employee)?;
         state.next_sequence = state.next_sequence.saturating_add(1);
         ticket.sequence = state.next_sequence;
@@ -3743,12 +3900,17 @@ impl BossService {
     /// Grant a queued ticket its claims and move it to `dispatching`.
     /// `false` means the generation went stale — the ticket was stopped
     /// or re-admitted while the broker grant was in flight, and the
-    /// caller must release what it just took.
+    /// caller must release what it just took. `revival` reports the
+    /// caller's read on the admission: a requeue behind an
+    /// already-started session validates its binding without the
+    /// first-dispatch scope gates, so a since-closed outcome or plan
+    /// cannot strand the prompts that re-admitted it.
     pub fn mark_dispatching(
         &self,
         session: Uuid,
         generation: u64,
         reservation: Option<Uuid>,
+        revival: bool,
     ) -> anyhow::Result<bool> {
         let mut marked = false;
         self.update(|state| {
@@ -3767,7 +3929,11 @@ impl BossService {
             if stale {
                 return Ok(());
             }
-            plan_contract::validate_binding(state, entry)?;
+            if revival {
+                plan_contract::validate_revived_binding(state, entry)?;
+            } else {
+                plan_contract::validate_binding(state, entry)?;
+            }
             let entry = state
                 .employees
                 .iter_mut()
@@ -3872,6 +4038,10 @@ impl BossService {
         let now = waku_protocol::model::unix_time();
         let mut outcome = None;
         self.update(|state| {
+            if let Some(reason) = state.employee_prompt_control(session).reason {
+                bail!("{reason}");
+            }
+            crate::chains::requeue_employee_attempt(state, session)?;
             let previous = state
                 .employees
                 .iter()
@@ -4455,7 +4625,8 @@ impl BossService {
         operation: BossOperation,
     ) -> anyhow::Result<BossResult> {
         match operation {
-            BossOperation::Chain { .. }
+            BossOperation::Counsel { .. }
+            | BossOperation::Chain { .. }
             | BossOperation::InstructionPin { .. }
             | BossOperation::Context
             | BossOperation::Projects { .. }
@@ -4547,6 +4718,9 @@ impl BossService {
             }
             BossOperation::View => {
                 let mut state = self.document();
+                if caller.is_some_and(|id| !self.is_counsel(id)) {
+                    state.counsel = Default::default();
+                }
                 if caller.is_some_and(|id| !self.is_boss(id)) {
                     // User obligations are private to the main Boss chat,
                     // including when an employee has coordination authority.
@@ -4622,6 +4796,13 @@ impl BossService {
                 self.require_owner(caller)?;
                 validate_name(&name)?;
                 self.update(|state| {
+                    anyhow::ensure!(
+                        !employee_names(state).any(|used| same_identity_name(used, &name))
+                            && !state.counsel.identity.as_ref().is_some_and(|identity| {
+                                same_identity_name(&identity.name, &name)
+                            }),
+                        "name is already used by Counsel or an employee"
+                    );
                     state.identity.name = name.trim().to_owned();
                     Ok(())
                 })?;
@@ -4634,6 +4815,7 @@ impl BossService {
                 self.require_owner(caller)?;
                 validate_name(&name)?;
                 self.update(|state| {
+                    validate_employee_name(state, &name)?;
                     let employee = state
                         .employees
                         .iter_mut()
@@ -5002,7 +5184,21 @@ impl BossService {
                     fs::rename(stage, publish)?;
                     self.recover_deliverable_snapshot(id)?;
                 }
-                Ok(BossResult::Saved)
+                // The publisher needs the durable id back — a chain artifact
+                // or follow-up handoff can only cite `deliverable:<id>` when
+                // the publish response carries it.
+                let deliverable = self
+                    .state
+                    .lock()
+                    .deliverables
+                    .iter()
+                    .find(|deliverable| deliverable.id == id)
+                    .cloned()
+                    .context("the published deliverable record is missing")?;
+                Ok(BossResult::DeliverablePublished {
+                    reference: format!("deliverable:{id}"),
+                    deliverable,
+                })
             }
             BossOperation::DismissDeliverable { id } => {
                 let _operation = self.operation_lock.lock();
@@ -5158,6 +5354,17 @@ impl BossService {
         use waku_protocol::boss::MemoryOperation;
 
         let state = self.document();
+        let mut proposals = self.memory_proposals.lock();
+        proposals.retain(|_, proposal| proposal.created.elapsed() < MEMORY_PROPOSAL_TTL);
+        let confirmation_bucket = match &operation {
+            MemoryOperation::Confirm { proposal_id } => Some(
+                proposals.get(&caller)
+                    .filter(|proposal| proposal.id == *proposal_id)
+                    .context("unknown or expired memory proposal; propose the note again and reconsider it")?
+                    .bucket.clone(),
+            ),
+            _ => None,
+        };
         let boss_principal = caller.is_none_or(|id| self.has_boss_authority(id));
         let principal = if boss_principal {
             "boss".to_owned()
@@ -5200,7 +5407,7 @@ impl BossService {
                     resolve_memory_bucket(bucket, project, own_project_path.as_deref(), &catalog)?;
                 (Some(id), path)
             }
-            None => (None, None),
+            None => (confirmation_bucket, None),
         };
         // Project buckets materialize on first touch: the caller's own
         // always, an explicitly named one only for the boss — an
@@ -5224,7 +5431,7 @@ impl BossService {
             let bucket = waku_memory_engine::buckets::Bucket {
                 id: bucket_id.clone(),
                 name,
-                purpose: "Shared project memory".into(),
+                purpose: "Selective project recall: concise, sourced context costly to rediscover; not documentation, work status, or operating rules".into(),
                 project_id: Some(bucket_id),
             };
             buckets.create_bucket(&bucket)?;
@@ -5268,6 +5475,7 @@ impl BossService {
         let mut compression = None;
         let mut bucket = None;
         let mut recorded = None;
+        let mut proposal = None;
         let mut retracted = None;
         let mut migration = None;
         let mut feed = None;
@@ -5316,31 +5524,90 @@ impl BossService {
                 retry_key,
                 ..
             } => {
-                let bucket_id = resolved_bucket
-                    .clone()
-                    .expect("bucket-addressed ops resolve a target");
-                bucket = Some(bucket_id.clone());
-                let kind = match kind {
-                    waku_protocol::boss::MemoryNoteKind::Fact => {
-                        waku_memory_engine::buckets::NoteKind::Fact
-                    }
-                    waku_protocol::boss::MemoryNoteKind::Observation => {
-                        waku_memory_engine::buckets::NoteKind::Observation
-                    }
-                    waku_protocol::boss::MemoryNoteKind::Question => {
-                        waku_memory_engine::buckets::NoteKind::Question
-                    }
-                };
-                let result = buckets.insert(
+                let bucket_id = resolved_bucket.clone().expect("record resolves a bucket");
+                buckets.validate_insert(
                     &bucket_access,
                     &principal,
                     &bucket_id,
-                    kind,
                     &text,
                     &retry_key,
                 )?;
-                recorded = Some(serde_json::to_value(result.note)?);
-                compression = result.compression.map(serde_json::to_value).transpose()?;
+                anyhow::ensure!(
+                    proposals.contains_key(&caller) || proposals.len() < MAX_MEMORY_PROPOSALS,
+                    "too many pending memory proposals; try again after they expire"
+                );
+                let same = proposals.get(&caller).is_some_and(|pending| {
+                    pending.recorded.is_none()
+                        && pending.bucket == bucket_id
+                        && pending.kind == kind
+                        && pending.text == text
+                        && pending.retry_key == retry_key
+                });
+                if !same {
+                    proposals.insert(
+                        caller,
+                        PendingMemory {
+                            id: Uuid::new_v4(),
+                            bucket: bucket_id.clone(),
+                            kind,
+                            text,
+                            retry_key,
+                            created: std::time::Instant::now(),
+                            recorded: None,
+                        },
+                    );
+                }
+                let pending = proposals.get(&caller).expect("proposal was inserted");
+                proposal = Some(serde_json::json!({
+                    "id": pending.id,
+                    "kind": pending.kind,
+                    "text": pending.text,
+                    "review": format!("Not saved to memory. Reconsider this exact proposed note. {}", waku_protocol::boss::MEMORY_RECORDING_GUIDANCE),
+                    "confirmCommand": format!("goddard-agent memory confirm {}", pending.id),
+                    "expiresInSeconds": MEMORY_PROPOSAL_TTL.saturating_sub(pending.created.elapsed()).as_secs(),
+                }));
+                bucket = Some(bucket_id);
+            }
+            MemoryOperation::Confirm { .. } => {
+                let pending = proposals
+                    .get_mut(&caller)
+                    .expect("confirmation was resolved");
+                buckets.validate_insert(
+                    &bucket_access,
+                    &principal,
+                    &pending.bucket,
+                    &pending.text,
+                    &pending.retry_key,
+                )?;
+                bucket = Some(pending.bucket.clone());
+                if let Some(note) = &pending.recorded {
+                    // A lost-response retry returns its receipt without inserting
+                    // again, even if the original note was subsequently retracted.
+                    recorded = Some(note.clone());
+                } else {
+                    let kind = match pending.kind {
+                        waku_protocol::boss::MemoryNoteKind::Fact => {
+                            waku_memory_engine::buckets::NoteKind::Fact
+                        }
+                        waku_protocol::boss::MemoryNoteKind::Observation => {
+                            waku_memory_engine::buckets::NoteKind::Observation
+                        }
+                        waku_protocol::boss::MemoryNoteKind::Question => {
+                            waku_memory_engine::buckets::NoteKind::Question
+                        }
+                    };
+                    let result = buckets.insert(
+                        &bucket_access,
+                        &principal,
+                        &pending.bucket,
+                        kind,
+                        &pending.text,
+                        &pending.retry_key,
+                    )?;
+                    recorded = Some(serde_json::to_value(result.note)?);
+                    pending.recorded = recorded.clone();
+                    compression = result.compression.map(serde_json::to_value).transpose()?;
+                }
             }
             MemoryOperation::Retract { note_id, .. } => {
                 let bucket_id = resolved_bucket
@@ -5479,6 +5746,10 @@ impl BossService {
                     "unknown memory bucket {bucket_id}"
                 );
                 let candidates = legacy_memory_candidates(&self.root, &source)?;
+                anyhow::ensure!(
+                    dry_run || caller.is_none(),
+                    "agents must propose and confirm individual memories; direct legacy import is human-only"
+                );
                 if !dry_run {
                     for candidate in &candidates {
                         let text =
@@ -5523,6 +5794,7 @@ impl BossService {
             notes,
             compression,
             recorded,
+            proposal,
             retracted,
             bucket,
             bucket_name,
@@ -5636,12 +5908,54 @@ impl BossService {
         mut next: BossState,
     ) -> anyhow::Result<()> {
         next.revision = next.revision.saturating_add(1);
-        self.save(&next)?;
+        if let Err(error) = self.save(&next) {
+            if let Some(conflict) = sqlite_storage::revision_conflict(&error) {
+                eprintln!(
+                    "Boss database changed under this host (expected revision {:?}, observed {:?}); reloading committed state",
+                    conflict.expected, conflict.observed
+                );
+                self.reload_state(&mut state)?;
+                drop(state);
+                if let Some(notifier) = self.notifier.lock().clone() {
+                    notifier();
+                }
+            }
+            return Err(error);
+        }
         *state = next;
         drop(state);
         if let Some(notifier) = self.notifier.lock().clone() {
             notifier();
         }
+        Ok(())
+    }
+
+    /// Adopt the committed state after another host wrote: the stale baseline
+    /// would reject every later save otherwise. `self.state` only advances on
+    /// a successful commit, so reloading never discards uncommitted work.
+    /// Runs the same open-time reconciliation `activate` applies so the
+    /// reloaded state's derived invariants hold — without writing, since a
+    /// live second host may still own the next commit.
+    fn reload_state(&self, state: &mut BossState) -> anyhow::Result<()> {
+        let mut fresh = self.storage.load(&self.root)?.unwrap_or_else(fresh_state);
+        let now = waku_protocol::model::unix_time();
+        reconcile_identity_names(&mut fresh);
+        reconcile_persona_defaults(&mut fresh);
+        for employee in &mut fresh.employees {
+            if employee.expired() && employee.expired_at.is_none() {
+                employee.expired_at = Some(now);
+            }
+        }
+        reconcile_waves(&mut fresh, now);
+        reconcile_outcome_assignments(&mut fresh);
+        crate::chains::reconcile(&mut fresh)?;
+        *self.interrupted.lock() = fresh
+            .employees
+            .iter()
+            .filter(|entry| restart_interrupted(entry))
+            .map(|entry| entry.session_id)
+            .collect();
+        *state = fresh;
         Ok(())
     }
 
@@ -6521,6 +6835,7 @@ fn employee_human_name<'a>(
     });
     let existing_names = existing_names
         .into_iter()
+        .map(|name| name.trim().to_lowercase())
         .collect::<std::collections::HashSet<_>>();
     let existing_initials = existing_names
         .iter()
@@ -6535,7 +6850,9 @@ fn employee_human_name<'a>(
                 .as_bytes()
                 .first()
                 .is_some_and(|initial| !existing_initials.contains(&initial.to_ascii_uppercase()));
-            if !existing_names.contains(candidate) && (!prefer_unused_initial || unused_initial) {
+            if !existing_names.contains(&candidate.to_ascii_lowercase())
+                && (!prefer_unused_initial || unused_initial)
+            {
                 *cursor = (*cursor).saturating_add(step + 1);
                 return candidate.into();
             }
@@ -6551,17 +6868,90 @@ fn employee_human_name<'a>(
     for step in 0..26u8 {
         let initial = (b'A' + (start + step) % 26) as char;
         let candidate = format!("{base} {initial}.");
-        if !existing_names.contains(candidate.as_str()) {
+        if !existing_names.contains(&candidate.to_ascii_lowercase()) {
             return candidate;
         }
     }
     for value in 27usize.. {
         let candidate = format!("{base} {}.", surname_suffix(value));
-        if !existing_names.contains(candidate.as_str()) {
+        if !existing_names.contains(&candidate.to_ascii_lowercase()) {
             return candidate;
         }
     }
     unreachable!("there is always an unused employee name suffix")
+}
+
+pub(crate) const LEADERSHIP_NAMES: [&str; 6] =
+    ["Atlas", "Nova", "Sage", "Orion", "Clover", "Quinn"];
+
+pub(crate) fn same_identity_name(left: &str, right: &str) -> bool {
+    left.trim().to_lowercase() == right.trim().to_lowercase()
+}
+
+pub(crate) fn employee_names(state: &BossState) -> impl Iterator<Item = &str> {
+    state
+        .employees
+        .iter()
+        .chain(state.retired_employees.iter())
+        .map(|employee| employee.identity.name.as_str())
+}
+
+fn leadership_names(state: &BossState) -> impl Iterator<Item = &str> {
+    std::iter::once(state.identity.name.as_str()).chain(
+        state
+            .counsel
+            .identity
+            .iter()
+            .map(|identity| identity.name.as_str()),
+    )
+}
+
+fn validate_employee_name(state: &BossState, name: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        !leadership_names(state).any(|used| same_identity_name(used, name)),
+        "name is already used by Boss or Counsel"
+    );
+    Ok(())
+}
+
+// Keep Boss's name. Move Counsel first so a Counsel-only collision can
+// be repaired without changing the employee, even if the employee retired.
+fn reconcile_identity_names(state: &mut BossState) {
+    let boss_name = state.identity.name.clone();
+    if let Some(identity) = state.counsel.identity.as_ref() {
+        if same_identity_name(&boss_name, &identity.name)
+            || employee_names(state).any(|name| same_identity_name(name, &identity.name))
+        {
+            let name = crate::counsel::available_counsel_name(state, identity.id);
+            state
+                .counsel
+                .identity
+                .as_mut()
+                .expect("Counsel identity exists")
+                .name = name;
+            state.counsel.revision = state.counsel.revision.saturating_add(1);
+        }
+    }
+
+    if !employee_names(state).any(|name| same_identity_name(name, &boss_name)) {
+        return;
+    }
+    let mut reserved: Vec<String> = employee_names(state)
+        .chain(leadership_names(state))
+        .map(str::to_owned)
+        .collect();
+    for employee in state
+        .employees
+        .iter_mut()
+        .chain(std::sync::Arc::make_mut(&mut state.retired_employees).iter_mut())
+    {
+        if same_identity_name(&employee.identity.name, &boss_name) {
+            let name =
+                employee_human_name(reserved.iter().map(String::as_str), &mut state.name_cursor);
+            reserved.push(name.clone());
+            employee.identity.name = name;
+        }
+    }
 }
 
 fn validate_name(name: &str) -> anyhow::Result<()> {
@@ -7736,7 +8126,7 @@ fn fresh_state() -> BossState {
     let id = Uuid::new_v4();
     let persona_id = Uuid::new_v4();
     let employee_id = Uuid::new_v4();
-    let names = ["Atlas", "Nova", "Sage", "Orion", "Clover", "Quinn"];
+    let names = LEADERSHIP_NAMES;
     let specialist_ids: BTreeMap<PersonaDefaultRole, Uuid> = PersonaDefaultRole::SPECIALISTS
         .iter()
         .copied()
@@ -7770,6 +8160,8 @@ fn fresh_state() -> BossState {
         *persona_defaults.get_mut(role) = current_persona_default_state(role);
     }
     BossState {
+        counsel: Default::default(),
+        employee_prompt_controls: Default::default(),
         identity: BossIdentity {
             id,
             name: names[id.as_bytes()[0] as usize % names.len()].into(),
@@ -7806,6 +8198,8 @@ fn fresh_state() -> BossState {
 
 fn disabled_state() -> BossState {
     BossState {
+        counsel: Default::default(),
+        employee_prompt_controls: Default::default(),
         identity: BossIdentity {
             id: Uuid::nil(),
             name: String::new(),
@@ -7867,6 +8261,100 @@ mod tests {
         assert!(service.document().session_id.is_none());
         assert!(service.document().identity.id.is_nil());
         assert!(!root.exists());
+    }
+
+    #[test]
+    fn employee_names_reserve_leadership_names_across_restart_and_rename() {
+        let root = std::env::temp_dir().join(format!("boss-names-{}", Uuid::new_v4()));
+        let database = root.join("app.db");
+        let service = BossService::open_database(root.clone(), database.clone()).unwrap();
+        let boss = Uuid::new_v4();
+        service.set_session_id(boss).unwrap();
+        let mut employee = service
+            .prepare_employee(
+                boss,
+                None,
+                "Release checks".into(),
+                None,
+                false,
+                EmployeeGoal::Errand,
+                None,
+            )
+            .unwrap();
+        employee.identity.name = " atlas ".into();
+        let mut unrelated = employee.clone();
+        unrelated.session_id = Uuid::new_v4();
+        unrelated.identity.id = unrelated.session_id;
+        unrelated.identity.name = "Unrelated".into();
+        let counsel_id = Uuid::new_v4();
+        service
+            .update(|state| {
+                state.identity.name = "Atlas".into();
+                state.counsel.identity = Some(BossIdentity {
+                    id: counsel_id,
+                    name: "ATLAS".into(),
+                    avatar_seed: "keep".into(),
+                    avatar_style: Default::default(),
+                });
+                state.employees.push(unrelated.clone());
+                std::sync::Arc::make_mut(&mut state.retired_employees).push(employee.clone());
+                Ok(())
+            })
+            .unwrap();
+        drop(service);
+
+        let service = BossService::disabled_database(root.clone(), database.clone());
+        service.activate().unwrap();
+        let document = service.document();
+        let counsel = document.counsel.identity.as_ref().unwrap();
+        let retired = &document.retired_employees[0];
+        assert_eq!(document.identity.name, "Atlas");
+        assert_eq!(counsel.id, counsel_id);
+        assert_eq!(counsel.avatar_seed, "keep");
+        assert_eq!(document.employees[0].identity, unrelated.identity);
+        assert_eq!(retired.identity.id, employee.identity.id);
+        assert!(validate_employee_name(&document, &retired.identity.name).is_ok());
+        assert!(!same_identity_name(&counsel.name, "Atlas"));
+
+        for name in [&counsel.name, &retired.identity.name] {
+            assert!(
+                service
+                    .handle(
+                        None,
+                        BossOperation::Rename {
+                            name: format!(" {} ", name.to_uppercase()),
+                        }
+                    )
+                    .is_err()
+            );
+        }
+        assert!(
+            service
+                .handle(
+                    None,
+                    BossOperation::RenameEmployee {
+                        session_id: unrelated.session_id,
+                        name: counsel.name.to_uppercase(),
+                    }
+                )
+                .is_err()
+        );
+        let mut renamed = document.counsel.clone();
+        renamed.identity.as_mut().unwrap().name = " atlas ".into();
+        assert!(
+            service
+                .save_counsel(renamed.revision, renamed, None)
+                .is_err()
+        );
+        assert_eq!(service.document().revision, document.revision);
+        drop(service);
+
+        let reopened = BossService::open_database(root.clone(), database)
+            .unwrap()
+            .document();
+        assert_eq!(reopened.counsel.identity.as_ref(), Some(counsel));
+        assert_eq!(reopened.retired_employees[0].identity, retired.identity);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -9805,7 +10293,7 @@ mod tests {
                 )
                 .is_err()
         );
-        service
+        let result = service
             .handle(
                 Some(employee_id),
                 BossOperation::PublishDeliverable {
@@ -9815,6 +10303,20 @@ mod tests {
                 },
             )
             .unwrap();
+        // Publish reports the stored record and the exact `deliverable:<id>`
+        // reference form handoffs accept — the publisher could not otherwise
+        // cite its artifact.
+        let BossResult::DeliverablePublished {
+            deliverable,
+            reference,
+        } = result
+        else {
+            panic!("publish must return the stored deliverable record");
+        };
+        assert_eq!(deliverable.name, "Employee Report");
+        assert_eq!(deliverable.source_path.as_deref(), Some(file_path.as_str()));
+        assert!(!deliverable.directory);
+        assert_eq!(reference, format!("deliverable:{}", deliverable.id));
         // Publishing is the only deliverable door that opens — the sidebar
         // affordances still refuse the employee.
         assert!(
@@ -9895,7 +10397,7 @@ mod tests {
         let file_created = file_deliverable.created_at;
 
         // Re-publishing refreshes the same deliverable rather than stacking rows.
-        service
+        let result = service
             .handle(
                 None,
                 BossOperation::PublishDeliverable {
@@ -9905,6 +10407,18 @@ mod tests {
                 },
             )
             .unwrap();
+        let BossResult::DeliverablePublished {
+            deliverable: republished_result,
+            reference: republished_reference,
+        } = result
+        else {
+            panic!("publish must return the stored deliverable record");
+        };
+        assert_eq!(republished_result.id, file_id);
+        assert_eq!(
+            republished_reference,
+            format!("deliverable:{file_id}")
+        );
         let state = service.document();
         assert_eq!(state.deliverables.len(), 2);
         let republished = state
@@ -10717,6 +11231,216 @@ mod memory_op_tests {
     use super::*;
     use waku_protocol::boss::{MemoryOperation, PersonaInstructionLayer};
 
+    fn confirm_proposal(
+        service: &BossService,
+        caller: Option<Uuid>,
+        project: Option<PathBuf>,
+        result: BossResult,
+    ) -> BossResult {
+        let BossResult::Memory {
+            proposal: Some(proposal),
+            recorded: None,
+            ..
+        } = result
+        else {
+            panic!("record must propose without saving");
+        };
+        let proposal_id = serde_json::from_value(proposal["id"].clone()).unwrap();
+        service
+            .memory(caller, project, MemoryOperation::Confirm { proposal_id })
+            .unwrap()
+    }
+
+    #[test]
+    fn memory_proposals_are_invisible_until_confirmed_and_retries_do_not_reinsert() {
+        let root = std::env::temp_dir().join(format!("boss-memory-proposal-{}", Uuid::new_v4()));
+        let project = root.join("repo");
+        fs::create_dir_all(&project).unwrap();
+        let service = BossService::open(root.clone()).unwrap();
+        let caller = Some(Uuid::new_v4());
+        let run = |operation| {
+            service
+                .memory(caller, Some(project.clone()), operation)
+                .unwrap()
+        };
+        let propose = || {
+            run(MemoryOperation::Record {
+                bucket: None,
+                project: None,
+                kind: waku_protocol::boss::MemoryNoteKind::Observation,
+                text: "Pinned dependency X validates CRC only when its reader reaches EOF.".into(),
+                retry_key: "crc-observation".into(),
+            })
+        };
+        let BossResult::Memory {
+            proposal: Some(proposal),
+            recorded: None,
+            compression: None,
+            ..
+        } = propose()
+        else {
+            panic!("a proposal is not a recorded note");
+        };
+        assert!(
+            proposal["review"]
+                .as_str()
+                .unwrap()
+                .contains("Not saved to memory")
+        );
+        assert!(
+            proposal["review"]
+                .as_str()
+                .unwrap()
+                .contains("standing instructions")
+        );
+        let id: Uuid = serde_json::from_value(proposal["id"].clone()).unwrap();
+        let BossResult::Memory {
+            proposal: Some(retry),
+            ..
+        } = propose()
+        else {
+            panic!()
+        };
+        assert_eq!(retry["id"], proposal["id"]);
+        assert!(service.project_memory_digest(&project).is_none());
+        let BossResult::Memory { notes, .. } = run(MemoryOperation::Scan {
+            bucket: None,
+            project: None,
+            query: "CRC".into(),
+        }) else {
+            panic!()
+        };
+        assert!(notes.is_empty());
+        let BossResult::Memory {
+            feed: Some(feed), ..
+        } = run(MemoryOperation::Feed)
+        else {
+            panic!()
+        };
+        assert!(feed["records"].as_array().unwrap().is_empty());
+        assert!(
+            service
+                .memory(
+                    Some(Uuid::new_v4()),
+                    Some(project.clone()),
+                    MemoryOperation::Confirm { proposal_id: id }
+                )
+                .is_err()
+        );
+        let BossResult::Memory {
+            recorded: Some(note),
+            ..
+        } = run(MemoryOperation::Confirm { proposal_id: id })
+        else {
+            panic!()
+        };
+        assert_eq!(note["text"], proposal["text"]);
+        assert_eq!(note["kind"], proposal["kind"]);
+        let BossResult::Memory {
+            recorded: Some(retried),
+            ..
+        } = run(MemoryOperation::Confirm { proposal_id: id })
+        else {
+            panic!()
+        };
+        assert_eq!(retried["id"], note["id"]);
+        run(MemoryOperation::Retract {
+            bucket: None,
+            project: None,
+            note_id: note["id"].as_str().unwrap().into(),
+            session: None,
+        });
+        run(MemoryOperation::Confirm { proposal_id: id });
+        assert!(
+            service.project_memory_digest(&project).is_none(),
+            "confirm retry must not undo a retraction"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn memory_confirmation_rechecks_access_and_rejects_replaced_expired_or_restarted_proposals() {
+        let root = std::env::temp_dir().join(format!("boss-memory-confirm-{}", Uuid::new_v4()));
+        let project = root.join("repo");
+        let other = root.join("other");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        let service = BossService::open(root.clone()).unwrap();
+        let caller = Some(Uuid::new_v4());
+        let propose = |text: &str| {
+            let BossResult::Memory {
+                proposal: Some(proposal),
+                ..
+            } = service
+                .memory(
+                    caller,
+                    Some(project.clone()),
+                    MemoryOperation::Record {
+                        bucket: None,
+                        project: None,
+                        kind: waku_protocol::boss::MemoryNoteKind::Fact,
+                        text: text.into(),
+                        retry_key: text.into(),
+                    },
+                )
+                .unwrap()
+            else {
+                panic!()
+            };
+            serde_json::from_value::<Uuid>(proposal["id"].clone()).unwrap()
+        };
+        let old = propose("first candidate");
+        let id = propose("revised candidate");
+        assert!(
+            service
+                .memory(
+                    caller,
+                    Some(project.clone()),
+                    MemoryOperation::Confirm { proposal_id: old }
+                )
+                .is_err()
+        );
+        assert!(
+            service
+                .memory(
+                    caller,
+                    Some(other),
+                    MemoryOperation::Confirm { proposal_id: id }
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("access denied")
+        );
+        service
+            .memory_proposals
+            .lock()
+            .get_mut(&caller)
+            .unwrap()
+            .created -= MEMORY_PROPOSAL_TTL;
+        assert!(
+            service
+                .memory(
+                    caller,
+                    Some(project.clone()),
+                    MemoryOperation::Confirm { proposal_id: id }
+                )
+                .is_err()
+        );
+        let id = propose("restart candidate");
+        let restarted = BossService::open(root.clone()).unwrap();
+        assert!(
+            restarted
+                .memory(
+                    caller,
+                    Some(project.clone()),
+                    MemoryOperation::Confirm { proposal_id: id }
+                )
+                .is_err()
+        );
+        assert!(restarted.project_memory_digest(&project).is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn project_bucket_is_automatic_and_other_buckets_require_an_explicit_grant() {
         let root = std::env::temp_dir().join(format!("boss-buckets-{}", Uuid::new_v4()));
@@ -10795,7 +11519,7 @@ mod memory_op_tests {
             .unwrap()
             .to_owned();
         let BossResult::Memory {
-            recorded: Some(note),
+            proposal: Some(note),
             ..
         } = service
             .handle(
@@ -11081,7 +11805,7 @@ mod memory_op_tests {
         // daemon-resolved path stands in for `set_project_context`.
         let BossResult::Memory {
             bucket: Some(echoed),
-            recorded: Some(note),
+            proposal: Some(note),
             ..
         } = service
             .memory(
@@ -11191,7 +11915,7 @@ mod memory_op_tests {
         .iter()
         .enumerate()
         {
-            service
+            let result = service
                 .handle(
                     Some(boss),
                     BossOperation::Memory {
@@ -11205,6 +11929,7 @@ mod memory_op_tests {
                     },
                 )
                 .unwrap();
+            confirm_proposal(&service, Some(boss), None, result);
         }
 
         let digest = service.project_memory_digest(&project).unwrap();
@@ -11261,7 +11986,7 @@ mod memory_op_tests {
 
         let migrate = |dry_run| {
             service.handle(
-                Some(boss),
+                None,
                 BossOperation::Memory {
                     operation: MemoryOperation::MigrateLegacy {
                         bucket: bucket.clone(),
@@ -11292,6 +12017,10 @@ mod memory_op_tests {
                 .unwrap()
                 .contains("Release branch is dev")
         );
+
+        assert!(service.handle(Some(boss), BossOperation::Memory {
+            operation: MemoryOperation::MigrateLegacy { bucket: bucket.clone(), source: "boss".into(), dry_run: false },
+        }).unwrap_err().to_string().contains("human-only"));
 
         let BossResult::Memory {
             migration: Some(imported),
@@ -11958,7 +12687,7 @@ mod memory_op_tests {
         );
 
         let held = Uuid::new_v4();
-        service.mark_dispatching(session, 1, Some(held)).unwrap();
+        service.mark_dispatching(session, 1, Some(held), false).unwrap();
         service.mark_working(session, 1).unwrap();
 
         let update = Uuid::new_v4();
@@ -12006,7 +12735,7 @@ mod memory_op_tests {
         // id so nothing leaks mid-flight.
         let held_two = Uuid::new_v4();
         service
-            .mark_dispatching(session, 2, Some(held_two))
+            .mark_dispatching(session, 2, Some(held_two), false)
             .unwrap();
         service.mark_working(session, 2).unwrap();
         let parked = Uuid::new_v4();
@@ -13611,10 +14340,21 @@ mod memory_op_tests {
             .set_outcome_waiting(
                 None,
                 task.id,
-                Some(OutcomeWait::Until { at: now + 7200 }),
+                Some(OutcomeWait::Until {
+                    at: now + 7200,
+                    recorded_at: None,
+                }),
                 None,
             )
             .unwrap();
+        assert_eq!(
+            outcome(&service, task.id)
+                .waiting
+                .as_ref()
+                .and_then(OutcomeWait::recorded_at),
+            Some(now),
+            "the write stamps the wait's own record time"
+        );
         assert!(
             service
                 .scan_outcome_reminders(now + waku_protocol::boss::OUTCOME_UNATTENDED_GRACE + 60)
@@ -13835,7 +14575,7 @@ mod memory_op_tests {
         // Drive the first generation to working, then requeue it — the
         // live replacement ends the admission superseded.
         service
-            .mark_dispatching(employee.session_id, 1, None)
+            .mark_dispatching(employee.session_id, 1, None, false)
             .unwrap();
         service.mark_working(employee.session_id, 1).unwrap();
         service

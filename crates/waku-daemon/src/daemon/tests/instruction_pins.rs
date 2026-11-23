@@ -22,6 +22,7 @@ fn instruction_pins_preserve_human_provenance_and_survive_rotation() {
     };
     record_boss_event(&backend.task_state, &backend.task_store, old, &submitted).unwrap();
     super::super::instruction_pins::capture_boss_instruction_event(
+        &backend.idle_shutdown,
         &backend.boss,
         &backend.task_state,
         &backend.task_store,
@@ -78,7 +79,7 @@ fn instruction_pins_preserve_human_provenance_and_survive_rotation() {
         )
         .unwrap();
     let outbound = backend.boss_outbound_prompt(old, "Continue supervising.".into());
-    assert!(outbound.contains("Wait for the user's restart confirmation"));
+    assert!(outbound.contains("Keep supervising the repair"));
     assert!(outbound.contains("<goddard-provider-context>"));
     assert!(outbound.contains(human));
     assert!(outbound.contains("The user confirms the daemon restart"));
@@ -216,6 +217,8 @@ fn a_hinted_boss_prompt_delivers_under_the_operation_guard() {
     backend.sessions.lock().insert(
         boss,
         RuntimeEntry {
+            mode: Default::default(),
+            _admission: None,
             plan_gate: None,
             runtime_id: runtime,
             driver: DriverHandle::from_control(capture.clone()),
@@ -236,6 +239,7 @@ fn a_hinted_boss_prompt_delivers_under_the_operation_guard() {
                     session_id: boss,
                     runtime_id: runtime,
                     command: Command::Prompt {
+                        runtime_mode: None,
                         prompt: "Keep the release hold while I confirm the restart".into(),
                         turn_id: None,
                         message_id: None,

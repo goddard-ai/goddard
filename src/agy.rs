@@ -177,21 +177,12 @@ pub fn newest_conversation_for_cwd(cwd: &Path, seen_at: u64) -> Option<String> {
 
 /// The argv for a terminal that runs the CLI's TUI.
 ///
-/// `agy -i "<prompt>"` opens the TUI with the first turn already queued;
-/// `agy --conversation <id>` reopens an existing one. `-p`'s greedy prompt
-/// argument is the reason the prompt rides as `-i`'s own value rather than
-/// a trailing positional.
+/// `agy --conversation <id>` reopens an existing conversation.
 pub struct AgyLaunch {
     pub args: Vec<String>,
 }
 
 impl AgyLaunch {
-    pub fn initial_prompt(prompt: &str, model: Option<&str>, effort: Option<&str>) -> Self {
-        let mut args = vec!["-i".to_owned(), prompt.to_owned()];
-        push_model_options(&mut args, model, effort);
-        Self { args }
-    }
-
     pub fn resume(conversation_id: &str, model: Option<&str>, effort: Option<&str>) -> Self {
         let mut args = vec!["--conversation".to_owned(), conversation_id.to_owned()];
         push_model_options(&mut args, model, effort);

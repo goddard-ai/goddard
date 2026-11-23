@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use crate::computer_use::ComputerToolRequest;
 use crate::model::{
     BackgroundWorkKey, DriverEvent, MessageAttachment, ProviderKind, ProviderResumeCursor,
-    RuntimeEventCursor,
+    RuntimeEventCursor, RuntimeMode,
 };
 use crossbeam_channel::{Sender, bounded, select};
 use parking_lot::Mutex;
@@ -100,23 +100,49 @@ fn connect_remote(
 ) -> anyhow::Result<DriverHandle> {
     let client_updates = daemon.subscribe_clients();
     let active_client = Arc::new(Mutex::new(initial_client.clone()));
+    let detail_visible = Arc::new(AtomicBool::new(false));
+    let forwarding_detail_visible = detail_visible.clone();
     let forwarding_client = active_client.clone();
     let closed = Arc::new(AtomicBool::new(false));
     let forwarding_closed = closed.clone();
     let (shutdown, forwarding_shutdown) = bounded(1);
     let forwarding_events = events.clone();
     let thread_initial_client = initial_client.clone();
+    let (view_wake, view_changes) = bounded(1);
     let spawn = std::thread::Builder::new()
         .name(format!("goddard-daemon-session-{session_id}"))
         .spawn(move || {
             let mut client = thread_initial_client;
             let mut remote_events = client.subscribe(session_id, runtime_id);
+            let set_view = |client: &waku_client::DaemonClient| {
+                // Compact interests strip bulk activity fields the viewer
+                // range-reads back on expansion; older daemons ignore the
+                // field and keep their legacy shape.
+                client.set_task_view_payloads(
+                    session_id,
+                    runtime_id,
+                    forwarding_detail_visible.load(Ordering::Acquire),
+                    if client.transcript_windows_available() {
+                        waku_protocol::transcript::TaskViewPayloadInterest::Compact
+                    } else {
+                        waku_protocol::transcript::TaskViewPayloadInterest::All
+                    },
+                )
+            };
+            if let Err(error) = set_view(&client) {
+                let _ = forwarding_events.send(DriverEvent::Error(format!("Could not load task view: {error:#}")));
+            }
             loop {
                 let disconnected = loop {
                     select! {
                         recv(forwarding_shutdown) -> _ => return,
+                        recv(view_changes) -> _ => {
+                            if let Err(error) = set_view(&client) {
+                                let _ = forwarding_events.send(DriverEvent::Error(format!("Could not load task view: {error:#}")));
+                            }
+                        },
                         recv(remote_events) -> sequenced => {
-                            let Ok(sequenced) = sequenced else {
+                            let Ok(mut sequenced) = sequenced else {
                                 break true;
                             };
                             if replay_cursor.is_some_and(|cursor| {
@@ -141,7 +167,17 @@ fn connect_remote(
                                 }
                                 continue;
                             }
-                            let event = match waku_client::event_from_wire(sequenced.event) {
+                            if let Some(snapshot) = sequenced.event.payload.as_object_mut().and_then(|payload| payload.remove("taskSnapshot")) {
+                                match serde_json::from_value(snapshot) {
+                                    Ok(session) => { let _ = forwarding_events.send(DriverEvent::TaskViewSnapshot { session: Box::new(session), detail: false, settle: false }); }
+                                    Err(error) => { let _ = forwarding_events.send(DriverEvent::Error(format!("Could not restore completed task: {error}"))); }
+                                }
+                            }
+                            let decoded = if sequenced.event.kind == "turnStarted" && sequenced.event.payload.get("turn").is_some() {
+                                serde_json::from_value(sequenced.event.payload["turn"].clone())
+                                    .map(DriverEvent::TaskTurnStarted).map_err(anyhow::Error::from)
+                            } else { waku_client::event_from_wire(sequenced.event) };
+                            let event = match decoded {
                                 Ok(event) => event,
                                 Err(error) => DriverEvent::Error(format!(
                                     "Goddard daemon sent an invalid event: {error}"
@@ -192,6 +228,7 @@ fn connect_remote(
                         *forwarding_client.lock() = replacement.clone();
                         client = replacement;
                         remote_events = client.subscribe(session_id, runtime_id);
+                        let _ = set_view(&client);
                     }
                     Ok(waku_client::ResponsePayload::SessionRuntime { .. }) => {
                         // The runtime is gone, but the daemon answering is
@@ -224,6 +261,8 @@ fn connect_remote(
     }
     Ok(DriverHandle::from_control(Arc::new(RemoteDriverControl {
         client: active_client,
+        detail_visible,
+        view_wake,
         session_id,
         runtime_id,
         supports_steer,
@@ -235,6 +274,8 @@ fn connect_remote(
 }
 
 struct RemoteDriverControl {
+    detail_visible: Arc<AtomicBool>,
+    view_wake: Sender<()>,
     client: Arc<Mutex<waku_client::DaemonClient>>,
     session_id: uuid::Uuid,
     runtime_id: uuid::Uuid,
@@ -317,9 +358,40 @@ impl RemoteDriverControl {
 }
 
 impl DriverControl for RemoteDriverControl {
+    fn daemon_runtime_id(&self) -> Option<uuid::Uuid> {
+        Some(self.runtime_id)
+    }
+
+    fn prompt_with_configuration(
+        &self,
+        prompt: String,
+        configuration: waku_client::PromptConfiguration,
+        turn_id: Option<uuid::Uuid>,
+        message_id: Option<uuid::Uuid>,
+        hidden: bool,
+        attachments: Vec<waku_protocol::model::MessageAttachment>,
+        presentation: Option<waku_protocol::PromptPresentation>,
+    ) -> anyhow::Result<waku_client::PendingRequest> {
+        let client = self.client.lock().clone();
+        client.begin_request(
+            self.session_id,
+            self.runtime_id,
+            waku_client::Command::PromptWithConfiguration {
+                prompt,
+                configuration,
+                turn_id,
+                message_id,
+                hidden,
+                attachments,
+                presentation,
+            },
+        )
+    }
+
     fn prompt(
         &self,
         prompt: String,
+        mode: RuntimeMode,
         turn_id: Option<uuid::Uuid>,
         message_id: Option<uuid::Uuid>,
         hidden: bool,
@@ -327,6 +399,7 @@ impl DriverControl for RemoteDriverControl {
     ) {
         self.notify(waku_client::Command::Prompt {
             prompt,
+            runtime_mode: Some(mode),
             turn_id,
             message_id,
             hidden,
@@ -496,6 +569,12 @@ impl DriverControl for RemoteDriverControl {
         }
     }
 
+    fn set_detail_visible(&self, visible: bool) {
+        if self.detail_visible.swap(visible, Ordering::AcqRel) != visible {
+            let _ = self.view_wake.try_send(());
+        }
+    }
+
     fn close(&self) {
         self.notify(waku_client::Command::CloseSession);
     }
@@ -601,6 +680,7 @@ impl DriverControl for FriendWatchControl {
     fn prompt(
         &self,
         _prompt: String,
+        _mode: RuntimeMode,
         _turn_id: Option<uuid::Uuid>,
         _message_id: Option<uuid::Uuid>,
         _hidden: bool,

@@ -33,7 +33,7 @@ impl ResourceSet {
 /// with the claim: the daemon's boss-set policy supplies them per attempt,
 /// so a policy change takes effect on the next try without re-writing the
 /// ledger.
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 pub struct AdmissionClaim {
     /// Stable daemon identity the claim is namespaced under — the Boss
     /// document's identity id, not a process id.
@@ -122,7 +122,7 @@ impl Default for ResourcePolicy {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 pub struct Reservation {
     pub id: Uuid,
     pub task: Uuid,

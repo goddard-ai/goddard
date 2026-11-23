@@ -250,6 +250,7 @@ pub(super) fn render_message_footer(
                 .flatten(),
             |element, tps| element.child(" · ").child(format!("{tps} tok/s")),
         );
+    let copy_atoms = message.atoms.clone();
     let copy_button = div()
         .id(SharedString::from(format!("copy-message-{message_id}")))
         .w(px(27.0))
@@ -275,7 +276,12 @@ pub(super) fn render_message_footer(
             tr!("common.copy_message")
         }))
         .on_click(move |_, _, cx| {
-            cx.write_to_clipboard(ClipboardItem::new_string(copy_content.to_string()));
+            let item = if copy_atoms.is_empty() {
+                ClipboardItem::new_string(copy_content.to_string())
+            } else {
+                composer::message_clipboard_item(&copy_content, &copy_atoms)
+            };
+            cx.write_to_clipboard(item);
             let _ = copy_waku.update(cx, |this, cx| {
                 this.show_message_copied(message_id, cx);
             });
@@ -670,6 +676,13 @@ fn render_sent_message_attachments(
         .justify_end()
         .gap(px(8.0));
     for (index, attachment) in attachments.iter().enumerate() {
+        let original_path = attachment
+            .blob_reference
+            .as_deref()
+            .and_then(|reference| {
+                waku_base::attachments::archived_path(reference, &attachment.path)
+            })
+            .unwrap_or_else(|| attachment.path.clone());
         if let Some(session_id) = attachment.session_id {
             let navigate_waku = waku.clone();
             let key_waku = waku.clone();
@@ -780,7 +793,7 @@ fn render_sent_message_attachments(
                         cx.stop_propagation();
                     }
                 });
-            let reveal_path = attachment.path.clone();
+            let reveal_path = original_path.clone();
             let mut attachment_column = div().flex().flex_col().items_end().gap(px(6.0));
             attachment_column = attachment_column.child(context_menu(
                 chip,
@@ -828,7 +841,7 @@ fn render_sent_message_attachments(
             let click_waku = waku.clone();
             let key_waku = waku.clone();
             let key_menu = menu.clone();
-            let click_path = attachment.path.to_string_lossy().into_owned();
+            let click_path = original_path.to_string_lossy().into_owned();
             let key_path = click_path.clone();
             let chip = div()
                 .id(SharedString::from(format!(
@@ -866,7 +879,7 @@ fn render_sent_message_attachments(
                         cx.stop_propagation();
                     }
                 });
-            let reveal_path = attachment.path.clone();
+            let reveal_path = original_path.clone();
             row = row.child(context_menu(
                 chip,
                 SharedString::from(format!("message-{message_id}-attachment-{index}-menu")),
@@ -900,8 +913,8 @@ fn render_sent_message_attachments(
                 let key_image = attachment_image.clone();
                 let preview_name = SharedString::from(attachment.name.clone());
                 let key_name = preview_name.clone();
-                let preview_path = attachment.path.clone();
-                let key_path = attachment.path.clone();
+                let preview_path = original_path.clone();
+                let key_path = original_path.clone();
                 tile = tile.child(
                     div()
                         .id(SharedString::from(format!(
@@ -966,7 +979,7 @@ fn render_sent_message_attachments(
             let key_menu = menu.clone();
             let click_waku = waku.clone();
             let key_waku = waku.clone();
-            let click_path = attachment.path.to_string_lossy().into_owned();
+            let click_path = original_path.to_string_lossy().into_owned();
             let key_path = click_path.clone();
             tile = tile
                 .cursor_pointer()
@@ -1009,7 +1022,7 @@ fn render_sent_message_attachments(
                     }
                 });
         }
-        let reveal_path = attachment.path.clone();
+        let reveal_path = original_path.clone();
         row = row.child(context_menu(
             tile,
             SharedString::from(format!("message-{message_id}-attachment-{index}-menu")),
@@ -1285,6 +1298,8 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
     // settled response stands in for the whole visible answer, so its menu
     // shares the footer's copy content — parts hidden behind "Worked for X"
     // stay out — rather than copying the final part alone.
+    let menu_atoms = message.atoms.clone();
+    let menu_display_content = content.clone();
     let menu_copy_content = assistant_footer_copy_content
         .clone()
         .unwrap_or_else(|| SharedString::from(waku_protocol::model::atom_visible_text(&content)));
@@ -1772,24 +1787,29 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                 div().w_full().flex().justify_center().child(
                     div()
                         .flex()
+                        .min_w_0()
+                        .max_w_full()
+                        .whitespace_normal()
                         .items_center()
                         .gap(px(5.0))
                         .px(px(10.0))
                         .py(px(4.0))
-                        .rounded_full()
+                        .rounded(px(10.0))
                         .bg(theme.overlay)
                         .text_size(sp(12.5))
                         .line_height(sp(16.0))
                         .when_some(status_kind, |row, kind| {
-                            row.child(status_notice_icon(kind, provider, theme, 11.0))
+                            row.child(
+                                div()
+                                    .flex_none()
+                                    .child(status_notice_icon(kind, provider, theme, 11.0)),
+                            )
                         })
-                        .child(md::render::plain_text(
+                        .child(div().min_w_0().child(md::render::notice_text(
                             content.clone(),
-                            ctx.families().ui.clone(),
-                            FontWeight::NORMAL,
                             theme.text_tertiary,
                             ctx,
-                        ))
+                        )))
                         .when(model_switched, |row| {
                             row.child(model_switch_cache_info(message_id, theme))
                         }),
@@ -1804,8 +1824,15 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
         SharedString::from(format!("message-menu-{message_id}")),
         &menu,
         move |cx| {
+            let copy_content = if menu_atoms.is_empty() {
+                menu_copy_content.to_string()
+            } else {
+                waku_protocol::model::message_copy_text(&menu_display_content, &menu_atoms)
+            };
             message_menu_items(
-                &menu_copy_content,
+                &copy_content,
+                (!menu_atoms.is_empty())
+                    .then(|| composer::message_clipboard_item(&menu_display_content, &menu_atoms)),
                 role,
                 user_message_action,
                 assistant_message_action,
@@ -1887,18 +1914,21 @@ fn status_notice_row(
         .w_full()
         .flex()
         .items_center()
+        .whitespace_normal()
         .gap(px(6.0))
         .py(px(4.0))
         .text_size(sp(12.5))
         .line_height(sp(16.0))
-        .child(status_notice_icon(status, provider, theme, 12.0))
-        .child(md::render::plain_text(
+        .child(
+            div()
+                .flex_none()
+                .child(status_notice_icon(status, provider, theme, 12.0)),
+        )
+        .child(div().min_w_0().child(md::render::notice_text(
             content.to_owned(),
-            ctx.families().ui.clone(),
-            FontWeight::NORMAL,
             theme.text_tertiary,
             ctx,
-        ))
+        )))
         .when(status == TranscriptNoticeStatus::ModelSwitched, |row| {
             row.child(model_switch_cache_info(message_id, theme))
         })
@@ -2889,6 +2919,7 @@ fn transfer_notice_row(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn message_menu_items(
     content: &str,
+    chip_copy: Option<ClipboardItem>,
     role: MessageRole,
     user_message_action: Option<UserMessageAction>,
     assistant_message_action: Option<AssistantMessageAction>,
@@ -2902,10 +2933,14 @@ pub(super) fn message_menu_items(
 
     let selected_text = selection.selection.borrow().selected_text();
     if let Some(selected) = selected_text.as_ref() {
-        let copy = selected.clone();
+        let copy = selection
+            .selection
+            .borrow()
+            .clipboard_item()
+            .unwrap_or_else(|| ClipboardItem::new_string(selected.clone()));
         items.push(
             MenuItem::new(tr!("common.copy_selection"), move |_, cx| {
-                cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()));
+                cx.write_to_clipboard(copy.clone());
             })
             .shortcut_action(&CopySelection),
         );
@@ -2919,11 +2954,13 @@ pub(super) fn message_menu_items(
     }
 
     let copy_content: Rc<str> = Rc::from(content);
-    let copied_content = copy_content.clone();
+    let copied_content = chip_copy
+        .clone()
+        .unwrap_or_else(|| ClipboardItem::new_string(copy_content.to_string()));
     items.push(MenuItem::new(
         tr!("common.copy_message_title"),
         move |_, cx| {
-            cx.write_to_clipboard(ClipboardItem::new_string(copied_content.to_string()));
+            cx.write_to_clipboard(copied_content.clone());
         },
     ));
 
@@ -2934,7 +2971,12 @@ pub(super) fn message_menu_items(
             tr!("common.copy_to_composer"),
             move |window, cx| {
                 composer.update(cx, |composer, cx| {
-                    composer.set_content(edit_content.clone(), cx);
+                    if let Some(item) = &chip_copy {
+                        composer.set_content("", cx);
+                        composer.paste_clipboard_item(item, cx);
+                    } else {
+                        composer.set_content(edit_content.clone(), cx);
+                    }
                 });
                 let focus_handle = composer.read(cx).focus();
                 window.focus(&focus_handle, cx);
@@ -3082,6 +3124,7 @@ pub(super) fn deliverable_menu_items(
 ) -> Vec<MenuItem> {
     message_menu_items(
         content,
+        None,
         MessageRole::Assistant,
         None,
         None,

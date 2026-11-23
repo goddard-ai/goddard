@@ -70,6 +70,16 @@ impl DriverHandle {
         Self { inner: control }
     }
 
+    /// The daemon runtime this attachment controls, when it has one.
+    /// Reading the identity performs no IPC.
+    pub fn daemon_runtime_id(&self) -> Option<Uuid> {
+        self.inner.daemon_runtime_id()
+    }
+
+    pub fn same_control(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+
     /// Send a prompt along with the ids this client gave the turn it opened
     /// and that turn's user message, so the daemon can publish the same
     /// identity to every other client attached to the runtime. `hidden`
@@ -80,13 +90,37 @@ impl DriverHandle {
     pub fn prompt(
         &self,
         prompt: String,
+        mode: RuntimeMode,
         turn_id: Option<Uuid>,
         message_id: Option<Uuid>,
         hidden: bool,
         attachments: Vec<MessageAttachment>,
     ) {
         self.inner
-            .prompt(prompt, turn_id, message_id, hidden, attachments);
+            .prompt(prompt, mode, turn_id, message_id, hidden, attachments);
+    }
+
+    /// Submit under an immutable selection and report explicit refusal.
+    /// Enqueue immediately; await the returned request off the UI thread.
+    pub fn prompt_with_configuration(
+        &self,
+        prompt: String,
+        configuration: waku_protocol::PromptConfiguration,
+        turn_id: Option<Uuid>,
+        message_id: Option<Uuid>,
+        hidden: bool,
+        attachments: Vec<MessageAttachment>,
+        presentation: Option<waku_protocol::PromptPresentation>,
+    ) -> anyhow::Result<crate::PendingRequest> {
+        self.inner.prompt_with_configuration(
+            prompt,
+            configuration,
+            turn_id,
+            message_id,
+            hidden,
+            attachments,
+            presentation,
+        )
     }
 
     pub fn supports_steer(&self) -> bool {
@@ -101,7 +135,7 @@ impl DriverHandle {
         self.inner.steer(prompt, hidden);
     }
 
-    /// Deliver a visible steer with its durable Boss queue mirror.
+    /// Deliver a visible steer with its durable queue identity and presentation.
     pub fn steer_with_submission(&self, prompt: String, queued_message: QueuedMessage) {
         self.inner.steer_with_submission(prompt, queued_message);
     }
@@ -178,20 +212,41 @@ impl DriverHandle {
         self.inner.fork(turns_to_remove)
     }
 
+    pub fn set_detail_visible(&self, visible: bool) {
+        self.inner.set_detail_visible(visible);
+    }
+
     pub fn close(&self) {
         self.inner.close();
     }
 }
 
 pub trait DriverControl: Send + Sync {
+    fn daemon_runtime_id(&self) -> Option<Uuid> {
+        None
+    }
+
     fn prompt(
         &self,
         prompt: String,
+        mode: RuntimeMode,
         turn_id: Option<Uuid>,
         message_id: Option<Uuid>,
         hidden: bool,
         attachments: Vec<MessageAttachment>,
     );
+    fn prompt_with_configuration(
+        &self,
+        _prompt: String,
+        _configuration: waku_protocol::PromptConfiguration,
+        _turn_id: Option<Uuid>,
+        _message_id: Option<Uuid>,
+        _hidden: bool,
+        _attachments: Vec<MessageAttachment>,
+        _presentation: Option<waku_protocol::PromptPresentation>,
+    ) -> anyhow::Result<crate::PendingRequest> {
+        anyhow::bail!("this transport cannot enforce the selected prompt settings")
+    }
     fn supports_steer(&self) -> bool {
         false
     }
@@ -224,6 +279,7 @@ pub trait DriverControl: Send + Sync {
     fn fork(&self, _turns_to_remove: usize) -> anyhow::Result<ProviderResumeCursor> {
         anyhow::bail!("conversation forking is not supported by this provider transport")
     }
+    fn set_detail_visible(&self, _visible: bool) {}
     fn close(&self) {}
 }
 
@@ -245,14 +301,7 @@ pub struct DriverStartOptions {
     pub provider_cursor: Option<ProviderResumeCursor>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SessionOptions {
-    pub mode: RuntimeMode,
-    pub model: Option<String>,
-    pub reasoning_effort: Option<String>,
-    pub service_tier: Option<String>,
-    pub context_window: Option<String>,
-}
+pub use waku_protocol::model::SessionOptions;
 
 #[cfg(test)]
 mod event_batch_tests {

@@ -232,6 +232,34 @@
       "when": 1793321816307,
       "tag": "0032_outstanding_lake",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1793744985215,
+      "tag": "0033_clever_nitro",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1793913800087,
+      "tag": "0034_smooth_kingpin",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1794489388169,
+      "tag": "0035_wealthy_genesis",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1794554089219,
+      "tag": "0036_gorgeous_cardiac",
+      "breakpoints": true
     }
   ]
 }

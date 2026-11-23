@@ -19,7 +19,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::{Value, json};
 use uuid::Uuid;
 use waku_protocol::eval::{EvalAnswer, EvalQuestion, Evaluation};
-use waku_protocol::model::{ActivityKind, AgentSession, MessageRole, TurnStatus};
+use waku_protocol::model::{
+    ActivityKind, AgentSession, GoalOperation, MessageRole, ThreadGoalStatus, TurnStatus,
+};
 
 use crate::ui::shortcut::ShortcutHint;
 
@@ -68,8 +70,9 @@ impl MarkerTone {
 /// flags rather than endings — a turn can report done while sitting on
 /// unrecovered errors, so they must not compete for this probability mass.
 /// `complete` and `nothing-to-do` only render when the model is sure.
-const ENDING_QUESTION: &str = "ending";
-const ENDING_OTHER_OPTION: &str = "other";
+const ENDING_QUESTION: &str = waku_protocol::eval::TURN_ENDING_QUESTION;
+#[cfg(test)]
+const ENDING_OTHER_OPTION: &str = waku_protocol::eval::TURN_ENDING_OTHER;
 const INPUT_QUESTION: &str = "awaiting-input-kind";
 const INPUT_OTHER_OPTION: &str = "other";
 const PARTIAL_QUESTION: &str = "partial-kind";
@@ -85,24 +88,15 @@ const ENDING_MARKERS: &[StatusMarker] = &[
         // but the decision log shows 0.65 suppressing clear winners that
         // beat their runner-up by 2x; 0.60 matches `answered`.
         threshold: 0.60,
-        instructions: "The prompt asked for a change or action, the work was carried \
-            out end to end, and the final response reports it done — judge the ask \
-            as the `prompt` plus any `priorPrompts` still in play. An ask satisfied \
-            entirely by information is `answered`; a reported 'no work needed' is \
-            `nothing-to-do`; a declined or redirected ask is `pushed-back`.",
+        instructions: waku_protocol::eval::ENDING_COMPLETE,
     },
     StatusMarker {
         id: "answered",
         label_key: "status_markers.answered",
         icon: "icons/message-square.svg",
         tone: MarkerTone::Info,
-        threshold: 0.60,
-        instructions: "The prompt asked for information — a question, an explanation, \
-            or an investigation — and the response delivers that answer, findings, \
-            or analysis without making changes. If the prompt also requested work \
-            that was carried out, choose `complete` instead; if the response mainly \
-            restates the request and waits for confirmation to do the work, choose \
-            `aligned`.",
+        threshold: waku_protocol::eval::TURN_ENDING_ANSWERED_THRESHOLD,
+        instructions: waku_protocol::eval::ENDING_ANSWERED,
     },
     StatusMarker {
         id: "nothing-to-do",
@@ -110,9 +104,7 @@ const ENDING_MARKERS: &[StatusMarker] = &[
         icon: "icons/minus.svg",
         tone: MarkerTone::Info,
         threshold: 0.65,
-        instructions: "The prompt asked for work, but the assistant investigated and \
-            reported that none was needed — the request was already satisfied, the \
-            problem does not reproduce, or there is nothing to change.",
+        instructions: waku_protocol::eval::ENDING_NOTHING_TO_DO,
     },
     StatusMarker {
         id: "pushed-back",
@@ -120,10 +112,7 @@ const ENDING_MARKERS: &[StatusMarker] = &[
         icon: "icons/hand.svg",
         tone: MarkerTone::Warning,
         threshold: 0.55,
-        instructions: "The assistant declined the request as asked or redirected it — \
-            refused, disputed the premise, or recommended a different approach — \
-            without asking the user anything. If it asked for approval, a decision, \
-            or details first, choose `awaiting-input`.",
+        instructions: waku_protocol::eval::ENDING_PUSHED_BACK,
     },
     StatusMarker {
         id: "awaiting-input",
@@ -131,11 +120,7 @@ const ENDING_MARKERS: &[StatusMarker] = &[
         icon: "icons/chat.svg",
         tone: MarkerTone::Info,
         threshold: 0.55,
-        instructions: "The requested work remains unfinished because the assistant \
-            asks the user for a go-ahead, a decision, missing details, or an action \
-            only the user can take before continuing. A rhetorical question after \
-            completed work does not count. A reply whose substance is replaying \
-            the request to confirm shared understanding is `aligned` instead.",
+        instructions: waku_protocol::eval::ENDING_AWAITING_INPUT,
     },
     StatusMarker {
         id: "aligned",
@@ -143,13 +128,7 @@ const ENDING_MARKERS: &[StatusMarker] = &[
         icon: "icons/chat.svg",
         tone: MarkerTone::Info,
         threshold: 0.55,
-        instructions: "The assistant's reply restates the user's request — it played \
-            back its understanding or recapped what it intends to do — and stops \
-            there, waiting for a green light to carry out the work; the only pending \
-            input is confirmation. A question needing more than a yes — a decision, \
-            missing details, or approval of a specific proposed action — is \
-            `awaiting-input`; a reply that delivers the requested information is \
-            `answered`.",
+        instructions: waku_protocol::eval::ENDING_ALIGNED,
     },
     StatusMarker {
         id: "partial",
@@ -157,9 +136,7 @@ const ENDING_MARKERS: &[StatusMarker] = &[
         icon: "icons/hourglass.svg",
         tone: MarkerTone::Warning,
         threshold: 0.50,
-        instructions: "The turn stopped before the work was finished — cut off by a \
-            context or step limit (`contextUsage` near its `window` is direct \
-            evidence), truncated output, or an explicit promise to continue later.",
+        instructions: waku_protocol::eval::ENDING_PARTIAL,
     },
 ];
 
@@ -308,6 +285,7 @@ fn suggested_actions(evaluation: &Evaluation) -> Vec<StatusSuggestedAction> {
                 | "decision"
                 | "action-needed"
                 | "awaiting-input"
+                | "partial"
                 | "needs-continuation"
                 | "errors-remain"
                 | "not-tested"
@@ -321,7 +299,7 @@ fn suggested_actions(evaluation: &Evaluation) -> Vec<StatusSuggestedAction> {
         Some("decision") | Some("awaiting-input") => vec![StatusSuggestedAction::YouDecide],
         // A typed prompt can't perform the step — it reports it done.
         Some("action-needed") => vec![StatusSuggestedAction::Done],
-        Some("needs-continuation") => vec![StatusSuggestedAction::KeepGoing],
+        Some("partial") | Some("needs-continuation") => vec![StatusSuggestedAction::KeepGoing],
         // `errors-remain` is the failed flag's subtype — it only leads
         // `cleared` when repairable errors outscored the bare failure.
         Some("errors-remain") => vec![StatusSuggestedAction::FixErrors],
@@ -351,6 +329,27 @@ fn waiting_for_user_input(evaluation: &Evaluation) -> bool {
             "awaiting-input" | "go-ahead" | "decision" | "details" | "action-needed" | "aligned"
         )
     })
+}
+
+/// Old verdicts must not interrupt a newer turn or an already parked goal.
+fn should_pause_goal_for_decision(
+    session: &AgentSession,
+    turn_id: Uuid,
+    evaluation: &Evaluation,
+) -> bool {
+    !session.status.is_busy()
+        && session.queued_messages.is_empty()
+        && session
+            .turns
+            .last()
+            .is_some_and(|turn| turn.id == turn_id && turn.status == TurnStatus::Completed)
+        && session
+            .thread_goal
+            .as_ref()
+            .is_some_and(|goal| goal.status == ThreadGoalStatus::Active)
+        && cleared_markers(evaluation)
+            .iter()
+            .any(|(marker, _)| marker.id == "decision")
 }
 
 /// What the resolving action says about the verdict's markers — a coarse
@@ -554,20 +553,7 @@ const STATUS_MARKER_MEASURE_SPAN: usize = 64;
 fn status_marker_questions() -> BTreeMap<String, EvalQuestion> {
     let mut questions = BTreeMap::from([(
         ENDING_QUESTION.to_owned(),
-        EvalQuestion::Choice {
-            instructions: "Which best describes how this turn ended? Judge the closing \
-                `response` against the `prompt` and any `priorPrompts` still in play; \
-                `toolSequence`, `toolErrors`, and `filesChanged` carry what the turn \
-                actually did. `answered` is only for asks satisfied entirely by \
-                information — a prompt that requested work ends `complete` or \
-                `partial` even when the response also explains."
-                .to_owned(),
-            criteria: ENDING_MARKERS
-                .iter()
-                .map(|marker| (marker.id.to_owned(), Some(marker.instructions.to_owned())))
-                .chain([(ENDING_OTHER_OPTION.to_owned(), None)])
-                .collect(),
-        },
+        waku_protocol::eval::turn_ending_question(),
     )]);
     questions.insert(
         INPUT_QUESTION.to_owned(),
@@ -961,6 +947,83 @@ fn status_marker_chip(marker: &StatusMarker, probability: f64, theme: &Theme) ->
         )
 }
 
+/// Keep the response footprint stable, but put its actions first when Jev
+/// has no markers. Overflow scrolls horizontally rather than growing the row.
+fn status_marker_footer(
+    turn_id: Uuid,
+    evaluation: Option<&Evaluation>,
+    theme: &Theme,
+    scroll: &ScrollHandle,
+    focus: &FocusHandle,
+    footer: AnyElement,
+) -> Div {
+    let mut cleared = evaluation.map(cleared_markers).unwrap_or_default();
+    cleared.sort_by(|(_, left), (_, right)| right.total_cmp(left));
+    let has_markers = !cleared.is_empty();
+    let keyboard_scroll = scroll.clone();
+    let marker_row = div()
+        .w_full()
+        .min_w_0()
+        .h(px(18.0))
+        .flex_none()
+        .relative()
+        .when(has_markers, |slot| {
+            slot.child(
+                div()
+                    .id(SharedString::from(format!("turn-status-markers-{turn_id}")))
+                    .size_full()
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .gap(px(12.0))
+                    .track_focus(focus)
+                    .tab_index(0)
+                    .focus_visible(|style| style.bg(theme.focus_highlight()))
+                    .restrict_scroll_to_axis()
+                    .overflow_x_scroll()
+                    .track_scroll(scroll)
+                    .on_key_down(move |event: &KeyDownEvent, window, cx| {
+                        if event.keystroke.modifiers.modified() {
+                            return;
+                        }
+                        let max = keyboard_scroll.max_offset().x;
+                        let offset = keyboard_scroll.offset();
+                        let x = match event.keystroke.key.as_str() {
+                            "left" => offset.x + px(80.0),
+                            "right" => offset.x - px(80.0),
+                            "home" => Pixels::ZERO,
+                            "end" => -max,
+                            _ => return,
+                        };
+                        keyboard_scroll.set_offset(point(x.clamp(-max, Pixels::ZERO), offset.y));
+                        cx.stop_propagation();
+                        window.refresh();
+                    })
+                    .children(cleared.into_iter().map(|(marker, probability)| {
+                        status_marker_chip(marker, probability, theme)
+                            .flex_none()
+                            .whitespace_nowrap()
+                    })),
+            )
+            .child(scrollbar::edge_fade(
+                scroll.clone(),
+                scrollbar::FadeEdge::Right,
+                theme.surface,
+            ))
+        });
+    div()
+        .w_full()
+        .min_w_0()
+        .h(px(18.0) + FOOTER_ROW_BELOW_MARKERS)
+        .flex_none()
+        .flex()
+        .flex_col()
+        .when(has_markers, |column| {
+            column.child(div().w_full().mb(px(6.0)).child(marker_row))
+        })
+        .child(footer)
+}
+
 /// The actionable turn marker shown in the sidebar, using the same icon,
 /// label, and tone as its transcript chip.
 pub(super) struct SidebarStatusMarker {
@@ -1052,69 +1115,14 @@ impl Waku {
                 .gap(px(6.0))
                 .children(marker_pill)
                 .children(actions.enumerate().map(|(index, action)| {
-                    let (icon_path, label) = match action {
-                        StatusSuggestedAction::Proceed => (
-                            "icons/chat.svg",
-                            action_predictions::suggested_prompt(
-                                "proceed",
-                                &self.state.suggested_prompts,
-                            )
-                            .unwrap_or_else(|| tr!("suggestions.proceed")),
-                        ),
-                        StatusSuggestedAction::MakeItHappen => (
-                            "icons/chat.svg",
-                            action_predictions::suggested_prompt(
-                                "make-it-happen",
-                                &self.state.suggested_prompts,
-                            )
-                            .unwrap_or_else(|| tr!("suggestions.make_it_happen")),
-                        ),
-                        StatusSuggestedAction::KeepGoing => (
-                            "icons/chat.svg",
-                            action_predictions::suggested_prompt(
-                                "keep-going",
-                                &self.state.suggested_prompts,
-                            )
-                            .unwrap_or_else(|| tr!("suggestions.keep_going")),
-                        ),
-                        StatusSuggestedAction::FixErrors => (
-                            "icons/chat.svg",
-                            action_predictions::suggested_prompt(
-                                "fix-errors",
-                                &self.state.suggested_prompts,
-                            )
-                            .unwrap_or_else(|| tr!("suggestions.fix_errors")),
-                        ),
-                        StatusSuggestedAction::RunTests => (
-                            "icons/chat.svg",
-                            action_predictions::suggested_prompt(
-                                "run-tests",
-                                &self.state.suggested_prompts,
-                            )
-                            .unwrap_or_else(|| tr!("suggestions.run_tests")),
-                        ),
-                        // These chips label the action; the
-                        // tooltip below shows the prompt text
-                        // that clicking sends.
-                        StatusSuggestedAction::YouDecide => (
-                            "icons/chat.svg",
-                            action_predictions::suggested_action_title("you-decide")
-                                .unwrap_or_else(|| tr!("suggestions.you_decide")),
-                        ),
-                        StatusSuggestedAction::Diagnose => (
-                            "icons/chat.svg",
-                            action_predictions::suggested_action_title("diagnose")
-                                .unwrap_or_else(|| tr!("suggestions.diagnose")),
-                        ),
-                        StatusSuggestedAction::Done => (
-                            "icons/chat.svg",
-                            action_predictions::suggested_prompt(
-                                "done",
-                                &self.state.suggested_prompts,
-                            )
-                            .unwrap_or_else(|| tr!("suggestions.done")),
-                        ),
-                    };
+                    let icon_path = "icons/chat.svg";
+                    let label = self
+                        .state
+                        .suggested_prompt_labels
+                        .get(action.canned_id())
+                        .cloned()
+                        .or_else(|| action_predictions::suggested_action_title(action.canned_id()))
+                        .unwrap_or_default();
                     let tooltip = action_predictions::suggested_prompt(
                         action.canned_id(),
                         &self.state.suggested_prompts,
@@ -1332,7 +1340,30 @@ impl Waku {
             return;
         }
         let state = turn_eval_state(session, turn_id, summary.as_deref());
-        let questions = status_marker_questions();
+        let mut questions = status_marker_questions();
+        for (id, condition) in &self.state.suggested_prompt_conditions {
+            if matches!(
+                id.as_str(),
+                "proceed"
+                    | "make-it-happen"
+                    | "keep-going"
+                    | "fix-errors"
+                    | "run-tests"
+                    | "you-decide"
+                    | "diagnose"
+                    | "done"
+            ) {
+                questions.insert(
+                    format!("suggest-prompt-{id}"),
+                    EvalQuestion::Noul {
+                        instructions: format!(
+                            "Is suggesting this follow-up appropriate? {condition}"
+                        ),
+                        criteria: None,
+                    },
+                );
+            }
+        }
         let tx = self.status_marker_tx.clone();
         let event_wake = self.event_wake_tx.clone();
         self.status_marker_in_flight.insert(turn_id);
@@ -1364,8 +1395,9 @@ impl Waku {
 
     /// Land answered evaluations. A failed call drops quietly — the turn's
     /// footer simply never gains chips, matching every other eval fallback.
-    pub(super) fn drain_status_marker_events(&mut self) -> bool {
+    pub(super) fn drain_status_marker_events(&mut self, cx: &mut Context<Self>) -> bool {
         let mut changed = false;
+        let mut changed_turns = BTreeSet::new();
         while let Ok((turn_id, result)) = self.status_marker_events.try_recv() {
             self.status_marker_in_flight.remove(&turn_id);
             match result {
@@ -1382,7 +1414,25 @@ impl Waku {
                             continue;
                         }
                         let session_id = session.id;
-                        let actions = suggested_actions(&evaluation);
+                        if should_pause_goal_for_decision(session, turn_id, &evaluation) {
+                            self.dispatch_goal_operation(
+                                session_id,
+                                GoalOperation::Set {
+                                    objective: None,
+                                    status: Some(ThreadGoalStatus::Paused),
+                                    replace: false,
+                                },
+                                cx,
+                            );
+                        }
+                        if self.state.selected_session == Some(session_id) {
+                            changed_turns.insert(turn_id);
+                        }
+                        let actions = suggested_actions(&evaluation).into_iter().filter(|action| {
+                            !self.state.suggested_prompt_conditions.contains_key(action.canned_id())
+                                || matches!(evaluation.answers.get(&format!("suggest-prompt-{}", action.canned_id())),
+                                    Some(EvalAnswer::Noul { noul }) if *noul >= 0.5)
+                        }).collect::<Vec<_>>();
                         let offered = enabled_status_suggestions(
                             &actions,
                             &self.state.disabled_suggested_actions,
@@ -1403,6 +1453,28 @@ impl Waku {
                 Err(error) => {
                     eprintln!("Goddard: status marker evaluation failed: {error}");
                 }
+            }
+        }
+        if !changed_turns.is_empty() {
+            // Verdicts change existing footer content, not row structure.
+            // Remeasure once per affected row without replaying the landing.
+            self.sync_transcript_rows();
+            let footers = self
+                .transcript_row_kinds
+                .borrow()
+                .iter()
+                .enumerate()
+                .filter_map(|(index, kind)| match kind {
+                    TranscriptRowKind::ResponseFooter(turn_id, _)
+                        if changed_turns.contains(turn_id) =>
+                    {
+                        Some(index)
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            for index in footers {
+                self.remeasure_transcript_rows(index..index + 1);
             }
         }
         changed
@@ -1508,39 +1580,41 @@ impl Waku {
         );
     }
 
-    /// The marker chips a settled turn's response footer shows, if the
-    /// evaluation answered and at least one marker cleared its threshold.
+    /// The settled turn's marker chips and action strip share a stable
+    /// footprint; without chips the actions occupy its first line.
     /// Boss-owned surfaces and employee chats do not evaluate turns for
     /// these markers.
     #[track_caller]
-    pub(super) fn render_status_marker_row(
+    pub(super) fn render_status_marker_footer(
         &self,
         turn_id: Uuid,
+        footer: AnyElement,
         theme: &Theme,
-    ) -> Option<AnyElement> {
-        if self
-            .selected_session()
-            .is_some_and(|session| self.session_is_boss_owned(session))
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if !self.state.status_markers_enabled
+            || self.selected_session().is_some_and(|session| {
+                self.session_is_boss_owned(session) || self.session_is_employee(session)
+            })
         {
-            return None;
+            return footer;
         }
-        let cleared = cleared_markers(self.turn_status_markers.get(&turn_id)?);
-        if cleared.is_empty() {
-            return None;
-        }
-        Some(
-            div()
-                .w_full()
-                .flex()
-                .items_center()
-                .gap(px(12.0))
-                .children(
-                    cleared.into_iter().map(|(marker, probability)| {
-                        status_marker_chip(marker, probability, theme)
-                    }),
-                )
-                .into_any_element(),
+        let state = window.use_keyed_state(
+            SharedString::from(format!("turn-status-marker-scroll-{turn_id}")),
+            cx,
+            |_, cx| (ScrollHandle::new(), cx.focus_handle()),
+        );
+        let (scroll, focus) = state.read(cx);
+        status_marker_footer(
+            turn_id,
+            self.turn_status_markers.get(&turn_id),
+            theme,
+            scroll,
+            focus,
+            footer,
         )
+        .into_any_element()
     }
 
     /// The sidebar status-slot glyph for a session, when its last turn's
@@ -1615,7 +1689,9 @@ impl Waku {
             return None;
         }
         let turn_id = session.turns.last()?.id;
-        let cleared = cleared_markers(self.turn_status_markers.get(&turn_id)?);
+        let mut cleared = cleared_markers(self.turn_status_markers.get(&turn_id)?);
+        // Keep equal scores in their existing order; sidebar priority is independent.
+        cleared.sort_by(|(_, left), (_, right)| right.total_cmp(left));
         if cleared.is_empty() {
             return None;
         }
@@ -1747,6 +1823,155 @@ mod tests {
         }
     }
 
+    struct MarkerLayoutHarness {
+        evaluation: Option<Evaluation>,
+        width: f32,
+        list: ListState,
+        markers: Vec<(ScrollHandle, FocusHandle)>,
+    }
+
+    impl Render for MarkerLayoutHarness {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let entity = cx.entity();
+            div().w(px(self.width)).h(px(300.0)).child(
+                list(self.list.clone(), move |index, _, cx| {
+                    entity.update(cx, |this, cx| {
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .child(div().h(px(70.0)).child(format!("Response {index}")))
+                            .child(status_marker_footer(
+                                Uuid::from_u128(index as u128),
+                                this.evaluation.as_ref(),
+                                &Theme::current(cx),
+                                &this.markers[index].0,
+                                &this.markers[index].1,
+                                div()
+                                    .id(SharedString::from(format!("footer-actions-{index}")))
+                                    .debug_selector(move || {
+                                        format!("footer-actions-{index}").into()
+                                    })
+                                    .h(px(27.0))
+                                    .into_any_element(),
+                            ))
+                            .into_any_element()
+                    })
+                })
+                .size_full(),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn late_markers_preserve_transcript_position_and_footer_height(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, cx| MarkerLayoutHarness {
+            evaluation: None,
+            width: 220.0,
+            list: ListState::new(40, ListAlignment::Top, px(1000.0)),
+            markers: (0..40)
+                .map(|_| (ScrollHandle::new(), cx.focus_handle()))
+                .collect(),
+        });
+        let markers = evaluation(BTreeMap::from([
+            ("failed".to_owned(), EvalAnswer::Noul { noul: 0.9 }),
+            ("blocked".to_owned(), EvalAnswer::Noul { noul: 0.9 }),
+            ("unverified".to_owned(), EvalAnswer::Noul { noul: 0.9 }),
+        ]));
+        for width in [220.0, 800.0] {
+            for at_tail in [false, true] {
+                view.update(cx, |this, cx| {
+                    this.width = width;
+                    this.evaluation = None;
+                    this.list.remeasure_items(0..40);
+                    if at_tail {
+                        this.list.scroll_to_end();
+                    } else {
+                        this.list.scroll_to(ListOffset {
+                            item_ix: 20,
+                            offset_in_item: px(11.0),
+                        });
+                    }
+                    cx.notify();
+                });
+                cx.run_until_parked();
+                let (before, height) = cx.read(|cx| {
+                    let list = &view.read(cx).list;
+                    (
+                        list.logical_scroll_top(),
+                        list.bounds_for_item(list.logical_scroll_top().item_ix)
+                            .unwrap()
+                            .size
+                            .height,
+                    )
+                });
+                for verdict in [
+                    Some(markers.clone()),
+                    Some(evaluation(BTreeMap::new())),
+                    None,
+                ] {
+                    let has_markers = verdict
+                        .as_ref()
+                        .is_some_and(|eval| !cleared_markers(eval).is_empty());
+                    view.update(cx, |this, cx| {
+                        this.evaluation = verdict;
+                        this.list.remeasure_items(0..40);
+                        cx.notify();
+                    });
+                    cx.run_until_parked();
+                    if width == 220.0 {
+                        let (scroll, focus, has_markers) = cx.read(|cx| {
+                            let this = view.read(cx);
+                            let (scroll, focus) = &this.markers[before.item_ix];
+                            (
+                                scroll.clone(),
+                                focus.clone(),
+                                this.evaluation
+                                    .as_ref()
+                                    .is_some_and(|eval| !cleared_markers(eval).is_empty()),
+                            )
+                        });
+                        if has_markers {
+                            assert!(scroll.max_offset().x > Pixels::ZERO);
+                            cx.update(|window, cx| focus.focus(window, cx));
+                            cx.simulate_keystrokes("end");
+                            cx.run_until_parked();
+                            assert_eq!(scroll.offset().x, -scroll.max_offset().x);
+                            cx.simulate_keystrokes("home");
+                            cx.run_until_parked();
+                            assert_eq!(scroll.offset().x, Pixels::ZERO);
+                        }
+                    }
+                    let row_top = cx.read(|cx| {
+                        let list = &view.read(cx).list;
+                        let after = list.logical_scroll_top();
+                        assert_eq!(after.item_ix, before.item_ix);
+                        assert!((after.offset_in_item - before.offset_in_item).abs() <= px(1.0));
+                        assert_eq!(
+                            list.bounds_for_item(before.item_ix).unwrap().size.height,
+                            height
+                        );
+                        list.bounds_for_item(if at_tail { 39 } else { 20 })
+                            .unwrap()
+                            .top()
+                    });
+                    let actions = cx
+                        .debug_bounds(if at_tail {
+                            "footer-actions-39"
+                        } else {
+                            "footer-actions-20"
+                        })
+                        .unwrap();
+                    assert_eq!(
+                        actions.top(),
+                        row_top + px(70.0 + if has_markers { 24.0 } else { 0.0 }),
+                        "actions occupy the marker line whenever no markers apply"
+                    );
+                }
+            }
+        }
+    }
+
     fn ending_choice(choice: &str, probabilities: &[(&str, f64)]) -> EvalAnswer {
         EvalAnswer::Choice {
             choice: choice.to_owned(),
@@ -1769,6 +1994,10 @@ mod tests {
             ending_choice("partial", &[("partial", 0.8)]),
         )]));
         assert!(session_awaits_continue(&session, Some(&verdict)));
+        assert_eq!(
+            suggested_actions(&verdict),
+            [StatusSuggestedAction::KeepGoing]
+        );
 
         verdict.answers.insert(
             PARTIAL_QUESTION.to_owned(),
@@ -1777,16 +2006,21 @@ mod tests {
         assert!(session_awaits_continue(&session, Some(&verdict)));
         assert!(!session_awaits_continue(&session, None));
 
-        for (ending, score) in [
-            ("partial", 0.49),
-            ("complete", 0.9),
-            ("awaiting-input", 0.9),
+        for (ending, score, expected_actions) in [
+            ("partial", 0.49, &[][..]),
+            ("complete", 0.9, &[][..]),
+            (
+                "awaiting-input",
+                0.9,
+                &[StatusSuggestedAction::YouDecide][..],
+            ),
         ] {
             verdict.answers.insert(
                 ENDING_QUESTION.to_owned(),
                 ending_choice(ending, &[(ending, score)]),
             );
             assert!(!session_awaits_continue(&session, Some(&verdict)));
+            assert_eq!(suggested_actions(&verdict), expected_actions);
         }
         verdict.answers.insert(
             ENDING_QUESTION.to_owned(),
@@ -1874,6 +2108,68 @@ mod tests {
             cleared_markers(&answers("other", 0.90))[0].0.id,
             "awaiting-input"
         );
+    }
+
+    #[test]
+    fn decision_pauses_only_an_active_goal_on_the_latest_settled_turn() {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.begin_turn("choose the next approach");
+        session.finish_active_turn(TurnStatus::Completed);
+        session.status = SessionStatus::Idle;
+        let turn_id = session.turns.last().unwrap().id;
+        let mut verdict = evaluation(BTreeMap::from([
+            (
+                ENDING_QUESTION.to_owned(),
+                ending_choice("awaiting-input", &[("awaiting-input", 0.88)]),
+            ),
+            (
+                INPUT_QUESTION.to_owned(),
+                ending_choice("decision", &[("decision", 0.82)]),
+            ),
+        ]));
+        assert!(!should_pause_goal_for_decision(&session, turn_id, &verdict));
+        session.thread_goal = Some(crate::model::ThreadGoal {
+            objective: "finish the work".into(),
+            status: ThreadGoalStatus::Active,
+            managed_since_message: None,
+            managed_id: None,
+            managed_last_turn: None,
+            token_budget: None,
+            tokens_used: 0,
+            time_used_seconds: 0,
+        });
+        assert!(should_pause_goal_for_decision(&session, turn_id, &verdict));
+        for status in [
+            ThreadGoalStatus::Paused,
+            ThreadGoalStatus::Complete,
+            ThreadGoalStatus::Blocked,
+        ] {
+            session.thread_goal.as_mut().unwrap().status = status;
+            assert!(!should_pause_goal_for_decision(&session, turn_id, &verdict));
+        }
+        session.thread_goal.as_mut().unwrap().status = ThreadGoalStatus::Active;
+        for (kind, score) in [("decision", 0.4), ("details", 0.9), ("go-ahead", 0.9)] {
+            verdict
+                .answers
+                .insert(INPUT_QUESTION.into(), ending_choice(kind, &[(kind, score)]));
+            assert!(!should_pause_goal_for_decision(&session, turn_id, &verdict));
+        }
+        verdict.answers.insert(
+            INPUT_QUESTION.into(),
+            ending_choice("decision", &[("decision", 0.82)]),
+        );
+        session
+            .queued_messages
+            .push(crate::model::QueuedMessage::new("I choose option A"));
+        assert!(!should_pause_goal_for_decision(&session, turn_id, &verdict));
+        session.queued_messages.clear();
+        session.begin_turn("I choose option A");
+        session.status = SessionStatus::Working;
+        assert!(!should_pause_goal_for_decision(&session, turn_id, &verdict));
+        session.status = SessionStatus::Idle;
+        assert!(!should_pause_goal_for_decision(&session, turn_id, &verdict));
+        session.finish_active_turn(TurnStatus::Completed);
+        assert!(!should_pause_goal_for_decision(&session, turn_id, &verdict));
     }
 
     #[test]
@@ -2039,7 +2335,10 @@ mod tests {
             [StatusSuggestedAction::KeepGoing]
         );
         assert_eq!(cleared_markers(&verdict(0.40))[0].0.id, "partial");
-        assert!(suggested_actions(&verdict(0.40)).is_empty());
+        assert_eq!(
+            suggested_actions(&verdict(0.40)),
+            [StatusSuggestedAction::KeepGoing]
+        );
 
         // `errors-remain` refines the `failed` flag the same way — the
         // failure is a Noul now, but its subtype still drives the chip.

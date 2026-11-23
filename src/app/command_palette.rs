@@ -12,8 +12,11 @@ use nucleo_matcher::{Matcher, Utf32Str};
 use waku_protocol::workspace::{GitHubAvailability, GitHubRepoRef, RepoWorktree};
 
 use super::*;
+
+mod worktree_search;
 use crate::git_branch::BranchUpstreamSnapshot;
 use crate::ui::shortcut::ShortcutHint;
+use worktree_search::WorktreeSearch;
 
 actions!(
     waku_command_palette,
@@ -32,6 +35,7 @@ actions!(
 
 const SEARCH_CONTEXT: &str = "CommandPalette > TextInput";
 const MAX_TASK_RESULTS: usize = 12;
+const MAX_UNARCHIVE_RESULTS: usize = 20;
 const MIN_EXACT_COMMAND_SUBSTRING_CHARS: usize = 3;
 const MAX_RESUME_RESULTS: usize = 30;
 const PROVIDER_SESSION_CATALOG_LIMIT: usize = 250;
@@ -224,6 +228,8 @@ enum PaletteAction {
     NewTerminalIn,
     SplitTerminalRight,
     SplitTerminalDown,
+    NavigateTerminal(Uuid, terminals::TerminalCheckoutTarget),
+    CopyTerminalScrollback(Uuid),
     NewTaskInDirectory(PathBuf, bool),
     NewTaskProjectless(bool),
     NewTaskInSameWorktree,
@@ -268,12 +274,17 @@ enum PaletteAction {
         branch: String,
         onto: Option<String>,
     },
+    GitCommit(PathBuf),
+    GitPush(PathBuf),
+    GitPull(PathBuf),
+    GitPullRebase(PathBuf),
     SyncBranch,
     /// The "Sync branch…" fallback picker's pick: open the branch picker
     /// rooted at this project's path.
     ChooseSyncBranchProject(Uuid),
     ChooseCodeBlockProject(Uuid),
     CompactContext,
+    ToggleRush(Uuid),
     GenerateVoiceBriefing,
     CancelVoiceBriefing,
     ToggleUsage,
@@ -282,6 +293,8 @@ enum PaletteAction {
     GoToNextUnreadCompletion,
     MarkAllSessionsRead,
     UndoArchive,
+    OpenUnarchive,
+    UnarchiveTask(Uuid),
     ToggleSidebar,
     ToggleRightPanel,
     ToggleBigPicture,
@@ -306,6 +319,12 @@ enum PaletteAction {
     InspectElements,
     InspectColors,
     ToggleAutoRestart,
+    SearchWorktrees,
+    SearchWorktreeProject(Uuid),
+    SearchWorktree(PathBuf),
+    WorktreeNewTask,
+    WorktreeToggleArchived,
+    WorktreeChangeProject,
     OpenRunScript,
     ChooseRunScriptProject(Uuid),
     /// Script picked — advance to the where-to-run step, or run straight
@@ -328,6 +347,10 @@ enum PaletteAction {
     CopyFriendCode,
     ShareFileOrFolder,
     ShareFileWithFriend(String),
+    SyncTo(bool),
+    ChooseSyncProject(Uuid, bool),
+    SyncToHost(Uuid, Uuid),
+    SyncToFriend(Uuid, String),
     ShareProject,
     ChooseShareProject(Uuid),
     ShareProjectWithFriend {
@@ -342,6 +365,9 @@ enum CommandPaletteView {
     Commands,
     Resume,
     ResumeProviders,
+    WorktreeProjects,
+    WorktreeSearch,
+    WorktreeTasks,
     RunScriptProjects,
     RunScripts,
     /// The run-script flow's where-to-run step: the task's workspace, the
@@ -351,7 +377,10 @@ enum CommandPaletteView {
     RemoveProject,
     /// The "Focus project…" project picker.
     FocusProject,
+    Unarchive,
     ShareFileFriends,
+    SyncProjects(bool),
+    SyncTargets(Uuid, bool),
     ShareProjects,
     ShareProjectFriends(Uuid),
     /// The "New task in…" directory picker.
@@ -762,7 +791,9 @@ pub(super) struct CommandPaletteUi {
     opened_at: Option<Instant>,
     focus_generation: u64,
     previous_focus: Option<FocusHandle>,
+    focused_terminal: Option<Uuid>,
     view: CommandPaletteView,
+    sync_workspace: Option<(Uuid, PathBuf)>,
     results: Vec<CommandPaletteItem>,
     message_searches: QueryCache<String, Vec<crate::persistence::SessionMessageMatch>>,
     active_message_query: Option<String>,
@@ -777,6 +808,7 @@ pub(super) struct CommandPaletteUi {
     provider_session_error: Option<String>,
     provider_session_status: ProviderSessionCatalogStatus,
     provider_session_generation: u64,
+    worktree_search: WorktreeSearch,
     /// The project the run-script drill-in scoped to, and the scan it
     /// produced.
     run_script_project: Option<Uuid>,
@@ -850,7 +882,9 @@ impl CommandPaletteUi {
             opened_at: None,
             focus_generation: 0,
             previous_focus: None,
+            focused_terminal: None,
             view: CommandPaletteView::Commands,
+            sync_workspace: None,
             results: Vec::new(),
             message_searches: QueryCache::new(MESSAGE_SEARCH_CACHE_CAPACITY),
             active_message_query: None,
@@ -865,6 +899,7 @@ impl CommandPaletteUi {
             provider_session_error: None,
             provider_session_status: ProviderSessionCatalogStatus::Ready,
             provider_session_generation: 0,
+            worktree_search: WorktreeSearch::default(),
             run_script_project: None,
             run_scripts: Vec::new(),
             run_scripts_pending: false,
@@ -1006,6 +1041,7 @@ impl Waku {
             .collect::<Vec<_>>();
         // A focused picker input disappears when its menu closes. Restore to a
         // durable surface instead of remembering that soon-detached handle.
+        self.command_palette.focused_terminal = self.focused_terminal_id(window, cx);
         self.command_palette.previous_focus = if open_menus.is_empty() {
             window.focused(cx)
         } else if self.settings_page.is_some() {
@@ -1107,6 +1143,11 @@ impl Waku {
             return;
         }
         self.command_palette.open = false;
+        self.command_palette.worktree_search.generation = self
+            .command_palette
+            .worktree_search
+            .generation
+            .wrapping_add(1);
         self.command_palette.opened_at = None;
         self.command_palette.focus_generation =
             self.command_palette.focus_generation.wrapping_add(1);
@@ -1201,6 +1242,16 @@ impl Waku {
         cx.notify();
     }
 
+    fn open_command_palette_unarchive_view(&mut self, cx: &mut Context<Self>) {
+        self.command_palette.view = CommandPaletteView::Unarchive;
+        self.command_palette.search.update(cx, |input, cx| {
+            input.set_placeholder(tr!("command_palette.unarchive_placeholder"), cx);
+            input.clear(cx);
+        });
+        self.refresh_command_palette_results("", false, cx);
+        cx.notify();
+    }
+
     fn open_command_palette_focus_project_view(&mut self, cx: &mut Context<Self>) {
         self.command_palette.view = CommandPaletteView::FocusProject;
         self.command_palette.search.update(cx, |input, cx| {
@@ -1220,8 +1271,10 @@ impl Waku {
         self.command_palette.search.update(cx, |input, cx| {
             input.set_placeholder(
                 tr!(match view {
-                    CommandPaletteView::ShareProjects =>
+                    CommandPaletteView::SyncProjects(_) | CommandPaletteView::ShareProjects =>
                         "command_palette.share_project_placeholder",
+                    CommandPaletteView::SyncTargets(_, false) =>
+                        "command_palette.sync_host_placeholder",
                     _ => "command_palette.share_friend_placeholder",
                 }),
                 cx,
@@ -2364,6 +2417,9 @@ impl Waku {
 
     pub(super) fn dismiss_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.command_palette.view {
+            CommandPaletteView::WorktreeProjects
+            | CommandPaletteView::WorktreeSearch
+            | CommandPaletteView::WorktreeTasks => self.back_worktree_search(cx),
             CommandPaletteView::Commands => self.close_command_palette(window, cx),
             CommandPaletteView::Resume => self.leave_command_palette_resume_view(cx),
             CommandPaletteView::ResumeProviders => {
@@ -2384,10 +2440,13 @@ impl Waku {
                 }
             }
             CommandPaletteView::RemoveProject => self.leave_command_palette_drill_in_view(cx),
-            CommandPaletteView::FocusProject => self.leave_command_palette_drill_in_view(cx),
-            CommandPaletteView::ShareFileFriends | CommandPaletteView::ShareProjects => {
-                self.leave_command_palette_drill_in_view(cx)
+            CommandPaletteView::FocusProject | CommandPaletteView::Unarchive => {
+                self.leave_command_palette_drill_in_view(cx);
             }
+            CommandPaletteView::ShareFileFriends
+            | CommandPaletteView::SyncProjects(_)
+            | CommandPaletteView::SyncTargets(_, _)
+            | CommandPaletteView::ShareProjects => self.leave_command_palette_drill_in_view(cx),
             CommandPaletteView::ShareProjectFriends(_) => {
                 self.open_command_palette_friends_view(CommandPaletteView::ShareProjects, cx)
             }
@@ -2407,6 +2466,9 @@ impl Waku {
 
     pub(super) fn refresh_command_palette_localized_text(&mut self, cx: &mut Context<Self>) {
         let placeholder = match self.command_palette.view {
+            CommandPaletteView::WorktreeProjects
+            | CommandPaletteView::WorktreeSearch
+            | CommandPaletteView::WorktreeTasks => self.worktree_search_placeholder(),
             CommandPaletteView::Commands => tr!("command_palette.placeholder"),
             CommandPaletteView::Resume => tr!("command_palette.resume_placeholder"),
             CommandPaletteView::ResumeProviders => {
@@ -2425,6 +2487,14 @@ impl Waku {
             }
             CommandPaletteView::RemoveProject => tr!("command_palette.remove_project_placeholder"),
             CommandPaletteView::FocusProject => tr!("command_palette.focus_project_placeholder"),
+            CommandPaletteView::Unarchive => tr!("command_palette.unarchive_placeholder"),
+            CommandPaletteView::SyncProjects(_) => tr!("command_palette.share_project_placeholder"),
+            CommandPaletteView::SyncTargets(_, true) => {
+                tr!("command_palette.share_friend_placeholder")
+            }
+            CommandPaletteView::SyncTargets(_, false) => {
+                tr!("command_palette.sync_host_placeholder")
+            }
             CommandPaletteView::ShareProjects => tr!("command_palette.share_project_placeholder"),
             CommandPaletteView::ShareFileFriends | CommandPaletteView::ShareProjectFriends(_) => {
                 tr!("command_palette.share_friend_placeholder")
@@ -2488,14 +2558,20 @@ impl Waku {
         }
         if matches!(
             self.command_palette.view,
-            CommandPaletteView::Resume
+            CommandPaletteView::WorktreeProjects
+                | CommandPaletteView::WorktreeSearch
+                | CommandPaletteView::WorktreeTasks
+                | CommandPaletteView::Resume
                 | CommandPaletteView::ResumeProviders
                 | CommandPaletteView::RunScriptProjects
                 | CommandPaletteView::RunScripts
                 | CommandPaletteView::RunScriptWorktrees
                 | CommandPaletteView::RemoveProject
                 | CommandPaletteView::FocusProject
+                | CommandPaletteView::Unarchive
                 | CommandPaletteView::ShareFileFriends
+                | CommandPaletteView::SyncProjects(_)
+                | CommandPaletteView::SyncTargets(_, _)
                 | CommandPaletteView::ShareProjects
                 | CommandPaletteView::ShareProjectFriends(_)
                 | CommandPaletteView::NewTaskIn
@@ -2553,6 +2629,7 @@ impl Waku {
             .iter()
             .filter(|session| {
                 session.has_started()
+                    && !session.boss_managed
                     && !session.is_side_chat()
                     && self
                         .focused_project_id()
@@ -2642,10 +2719,39 @@ impl Waku {
         .detach();
     }
 
+    /// Resolve only the visible surface's context; a terminal must never
+    /// fall back to a remembered task when its cwd is unavailable.
+    fn command_palette_git_workspace(&self, cx: &App) -> Option<PathBuf> {
+        if self.big_picture.is_open() {
+            return self.workspace_subject_path();
+        }
+        if let Some(id) = self.standalone_git_panel_terminal() {
+            return self.terminal_cwd(id, cx);
+        }
+        match self.main_screen(self.live_deliverable_page().is_some()) {
+            render::MainScreen::Terminal(id) => self.terminal_cwd(id, cx),
+            render::MainScreen::Session
+            | render::MainScreen::Deliverable
+            | render::MainScreen::VoiceScratchpad => self.workspace_subject_path(),
+            render::MainScreen::Projects => self
+                .projects_page
+                .and_then(|id| self.state.projects.iter().find(|project| project.id == id))
+                .filter(|project| !project.is_projectless())
+                .map(|project| project.path.clone()),
+            _ => self
+                .focused_project_id()
+                .and_then(|id| self.state.projects.iter().find(|project| project.id == id))
+                .or_else(|| self.selected_project())
+                .filter(|project| !project.is_projectless())
+                .map(|project| project.path.clone()),
+        }
+    }
+
     fn command_palette_commands(
         &self,
         searching: bool,
         updater_available: bool,
+        cx: &App,
     ) -> Vec<CommandPaletteItem> {
         let display_section = |suggested| {
             if searching {
@@ -2661,6 +2767,24 @@ impl Waku {
             current
         };
         let mut commands = vec![
+            CommandPaletteItem::command(
+                PaletteSection::Commands,
+                tr!("command_palette.sync_to_host"),
+                "icons/git-branch.svg",
+                None,
+                PaletteAction::SyncTo(false),
+                "sync push pull remote host origin project",
+                next(),
+            ),
+            CommandPaletteItem::command(
+                PaletteSection::Commands,
+                tr!("command_palette.sync_to_friend"),
+                "icons/git-branch.svg",
+                None,
+                PaletteAction::SyncTo(true),
+                "sync friend pairing iroh project origin",
+                next(),
+            ),
             CommandPaletteItem::command(
                 display_section(PaletteSection::Suggested),
                 tr!("qa.start_action"),
@@ -2762,6 +2886,15 @@ impl Waku {
             ),
             CommandPaletteItem::command(
                 display_section(PaletteSection::Suggested),
+                tr!("command_palette.search_worktrees"),
+                "icons/folder.svg",
+                None,
+                PaletteAction::SearchWorktrees,
+                "search find browse worktrees branches checkout task",
+                next(),
+            ),
+            CommandPaletteItem::command(
+                display_section(PaletteSection::Suggested),
                 tr!("command_palette.run_script"),
                 "icons/terminal.svg",
                 Some(ShortcutHint::action(&RunProjectScript)),
@@ -2780,12 +2913,22 @@ impl Waku {
             ),
         ];
 
+        commands.push(CommandPaletteItem::command(
+            display_section(PaletteSection::Suggested),
+            tr!("command_palette.unarchive"),
+            "icons/archive.svg",
+            None,
+            PaletteAction::OpenUnarchive,
+            "unarchive restore archived chats tasks sessions conversations",
+            next(),
+        ));
+
         // The toast's Undo survives dismissal here: the most recent archive
         // — a batch counts as one — stays restorable until it's used or the
         // app restarts.
         let undoable_archive =
             still_archived_sessions(&self.state.sessions, &self.undoable_archive);
-        if !undoable_archive.is_empty() {
+        if !undoable_archive.is_empty() || self.sidebar_archive_available() {
             let mut item = CommandPaletteItem::command(
                 display_section(PaletteSection::Suggested),
                 tr!("command_palette.undo_archive"),
@@ -2810,6 +2953,9 @@ impl Waku {
             commands.push(item);
         }
 
+        if !self.state.friends_enabled {
+            commands.retain(|item| item.action != PaletteAction::SyncTo(true));
+        }
         if self.state.friends_enabled {
             commands.extend([
                 CommandPaletteItem::command(
@@ -2867,7 +3013,7 @@ impl Waku {
             .state
             .sessions
             .iter()
-            .any(|session| self.session_reclaim_eligible(session))
+            .any(|session| self.session_reclaimable(session))
         {
             commands.push(CommandPaletteItem::command(
                 display_section(PaletteSection::Suggested),
@@ -2990,6 +3136,49 @@ impl Waku {
             );
             incognito_item.detail = Some(format!("#{worktree_name}"));
             commands.push(incognito_item);
+        }
+
+        if self.git_panel_operation.is_none() && self.commit_operation.is_none() {
+            if let Some(workspace) = self.command_palette_git_workspace(cx) {
+                for (label, icon, action, keywords) in [
+                    (
+                        tr!("command_palette.git_commit"),
+                        "icons/git-branch.svg",
+                        PaletteAction::GitCommit(workspace.clone()),
+                        "git commit changes message staged",
+                    ),
+                    (
+                        tr!("command_palette.git_push"),
+                        "icons/cloud-upload.svg",
+                        PaletteAction::GitPush(workspace.clone()),
+                        "git push publish upstream remote",
+                    ),
+                    (
+                        tr!("command_palette.git_pull"),
+                        "icons/download.svg",
+                        PaletteAction::GitPull(workspace.clone()),
+                        "git pull fetch fast forward upstream remote",
+                    ),
+                    (
+                        tr!("command_palette.git_pull_rebase"),
+                        "icons/git-branch.svg",
+                        PaletteAction::GitPullRebase(workspace.clone()),
+                        "git pull fetch rebase sync upstream remote",
+                    ),
+                ] {
+                    let mut item = CommandPaletteItem::command(
+                        PaletteSection::Commands,
+                        label,
+                        icon,
+                        None,
+                        action,
+                        keywords,
+                        next(),
+                    );
+                    item.detail = Some(workspace.display().to_string());
+                    commands.push(item);
+                }
+            }
         }
 
         // Same gate as the composer's `/land`: the session the composer
@@ -3125,6 +3314,22 @@ impl Waku {
             ));
         }
 
+        if let Some(session) = self.selected_session() {
+            commands.push(CommandPaletteItem::command(
+                display_section(PaletteSection::Suggested),
+                tr!(if self.session_is_rushed(session.id) {
+                    "command_palette.stop_rushing_current_task"
+                } else {
+                    "command_palette.rush_current_task"
+                }),
+                "icons/zap.svg",
+                None,
+                PaletteAction::ToggleRush(session.id),
+                "rush current task fast priority attention stop disable",
+                next(),
+            ));
+        }
+
         // Voice briefing commands track the selected task: cancel surfaces
         // while a pipeline is in flight, generate once a settled reply
         // exists and nothing is already running for it.
@@ -3226,24 +3431,26 @@ impl Waku {
             .iter()
             .any(|project| !project.is_projectless())
         {
-            let focused = self.focused_project_id().is_some();
             commands.push(CommandPaletteItem::command(
                 PaletteSection::Commands,
-                if focused {
-                    tr!("command_palette.unfocus_project")
-                } else {
-                    tr!("command_palette.focus_project")
-                },
+                tr!("command_palette.focus_project"),
                 "icons/target.svg",
                 None,
-                if focused {
-                    PaletteAction::UnfocusProject
-                } else {
-                    PaletteAction::OpenFocusProject
-                },
-                "focus project filter sidebar only tasks unfocus show all projects",
+                PaletteAction::OpenFocusProject,
+                "focus project filter sidebar only tasks switch",
                 next(),
             ));
+            if self.focused_project_id().is_some() {
+                commands.push(CommandPaletteItem::command(
+                    PaletteSection::Commands,
+                    tr!("command_palette.unfocus_project"),
+                    "icons/target.svg",
+                    None,
+                    PaletteAction::UnfocusProject,
+                    "unfocus project filter sidebar tasks show all projects",
+                    next(),
+                ));
+            }
         }
         if self.state.github.inbox_enabled {
             commands.push(CommandPaletteItem::command(
@@ -3348,6 +3555,7 @@ impl Waku {
             None,
             None,
             self.state.starred_idle_before_unseen,
+            self.state.prefer_starred_when_nothing_unread,
         )
         .is_some()
         {
@@ -3778,6 +3986,44 @@ impl Waku {
                 item.action != PaletteAction::StartQa && item.action != PaletteAction::EditQaSetup
             });
         }
+        if let Some(id) = self.command_palette.focused_terminal {
+            commands.push(CommandPaletteItem::command(
+                PaletteSection::Commands,
+                tr!("terminal.copy_scrollback"),
+                "icons/copy.svg",
+                None,
+                PaletteAction::CopyTerminalScrollback(id),
+                "terminal copy scrollback history output clipboard text",
+                next(),
+            ));
+            for (target, label, keywords) in [
+                (
+                    terminals::TerminalCheckoutTarget::Primary,
+                    tr!("terminal.go_to_primary_checkout"),
+                    "terminal cd git repository root primary checkout",
+                ),
+                (
+                    terminals::TerminalCheckoutTarget::Previous,
+                    tr!("terminal.go_to_previous_worktree"),
+                    "terminal cd previous last worktree checkout back",
+                ),
+                (
+                    terminals::TerminalCheckoutTarget::DefaultBranch,
+                    tr!("terminal.go_to_default_checkout"),
+                    "terminal cd default branch main master checkout worktree",
+                ),
+            ] {
+                commands.push(CommandPaletteItem::command(
+                    PaletteSection::Commands,
+                    label,
+                    "icons/terminal-square.svg",
+                    None,
+                    PaletteAction::NavigateTerminal(id, target),
+                    keywords,
+                    next(),
+                ));
+            }
+        }
         commands
     }
 
@@ -3797,6 +4043,7 @@ impl Waku {
     fn command_palette_task_candidates(
         &self,
         search: &crate::persistence::SessionMessageSearchQuery,
+        scope_to_focused_project: bool,
     ) -> Vec<CommandPaletteItem> {
         let projects = self
             .state
@@ -3832,12 +4079,14 @@ impl Waku {
             .iter()
             .filter(|session| {
                 session.has_started()
+                    && !session.boss_managed
                     && !session.is_side_chat()
                     // A focused project scopes the palette's task results to
                     // it — the sidebar already shows nothing else.
-                    && self
-                        .focused_project_id()
-                        .is_none_or(|focused| session.project_id == focused)
+                    && (!scope_to_focused_project
+                        || self
+                            .focused_project_id()
+                            .is_none_or(|focused| session.project_id == focused))
                     && match scope {
                         crate::persistence::SessionMessageSearchScope::Active => {
                             session.archived_at.is_none()
@@ -4158,13 +4407,157 @@ impl Waku {
             .collect()
     }
 
+    fn sync_project_to_host(&mut self, project: Uuid, host: Uuid, cx: &mut Context<Self>) {
+        let Some(path) = self
+            .state
+            .projects
+            .iter()
+            .find(|item| item.id == project)
+            .map(|item| item.path.clone())
+        else {
+            return;
+        };
+        let path = self
+            .command_palette
+            .sync_workspace
+            .as_ref()
+            .filter(|(id, _)| *id == project)
+            .map(|(_, path)| path.clone())
+            .unwrap_or(path);
+        let Some(source) = self
+            .daemons
+            .daemon_for_project(project)
+            .map(|daemon| daemon.client())
+        else {
+            self.show_toast(tr!("command_palette.sync_source_offline"));
+            return;
+        };
+        let Some(target) = self
+            .daemons
+            .supervisor(waku_client::DaemonKey::Remote(host))
+            .map(|daemon| daemon.client())
+        else {
+            self.show_toast(tr!("command_palette.sync_host_offline"));
+            return;
+        };
+        self.show_toast(tr!("command_palette.sync_running"));
+        cx.spawn(async move |this, cx| {
+            let result: anyhow::Result<()> = cx
+                .background_executor()
+                .spawn(async move {
+                    use waku_client::{Command, ResponsePayload};
+                    let ResponsePayload::ProjectSyncInfo {
+                        origin_url, branch, ..
+                    } = source.request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        Command::GetProjectSyncInfo {
+                            project_path: path.clone(),
+                        },
+                    )?
+                    else {
+                        anyhow::bail!("unexpected project sync response");
+                    };
+                    target.request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        Command::PullProjectSync {
+                            origin_url: origin_url.clone(),
+                            branch: branch.clone(),
+                            check_only: true,
+                        },
+                    )?;
+                    source.request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        Command::PushProjectSync {
+                            project_path: path,
+                            origin_url: origin_url.clone(),
+                            branch: branch.clone(),
+                        },
+                    )?;
+                    target
+                        .request(
+                            Uuid::nil(),
+                            Uuid::nil(),
+                            Command::PullProjectSync {
+                                origin_url,
+                                branch,
+                                check_only: false,
+                            },
+                        )
+                        .map_err(|error| {
+                            anyhow::anyhow!(
+                                "push to origin succeeded, but remote pull failed: {error:#}"
+                            )
+                        })?;
+                    Ok(())
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                match result {
+                    Ok(()) => this.show_success_toast(tr!("command_palette.sync_complete")),
+                    Err(error) => this.show_toast(tr!(
+                        "command_palette.sync_failed",
+                        error = format!("{error:#}")
+                    )),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn command_palette_share_candidates(&self) -> Vec<CommandPaletteItem> {
         match self.command_palette.view {
-            CommandPaletteView::ShareProjects => self
+            CommandPaletteView::SyncTargets(project, friend) => {
+                if friend {
+                    self.friends_state
+                        .friends
+                        .iter()
+                        .enumerate()
+                        .map(|(order, friend)| {
+                            CommandPaletteItem::command(
+                                PaletteSection::Commands,
+                                friends::friend_display_name(friend).to_owned(),
+                                "icons/folder.svg",
+                                None,
+                                PaletteAction::SyncToFriend(project, friend.node_id.clone()),
+                                "friend sync pair",
+                                order,
+                            )
+                        })
+                        .collect()
+                } else {
+                    let owner = self.daemons.project_owner(project);
+                    self.state
+                        .remote_hosts
+                        .iter()
+                        .filter(|host| owner != waku_client::DaemonKey::Remote(host.id))
+                        .enumerate()
+                        .map(|(order, host)| {
+                            CommandPaletteItem::command(
+                                PaletteSection::Commands,
+                                host.name.clone(),
+                                "icons/folder.svg",
+                                None,
+                                PaletteAction::SyncToHost(project, host.id),
+                                "remote host sync",
+                                order,
+                            )
+                        })
+                        .collect()
+                }
+            }
+            CommandPaletteView::ShareProjects | CommandPaletteView::SyncProjects(_) => self
                 .state
                 .projects
                 .iter()
                 .filter(|project| !project.temporary && !project.is_projectless())
+                .filter(|project| {
+                    self.command_palette.view != CommandPaletteView::SyncProjects(true)
+                        || !self.daemons.is_remote_project(project.id)
+                })
                 .enumerate()
                 .map(|(order, project)| {
                     let label = project.display_name();
@@ -4181,7 +4574,12 @@ impl Waku {
                         )),
                         icon: PaletteIcon::Asset("icons/folder.svg"),
                         shortcut: None,
-                        action: PaletteAction::ChooseShareProject(project.id),
+                        action: match self.command_palette.view {
+                            CommandPaletteView::SyncProjects(friend) => {
+                                PaletteAction::ChooseSyncProject(project.id, friend)
+                            }
+                            _ => PaletteAction::ChooseShareProject(project.id),
+                        },
                         content_match: None,
                         order,
                         recency: 0,
@@ -4432,6 +4830,43 @@ impl Waku {
             selected_action.flatten(),
             Some(PaletteAction::RemoveProject),
         );
+    }
+
+    fn refresh_command_palette_unarchive_results(&mut self, query: &str, preserve_selection: bool) {
+        let selected = preserve_selection
+            .then(|| {
+                self.command_palette
+                    .results
+                    .get(self.command_palette.selected)
+            })
+            .flatten()
+            .map(|item| item.action.clone());
+        let search = crate::persistence::parse_session_message_search("archived:true");
+        let mut candidates = self.command_palette_task_candidates(&search, false);
+        let archived_at = self
+            .state
+            .sessions
+            .iter()
+            .filter_map(|session| session.archived_at.map(|at| (session.id, at)))
+            .collect::<HashMap<_, _>>();
+        for item in &mut candidates {
+            if let PaletteAction::SelectTask(id) = item.action {
+                item.action = PaletteAction::UnarchiveTask(id);
+                item.recency = archived_at.get(&id).copied().unwrap_or_default();
+            }
+            item.content_match = None;
+        }
+        candidates.sort_by_key(|item| std::cmp::Reverse(item.recency));
+        for (order, item) in candidates.iter_mut().enumerate() {
+            item.order = order;
+        }
+        let query = query.trim();
+        if !query.is_empty() {
+            candidates = self.score_run_script_items(candidates, query);
+        }
+        candidates.truncate(MAX_UNARCHIVE_RESULTS);
+        self.command_palette.results = candidates;
+        self.finish_drill_in_refresh(selected, None);
     }
 
     fn refresh_command_palette_focus_project_results(
@@ -5186,6 +5621,13 @@ impl Waku {
 
     fn refresh_command_palette_results(&mut self, query: &str, preserve_selection: bool, cx: &App) {
         match self.command_palette.view {
+            CommandPaletteView::WorktreeProjects
+            | CommandPaletteView::WorktreeSearch
+            | CommandPaletteView::WorktreeTasks => {
+                self.refresh_worktree_search(query, preserve_selection);
+                return;
+            }
+
             CommandPaletteView::Resume => {
                 self.refresh_command_palette_resume_results(query, preserve_selection);
                 return;
@@ -5210,11 +5652,17 @@ impl Waku {
                 self.refresh_command_palette_remove_project_results(query, preserve_selection);
                 return;
             }
+            CommandPaletteView::Unarchive => {
+                self.refresh_command_palette_unarchive_results(query, preserve_selection);
+                return;
+            }
             CommandPaletteView::FocusProject => {
                 self.refresh_command_palette_focus_project_results(query, preserve_selection);
                 return;
             }
             CommandPaletteView::ShareFileFriends
+            | CommandPaletteView::SyncProjects(_)
+            | CommandPaletteView::SyncTargets(_, _)
             | CommandPaletteView::ShareProjects
             | CommandPaletteView::ShareProjectFriends(_) => {
                 self.refresh_command_palette_share_results(query, preserve_selection);
@@ -5263,7 +5711,8 @@ impl Waku {
             .is_some_and(|state| state.0.is_some());
         let query = query.trim();
         if query.is_empty() {
-            self.command_palette.results = self.command_palette_commands(false, updater_available);
+            self.command_palette.results =
+                self.command_palette_commands(false, updater_available, cx);
             self.command_palette.selected = 0;
             self.command_palette.scroll.scroll_to_item(0);
             return;
@@ -5279,7 +5728,7 @@ impl Waku {
             self.command_palette.message_matches_query.as_deref() == Some(query);
         let mut utf32 = Vec::new();
         let mut tasks = self
-            .command_palette_task_candidates(&search)
+            .command_palette_task_candidates(&search, true)
             .into_iter()
             .filter_map(|mut item| {
                 if needle.is_empty() {
@@ -5344,7 +5793,7 @@ impl Waku {
         let mut commands = if needle.is_empty() {
             Vec::new()
         } else {
-            self.command_palette_commands(true, updater_available)
+            self.command_palette_commands(true, updater_available, cx)
                 .into_iter()
                 .filter_map(|item| {
                     pattern
@@ -5739,6 +6188,84 @@ impl Waku {
         };
 
         match action {
+            PaletteAction::SyncTo(friend) => {
+                self.command_palette.sync_workspace = None;
+                let ambient_path = self.command_palette_git_workspace(cx);
+                let ambient = ambient_path
+                    .as_ref()
+                    .and_then(|path| {
+                        match self.main_screen(self.live_deliverable_page().is_some()) {
+                            render::MainScreen::Session
+                            | render::MainScreen::Deliverable
+                            | render::MainScreen::VoiceScratchpad => self.workspace_subject().1,
+                            render::MainScreen::Projects => self.projects_page,
+                            _ => self.focused_project_id(),
+                        }
+                        .or_else(|| {
+                            let mut matches = self
+                                .state
+                                .projects
+                                .iter()
+                                .filter(|project| path.starts_with(&project.path));
+                            let first = matches.next()?;
+                            matches.next().is_none().then_some(first.id)
+                        })
+                    })
+                    .filter(|id| {
+                        self.state.projects.iter().any(|project| {
+                            project.id == *id && !project.is_projectless() && !project.temporary
+                        })
+                    });
+                let ambient = ambient.filter(|id| !friend || !self.daemons.is_remote_project(*id));
+                self.command_palette.sync_workspace = ambient.zip(ambient_path);
+                self.open_command_palette_friends_view(
+                    match ambient {
+                        Some(project) => CommandPaletteView::SyncTargets(project, friend),
+                        None => CommandPaletteView::SyncProjects(friend),
+                    },
+                    cx,
+                );
+                return;
+            }
+            PaletteAction::ChooseSyncProject(project, friend) => {
+                self.command_palette.sync_workspace = None;
+                self.open_command_palette_friends_view(
+                    CommandPaletteView::SyncTargets(project, friend),
+                    cx,
+                );
+                return;
+            }
+            PaletteAction::SearchWorktrees => {
+                self.start_worktree_search(cx);
+                return;
+            }
+            PaletteAction::SearchWorktreeProject(project) => {
+                self.remember_worktree_search(cx);
+                self.load_search_worktrees(project, cx);
+                return;
+            }
+            PaletteAction::SearchWorktree(path) => {
+                self.remember_worktree_search(cx);
+                self.command_palette.worktree_search.path = Some(path);
+                self.set_worktree_search_view(CommandPaletteView::WorktreeTasks, cx);
+                return;
+            }
+            PaletteAction::WorktreeToggleArchived => {
+                self.command_palette.worktree_search.archived =
+                    !self.command_palette.worktree_search.archived;
+                let query = self.command_palette.search.read(cx).content().to_owned();
+                self.refresh_worktree_search(&query, true);
+                cx.notify();
+                return;
+            }
+            PaletteAction::WorktreeChangeProject => {
+                self.back_worktree_search(cx);
+                return;
+            }
+            PaletteAction::WorktreeNewTask => {
+                self.create_task_in_search_worktree(window, cx);
+                return;
+            }
             PaletteAction::StartQa | PaletteAction::EditQaSetup => {
                 if !self.state.qa_sessions_enabled {
                     return;
@@ -5780,6 +6307,10 @@ impl Waku {
             }
             PaletteAction::OpenRemoveProject => {
                 self.open_command_palette_remove_project_view(cx);
+                return;
+            }
+            PaletteAction::OpenUnarchive => {
+                self.open_command_palette_unarchive_view(cx);
                 return;
             }
             PaletteAction::OpenFocusProject => {
@@ -5878,6 +6409,14 @@ impl Waku {
                     self.new_terminal_action(&NewTerminal, window, cx);
                 }
             }
+            PaletteAction::NavigateTerminal(id, target) => {
+                self.navigate_terminal_checkout(id, target, cx);
+            }
+            PaletteAction::CopyTerminalScrollback(id) => {
+                if let Some(terminal) = self.right_panel_terminals.get(&id) {
+                    terminal.update(cx, |terminal, cx| terminal.copy_scrollback(cx));
+                }
+            }
             PaletteAction::SplitTerminalRight => {
                 self.split_terminal_action(&SplitTerminal, window, cx)
             }
@@ -5926,6 +6465,42 @@ impl Waku {
                     self.pick_and_send_file(node_id, cx);
                 }
             }
+            PaletteAction::SyncToHost(project, host) => {
+                self.sync_project_to_host(project, host, cx)
+            }
+            PaletteAction::SyncToFriend(project, friend) => {
+                if let Some(project) = self.state.projects.iter().find(|item| item.id == project) {
+                    let project_path = project.path.clone();
+                    let client = self.daemon.client();
+                    cx.spawn(async move |this, cx| {
+                        let result = cx
+                            .background_executor()
+                            .spawn(async move {
+                                client.request(
+                                    Uuid::nil(),
+                                    Uuid::nil(),
+                                    waku_client::Command::SyncProjectWithFriend {
+                                        node_id: friend,
+                                        project_path,
+                                    },
+                                )
+                            })
+                            .await;
+                        let _ = this.update(cx, |this, cx| {
+                            match result {
+                                Ok(_) => this
+                                    .show_success_toast(tr!("command_palette.sync_friend_pending")),
+                                Err(error) => this.show_toast(tr!(
+                                    "friends.command_failed",
+                                    error = format!("{error:#}")
+                                )),
+                            }
+                            cx.notify();
+                        });
+                    })
+                    .detach();
+                }
+            }
             PaletteAction::ShareProjectWithFriend { project, friend } => {
                 if let Some(project) =
                     self.state.projects.iter().find(|item| {
@@ -5966,6 +6541,7 @@ impl Waku {
             }
             PaletteAction::MarkAllSessionsRead => self.mark_all_sessions_read(cx),
             PaletteAction::UndoArchive => self.undo_last_archive(cx),
+            PaletteAction::UnarchiveTask(id) => self.unarchive_session(id, true, cx),
             PaletteAction::CheckForUpdates => {
                 window.dispatch_action(CheckForUpdates.boxed_clone(), cx)
             }
@@ -6090,6 +6666,14 @@ impl Waku {
                     );
                 }
             }
+            PaletteAction::GitCommit(workspace) => {
+                self.open_commit_dialog_in(workspace, window, cx);
+            }
+            PaletteAction::GitPush(workspace) => self.start_workspace_push(workspace, cx),
+            PaletteAction::GitPull(workspace) => self.start_workspace_pull_changes(workspace, cx),
+            PaletteAction::GitPullRebase(workspace) => {
+                self.start_workspace_sync(workspace, waku_client::git::PullStrategy::Rebase, cx);
+            }
             PaletteAction::SyncBranch => {
                 self.settings_page = None;
                 self.open_sync_branch(window, cx);
@@ -6115,6 +6699,7 @@ impl Waku {
                     self.compact_session(session_id, cx);
                 }
             }
+            PaletteAction::ToggleRush(session_id) => self.toggle_rush(session_id, cx),
             PaletteAction::GenerateVoiceBriefing => {
                 if let Some(session_id) = self.state.selected_session
                     && let Some(message_id) = self.voice_briefing_last_reply(session_id)
@@ -6236,12 +6821,21 @@ impl Waku {
             | PaletteAction::StartQa
             | PaletteAction::EditQaSetup
             | PaletteAction::ChooseQaProject(_)
+            | PaletteAction::SearchWorktrees
+            | PaletteAction::SearchWorktreeProject(_)
+            | PaletteAction::SearchWorktree(_)
+            | PaletteAction::WorktreeToggleArchived
+            | PaletteAction::WorktreeChangeProject
+            | PaletteAction::WorktreeNewTask
             | PaletteAction::OpenRunScript
             | PaletteAction::ChooseRunScriptProject(_)
             | PaletteAction::ChooseRunScriptLocation { .. }
             | PaletteAction::OpenRemoveProject
             | PaletteAction::OpenFocusProject
+            | PaletteAction::OpenUnarchive
             | PaletteAction::ShareFileOrFolder
+            | PaletteAction::SyncTo(_)
+            | PaletteAction::ChooseSyncProject(_, _)
             | PaletteAction::ShareProject
             | PaletteAction::ChooseShareProject(_)
             | PaletteAction::NewTaskIn
@@ -6312,6 +6906,8 @@ impl Waku {
             .filter(|item| matches!(&item.action, PaletteAction::ResumeProviderSession(..)))
             .count();
         let results_pending = match view {
+            CommandPaletteView::WorktreeSearch => self.command_palette.worktree_search.pending,
+            CommandPaletteView::WorktreeProjects | CommandPaletteView::WorktreeTasks => false,
             CommandPaletteView::Resume => self.command_palette.provider_sessions_pending,
             CommandPaletteView::Commands => self.command_palette.message_search_pending,
             CommandPaletteView::RunScripts => self.command_palette.run_scripts_pending,
@@ -6330,7 +6926,10 @@ impl Waku {
             | CommandPaletteView::RunScriptProjects
             | CommandPaletteView::RemoveProject
             | CommandPaletteView::FocusProject
+            | CommandPaletteView::Unarchive
             | CommandPaletteView::ShareFileFriends
+            | CommandPaletteView::SyncProjects(_)
+            | CommandPaletteView::SyncTargets(_, _)
             | CommandPaletteView::ShareProjects
             | CommandPaletteView::ShareProjectFriends(_)
             | CommandPaletteView::IssueProjects
@@ -6339,9 +6938,13 @@ impl Waku {
             | CommandPaletteView::SavePrompt => false,
             CommandPaletteView::RecentPrompts => false,
         };
-        let search_error = (view == CommandPaletteView::Commands)
-            .then(|| self.command_palette.message_search_error.as_ref())
-            .flatten();
+        let search_error = if view == CommandPaletteView::WorktreeSearch {
+            self.command_palette.worktree_search.error.as_ref()
+        } else {
+            (view == CommandPaletteView::Commands)
+                .then(|| self.command_palette.message_search_error.as_ref())
+                .flatten()
+        };
         let search_status_height = if search_error.is_some() { 40.0 } else { 0.0 };
         let show_empty_state = search_error.is_none()
             && should_show_command_palette_empty_state(
@@ -6352,9 +6955,10 @@ impl Waku {
                 },
                 results_pending,
             );
-        let show_loading_state = (resume_view
-            && resume_session_count == 0
-            && self.command_palette.provider_sessions_pending)
+        let show_loading_state = (view == CommandPaletteView::WorktreeSearch && results_pending)
+            || (resume_view
+                && resume_session_count == 0
+                && self.command_palette.provider_sessions_pending)
             || (run_scripts_view
                 && self.command_palette.results.is_empty()
                 && self.command_palette.run_scripts_pending)
@@ -6404,7 +7008,10 @@ impl Waku {
                     "icons/loader-circle.svg",
                     if run_scripts_view {
                         tr!("command_palette.loading_scripts")
-                    } else if view == CommandPaletteView::RunScriptWorktrees {
+                    } else if matches!(
+                        view,
+                        CommandPaletteView::RunScriptWorktrees | CommandPaletteView::WorktreeSearch
+                    ) {
                         tr!("command_palette.loading_worktrees")
                     } else if view == CommandPaletteView::NewTaskIn {
                         tr!("command_palette.loading_directories")
@@ -6774,6 +7381,12 @@ impl Waku {
                                         .min_w_0()
                                         .flex()
                                         .items_baseline()
+                                        // Flex layout does not measure text baselines. Center
+                                        // matching text metrics so the folder icon cannot shift
+                                        // the project's baseline relative to the other labels.
+                                        .when(session_project.is_some(), |row| {
+                                            row.items_center().line_height(sp(20.0))
+                                        })
                                         .gap(px(7.0))
                                         .child(
                                             div()
@@ -6823,7 +7436,11 @@ impl Waku {
                                                 div()
                                                     .min_w_0()
                                                     .truncate()
-                                                    .text_size(sp(12.5))
+                                                    .text_size(sp(if session_project.is_some() {
+                                                        14.0
+                                                    } else {
+                                                        12.5
+                                                    }))
                                                     .text_color(theme.text_tertiary)
                                                     .child(detail),
                                             )
@@ -6845,7 +7462,7 @@ impl Waku {
                                                         div()
                                                             .min_w_0()
                                                             .truncate()
-                                                            .text_size(sp(12.5))
+                                                            .text_size(sp(14.0))
                                                             .text_color(theme.text_tertiary)
                                                             .child(project),
                                                     ),

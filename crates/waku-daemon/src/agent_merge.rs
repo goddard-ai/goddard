@@ -5,51 +5,54 @@ use std::process::{Command, Stdio};
 
 use anyhow::{Context as _, bail};
 
-#[derive(Default)]
-struct SubmissionQueue {
-    next: u64,
-    serving: u64,
-}
-
-struct SubmissionPermit {
-    queue: &'static parking_lot::Mutex<SubmissionQueue>,
-    wake: &'static parking_lot::Condvar,
-}
-
-impl Drop for SubmissionPermit {
-    fn drop(&mut self) {
-        let mut queue = self.queue.lock();
-        queue.serving = queue.serving.wrapping_add(1);
-        self.wake.notify_all();
-    }
-}
-
-fn submission_slot() -> SubmissionPermit {
-    static QUEUE: std::sync::OnceLock<(parking_lot::Mutex<SubmissionQueue>, parking_lot::Condvar)> =
-        std::sync::OnceLock::new();
-    let (queue, wake) = QUEUE.get_or_init(|| {
-        (
-            parking_lot::Mutex::new(SubmissionQueue::default()),
-            parking_lot::Condvar::new(),
-        )
-    });
-    let mut state = queue.lock();
-    let ticket = state.next;
-    state.next = state.next.wrapping_add(1);
-    while state.serving != ticket {
-        wake.wait(&mut state);
-    }
-    drop(state);
-    SubmissionPermit { queue, wake }
-}
-
+#[cfg(test)]
 pub(crate) fn submit(
     project: &Path,
     source: &Path,
     recorded_base: Option<&str>,
     branch: &str,
 ) -> anyhow::Result<String> {
-    let _permit = submission_slot();
+    submit_for_owner(project, source, recorded_base, branch, None)
+}
+
+pub(crate) fn submit_for_owner(
+    project: &Path,
+    source: &Path,
+    recorded_base: Option<&str>,
+    branch: &str,
+    owner: Option<uuid::Uuid>,
+) -> anyhow::Result<String> {
+    let project = project.to_path_buf();
+    let source_path = source.to_path_buf();
+    let base = recorded_base.map(str::to_owned);
+    let target = branch.to_owned();
+    let job = waku_git::landing_queue::enqueue(
+        source,
+        uuid::Uuid::new_v4(),
+        owner,
+        waku_protocol::landing::LandingKind::Submit,
+        Some(branch),
+        waku_protocol::git::PullStrategy::Rebase,
+        move |permit| {
+            permit.check_repository(&project)?;
+            Ok(waku_protocol::landing::LandingResult::Submitted {
+                sha: submit_inner(&project, &source_path, base.as_deref(), &target)?,
+            })
+        },
+    )?;
+    match waku_git::landing_queue::wait(job.id)? {
+        waku_protocol::landing::LandingResult::Submitted { sha } => Ok(sha),
+        waku_protocol::landing::LandingResult::Failed { message } => bail!("{message}"),
+        _ => bail!("unexpected submission result"),
+    }
+}
+
+fn submit_inner(
+    project: &Path,
+    source: &Path,
+    recorded_base: Option<&str>,
+    branch: &str,
+) -> anyhow::Result<String> {
     let root = git_text(project, &["rev-parse", "--show-toplevel"])?;
     let root = PathBuf::from(root.trim());
     let target = git_text(
@@ -614,6 +617,53 @@ mod tests {
         assert!(error.contains("submitting worktree"), "{error}");
         assert!(error.contains("QA branch"), "{error}");
         assert_eq!(git(&project, &["rev-parse", "dev"]).trim(), unit);
+    }
+
+    #[test]
+    fn submission_and_slash_land_share_a_repository_queue() {
+        let (_root, project, employee, base) = landing_fixture();
+        let slash_worktree = project.parent().unwrap().join("slash-land");
+        git(
+            &project,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                slash_worktree.to_str().unwrap(),
+                &base,
+            ],
+        );
+        commit(&slash_worktree, "slash.txt", "slash\n", "feat: slash land");
+        let start = Arc::new(Barrier::new(3));
+        let submit_job = {
+            let start = start.clone();
+            let project = project.clone();
+            std::thread::spawn(move || {
+                start.wait();
+                submit(&project, &employee, Some(&base), "dev").unwrap()
+            })
+        };
+        let land_job = {
+            let start = start.clone();
+            std::thread::spawn(move || {
+                start.wait();
+                waku_git::git_panel::land(
+                    &slash_worktree,
+                    Some("dev"),
+                    waku_protocol::git::PullStrategy::Rebase,
+                )
+                .unwrap()
+            })
+        };
+        start.wait();
+        submit_job.join().unwrap();
+        assert!(matches!(
+            land_job.join().unwrap(),
+            waku_protocol::git::LandOutcome::Landed { .. }
+        ));
+        assert!(project.join("unit.txt").exists());
+        assert!(project.join("slash.txt").exists());
+        assert!(git(&project, &["status", "--porcelain"]).trim().is_empty());
     }
 
     #[test]

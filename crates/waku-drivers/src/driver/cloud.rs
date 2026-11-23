@@ -380,6 +380,7 @@ impl CloudDriver {
                     events,
                     state,
                     DriverEvent::SteerAccepted {
+                        submission_id: None,
                         message: text.to_owned(),
                         sent_by_task: None,
                         hidden: false,
@@ -393,6 +394,7 @@ impl CloudDriver {
                     events,
                     state,
                     DriverEvent::SteerAccepted {
+                        submission_id: None,
                         message: text.to_owned(),
                         sent_by_task: None,
                         hidden: false,
@@ -406,6 +408,7 @@ impl CloudDriver {
                     events,
                     state,
                     DriverEvent::SteerRejected {
+                        submission_id: None,
                         message: text.to_owned(),
                         reason: format!("{error:#}"),
                         reason_i18n: None,

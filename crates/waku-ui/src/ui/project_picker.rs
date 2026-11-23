@@ -687,6 +687,7 @@ impl Render for ProjectPicker {
                             .px(px(10.0))
                             .rounded(px(11.0))
                             .bg(theme.surface)
+                            .text_size(sp(12.5))
                             .flex()
                             .items_center()
                             .gap(px(8.0))

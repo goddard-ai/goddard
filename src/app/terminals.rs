@@ -2,6 +2,49 @@ use super::*;
 use crate::persistence::TerminalPaneLayout;
 use crate::ui::ActivationExt;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum TerminalCheckoutTarget {
+    Primary,
+    Previous,
+    DefaultBranch,
+}
+
+fn checkout_destination(
+    target: TerminalCheckoutTarget,
+    entries: &[waku_protocol::workspace::RepoWorktree],
+    metadata: &crate::git_branch::BranchMetadata,
+    previous: Option<PathBuf>,
+) -> anyhow::Result<PathBuf> {
+    match target {
+        TerminalCheckoutTarget::Previous => {
+            previous.ok_or_else(|| anyhow::anyhow!("no previous worktree for this terminal"))
+        }
+        TerminalCheckoutTarget::Primary => entries
+            .iter()
+            .find(|entry| entry.is_main)
+            .map(|entry| entry.path.clone())
+            .ok_or_else(|| anyhow::anyhow!("no primary checkout is available")),
+        TerminalCheckoutTarget::DefaultBranch => {
+            // `default_branch` falls back to the current feature branch. Only
+            // origin/HEAD or conventional local defaults identify this target.
+            let branch = metadata
+                .remote_default
+                .as_deref()
+                .or_else(|| {
+                    ["main", "master"]
+                        .into_iter()
+                        .find(|name| metadata.branches.iter().any(|branch| branch.name == *name))
+                })
+                .ok_or_else(|| anyhow::anyhow!("could not determine the default branch"))?;
+            entries
+                .iter()
+                .find(|entry| entry.branch.as_deref() == Some(branch))
+                .map(|entry| entry.path.clone())
+                .ok_or_else(|| anyhow::anyhow!("no existing checkout of default branch {branch}"))
+        }
+    }
+}
+
 /// One entry in the sidebar's Terminals group. `session` scopes the
 /// terminal to the task whose right-panel surfaces own it; `None` is a
 /// global terminal that exists only in the group.
@@ -138,6 +181,32 @@ fn terminal_pane_layout(
     layout
 }
 
+/// Remove group membership without touching shell identity or launch metadata.
+fn ungroup_terminal_records(
+    records: &mut HashMap<Uuid, TerminalRecord>,
+    anchor_id: Uuid,
+    detached: &[Uuid],
+) {
+    for id in detached {
+        if let Some(record) = records.get_mut(id) {
+            record.pane_of = None;
+            record.panes.clear();
+            record.pane_layout = None;
+        }
+    }
+    if let Some(record) = records.get_mut(&anchor_id) {
+        record.panes.retain(|id| !detached.contains(id));
+        let remaining = std::iter::once(anchor_id)
+            .chain(record.panes.iter().copied())
+            .collect::<Vec<_>>();
+        record.pane_layout = if record.panes.is_empty() {
+            None
+        } else {
+            terminal_pane_layout(record.pane_layout.as_ref(), &remaining, false)
+        };
+    }
+}
+
 fn terminal_group_layout(
     records: &HashMap<Uuid, TerminalRecord>,
     anchor_id: Uuid,
@@ -219,6 +288,33 @@ fn new_terminal_split_target(
         Some(anchor) if maximized_anchor == Some(anchor) => Some(anchor),
         Some(_) => None,
         None => maximized_anchor,
+    }
+}
+
+/// What Escape does inside the floating card. `Hide` parks the shell
+/// under its sidebar row; `Arm` starts the second-press window and keeps
+/// the card; `ArmPassthrough` arms and also lets the keystroke through —
+/// Escape is real input to a program holding focus, so the arm claims
+/// only the deliberate follow-up press.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DockedTerminalEscape {
+    Hide,
+    Arm,
+    ArmPassthrough,
+}
+
+fn docked_terminal_escape(
+    group_busy: bool,
+    armed: bool,
+    focused_pane_busy: bool,
+) -> DockedTerminalEscape {
+    if !group_busy || armed {
+        return DockedTerminalEscape::Hide;
+    }
+    if focused_pane_busy {
+        DockedTerminalEscape::ArmPassthrough
+    } else {
+        DockedTerminalEscape::Arm
     }
 }
 
@@ -846,11 +942,6 @@ impl Waku {
                 && let Some(anchor) = self.terminal_records.get_mut(&anchor_id)
             {
                 anchor.panes.retain(|pane| *pane != terminal_id);
-                if anchor.panes.is_empty()
-                    && let Some(view) = self.right_panel_terminals.get(&anchor_id)
-                {
-                    view.update(cx, |view, _| view.set_pane(false));
-                }
             }
             for pane in panes {
                 self.drop_terminal(pane, cx);
@@ -1265,15 +1356,6 @@ impl Waku {
             .and_then(|record| record.custom_title.clone())
         {
             view.update(cx, |view, cx| view.set_custom_title(Some(title), cx));
-        }
-        // A group member's view sizes to its painted cell and carries the
-        // pane toolbar; a respawned view (workspace move) re-derives it here.
-        if self
-            .terminal_records
-            .get(&terminal_id)
-            .is_some_and(|record| record.pane_of.is_some() || !record.panes.is_empty())
-        {
-            view.update(cx, |view, _| view.set_pane(true));
         }
         self.right_panel_terminals.insert(terminal_id, view);
     }
@@ -1887,9 +1969,6 @@ impl Waku {
         if self.selected_terminal == Some(anchor_id) {
             self.maximized_terminal_pane = None;
         }
-        if let Some(anchor) = self.right_panel_terminals.get(&anchor_id) {
-            anchor.update(cx, |view, _| view.set_pane(true));
-        }
         if let Some(view) = self.right_panel_terminals.get(&pane_id) {
             let focus = view.read(cx).focus_handle(cx);
             window.on_next_frame(move |window, cx| window.focus(&focus, cx));
@@ -2038,10 +2117,80 @@ impl Waku {
         cx.notify();
     }
 
+    pub(super) fn navigate_terminal_checkout(
+        &mut self,
+        id: Uuid,
+        target: TerminalCheckoutTarget,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(view) = self.right_panel_terminals.get(&id).cloned() else {
+            return;
+        };
+        let cwd = view.read(cx).working_directory().to_path_buf();
+        let previous = view.read(cx).previous_checkout();
+        let Some(workspace) = self.workspace_client_for_path(&cwd) else {
+            self.show_toast(tr!("errors.daemon_disconnected"));
+            return;
+        };
+        let view = view.downgrade();
+        let requested_cwd = cwd.clone();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    use waku_client::{WorkspaceOperation, WorkspaceResult};
+                    let WorkspaceResult::BranchMetadata {
+                        snapshot: Some(metadata),
+                    } = workspace
+                        .request(WorkspaceOperation::InspectBranchMetadata { cwd: cwd.clone() })?
+                    else {
+                        anyhow::bail!("terminal is not in a Git checkout");
+                    };
+                    let entries = if target == TerminalCheckoutTarget::Previous {
+                        Vec::new()
+                    } else {
+                        let WorkspaceResult::RepoWorktrees {
+                            entries: Some(entries),
+                        } = workspace.request(WorkspaceOperation::ListWorktrees {
+                            cwd,
+                            skip_status: true,
+                        })?
+                        else {
+                            anyhow::bail!("could not list repository checkouts");
+                        };
+                        entries
+                    };
+                    let destination = checkout_destination(target, &entries, &metadata, previous)?;
+                    Ok::<_, anyhow::Error>((metadata.repository, destination))
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                let Some(view) = view.upgrade() else {
+                    return;
+                };
+                // A directory change while Git was resolving invalidates the
+                // request. Never redirect a terminal that has since moved.
+                if view.read(cx).working_directory() != requested_cwd {
+                    this.show_toast("Terminal directory changed; try again");
+                    return;
+                }
+                let result = result.and_then(|(source, destination)| {
+                    view.update(cx, |view, cx| {
+                        view.navigate_checkout(source, destination, cx)
+                    })
+                });
+                if let Err(error) = result {
+                    this.show_toast(format!("Could not switch terminal checkout: {error}"));
+                }
+            });
+        })
+        .detach();
+    }
+
     /// Any terminal view holding keyboard focus — a pane or an anchor in
     /// either surface. The scan only walks the two groups that can be on
     /// screen: the main-area selection and the active panel tab.
-    fn focused_terminal_id(&self, window: &Window, cx: &App) -> Option<Uuid> {
+    pub(super) fn focused_terminal_id(&self, window: &Window, cx: &App) -> Option<Uuid> {
         let candidates = self
             .selected_terminal
             .into_iter()
@@ -2118,7 +2267,7 @@ impl Waku {
             .into_iter()
             .find(|id| *id != terminal_id);
         if record.pane_of.is_none() {
-            self.promote_terminal_pane(terminal_id, cx);
+            self.promote_terminal_pane(terminal_id);
         }
         self.drop_terminal(terminal_id, cx);
         if let Some(focus) = survivor
@@ -2142,7 +2291,7 @@ impl Waku {
     /// pane — every reference (tabs, selection, panel owner, history)
     /// rekeys to the promoted terminal. The old anchor's record empties
     /// its pane list so `drop_terminal` treats it as ungrouped.
-    fn promote_terminal_pane(&mut self, anchor_id: Uuid, cx: &mut Context<Self>) {
+    fn promote_terminal_pane(&mut self, anchor_id: Uuid) {
         let Some(mut panes) = self
             .terminal_records
             .get(&anchor_id)
@@ -2181,13 +2330,10 @@ impl Waku {
                 record.pane_of = Some(new_anchor);
             }
         }
-        // A single survivor stops being a group — its view loses the
-        // pane chrome along with the membership.
-        if panes.is_empty()
-            && let Some(view) = self.right_panel_terminals.get(&new_anchor)
-        {
-            view.update(cx, |view, _| view.set_pane(false));
-        }
+        self.retarget_terminal_surface(anchor_id, new_anchor);
+    }
+
+    fn retarget_terminal_surface(&mut self, anchor_id: Uuid, new_anchor: Uuid) {
         let retarget = |surface: &mut RightPanelSurface| {
             if *surface == RightPanelSurface::Terminal(anchor_id) {
                 *surface = RightPanelSurface::Terminal(new_anchor);
@@ -2251,6 +2397,78 @@ impl Waku {
         {
             dialog.terminal_id = new_anchor;
         }
+    }
+
+    /// Separate live shells by changing membership only; PTYs and metadata stay put.
+    fn unsplit_terminal_group(
+        &mut self,
+        terminal_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let anchor_id = self.terminal_group_anchor(terminal_id);
+        let panes = self.terminal_group_panes(anchor_id);
+        if panes.len() < 2 {
+            return;
+        }
+        ungroup_terminal_records(&mut self.terminal_records, anchor_id, &panes);
+        if terminal_id != anchor_id {
+            self.retarget_terminal_surface(anchor_id, terminal_id);
+        }
+        // Keep the former panes adjacent in their displayed order.
+        let index = self
+            .terminal_order
+            .iter()
+            .take_while(|id| **id != anchor_id)
+            .filter(|id| !panes.contains(id))
+            .count();
+        self.terminal_order.retain(|id| !panes.contains(id));
+        self.terminal_order.splice(index..index, panes.iter().copied());
+        self.finish_terminal_ungroup(&panes, terminal_id, window, cx);
+    }
+
+    fn move_terminal_pane_out(
+        &mut self,
+        terminal_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let anchor_id = self.terminal_group_anchor(terminal_id);
+        let panes = self.terminal_group_panes(anchor_id);
+        if panes.len() < 2 {
+            return;
+        }
+        let remaining_anchor = if terminal_id == anchor_id {
+            self.promote_terminal_pane(anchor_id);
+            panes[1]
+        } else {
+            anchor_id
+        };
+        ungroup_terminal_records(&mut self.terminal_records, remaining_anchor, &[terminal_id]);
+        self.finish_terminal_ungroup(&panes, terminal_id, window, cx);
+        self.activate_terminal(terminal_id, true, window, cx);
+    }
+
+    fn finish_terminal_ungroup(
+        &mut self,
+        panes: &[Uuid],
+        terminal_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .maximized_terminal_pane
+            .is_some_and(|id| panes.contains(&id))
+        {
+            self.maximized_terminal_pane = None;
+        }
+        if let Some(view) = self.right_panel_terminals.get(&terminal_id) {
+            window.focus(&view.read(cx).focus_handle(cx), cx);
+        }
+        self.sidebar_rows_fingerprint.set(None);
+        self.set_sidebar_group_collapsed(SidebarGroup::Terminals, false, cx);
+        self.save();
+        cx.notify();
     }
 
     /// Hover uses the same floating-card selection as a normal sidebar open.
@@ -2371,11 +2589,6 @@ impl Waku {
         }
         let incoming =
             join_terminal_groups(&mut self.terminal_records, dragged_id, anchor_id, max_panes);
-        for terminal_id in std::iter::once(&anchor_id).chain(&incoming) {
-            if let Some(view) = self.right_panel_terminals.get(terminal_id) {
-                view.update(cx, |view, _| view.set_pane(true));
-            }
-        }
         // References pointing at the dragged terminal follow it into
         // the group — a selected terminal's main-area slot hands over
         // to its new anchor.
@@ -2820,6 +3033,66 @@ impl Waku {
         let focus = self.composer_focus(cx);
         window.focus(&focus, cx);
         cx.notify();
+    }
+
+    /// The card's bare Escape: an idle group hides on one press, while a
+    /// pane mid-command earns the same second-press confirmation the
+    /// composer's stop uses — the card covers a program the user may have
+    /// meant to keep watching. When the busy pane itself holds focus the
+    /// first press still reaches the program — vim's Escape is real
+    /// input — and the arm claims only the follow-up inside the window.
+    fn dismiss_docked_terminal_action(
+        &mut self,
+        terminal_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut group_busy = false;
+        let mut focused_pane_busy = false;
+        for pane_id in self.terminal_group_panes(terminal_id) {
+            let Some(terminal) = self.right_panel_terminals.get(&pane_id) else {
+                continue;
+            };
+            if !terminal.read(cx).command_running() {
+                continue;
+            }
+            group_busy = true;
+            focused_pane_busy |= terminal
+                .read(cx)
+                .focus_handle(cx)
+                .contains_focused(window, cx);
+        }
+        let target = EscapeStopTarget::DockedTerminal(terminal_id);
+        let armed = self
+            .escape_stop_confirmation
+            .is_armed_for(target, Instant::now());
+        let escape = docked_terminal_escape(group_busy, armed, focused_pane_busy);
+        if matches!(escape, DockedTerminalEscape::Hide) {
+            self.escape_stop_confirmation.clear();
+            self.dismiss_docked_terminal(window, cx);
+            return;
+        }
+        // `armed` was just established false for this target — `press`
+        // cannot resolve to Stop here.
+        let EscapeStopPress::Arm(arm) = self.escape_stop_confirmation.press(target, Instant::now())
+        else {
+            return;
+        };
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(ESCAPE_STOP_CONFIRMATION_TIMEOUT)
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.escape_stop_confirmation.expire(arm) {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        if matches!(escape, DockedTerminalEscape::ArmPassthrough) {
+            cx.propagate();
+        }
     }
 
     /// The standalone page's minimize: the terminal drops to the floating
@@ -3335,6 +3608,9 @@ impl Waku {
                     .items_center()
                     .child(self.render_terminal_location_for_id(terminal_id, cx))
                     .child(div().flex_1())
+                    .when(panes.len() == 1, |header| {
+                        header.child(self.render_terminal_actions(terminal_id, cx))
+                    })
                     .children(maximize_button)
                     .child(minimize_button),
             )
@@ -3365,43 +3641,24 @@ impl Waku {
             .into_any_element()
     }
 
-    /// The docked terminal card pinned to the top of the main column —
-    /// in flow, so the surface underneath shifts down rather than being
-    /// covered. The header carries the title and directory, the expand
-    /// affordance that promotes the card to the standalone page, and the
-    /// close that only dismisses the card — the shell keeps running.
-    pub(super) fn render_docked_terminal_card(
+    #[track_caller]
+    fn render_docked_terminal_controls(
         &self,
         terminal_id: Uuid,
-        width: f32,
-        window: &Window,
+        grouped: bool,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
-        self.ensure_sidebar_terminal_repo_roots(cx);
+    ) -> [AnyElement; 2] {
         let theme = Theme::current(cx);
-        let Some(terminal) = self.right_panel_terminals.get(&terminal_id).cloned() else {
-            return div().into_any_element();
-        };
-        // The view's column math needs its painted width — the card's
-        // margin, border, and inset mat shave the column's.
-        let inner_width =
-            (width - DOCKED_TERMINAL_MARGIN * 2.0 - 2.0 - DOCKED_TERMINAL_INSET * 2.0).max(0.0);
-        if (terminal.read(cx).panel_width() - inner_width).abs() > 0.5 {
-            terminal.update(cx, |terminal, _| terminal.set_panel_width(inner_width));
-        }
-        let card_height = (f32::from(window.viewport_size().height) * 0.4)
-            .clamp(DOCKED_TERMINAL_MIN_HEIGHT, DOCKED_TERMINAL_MAX_HEIGHT);
-        let record = self.terminal_records.get(&terminal_id);
-        let title = record
-            .and_then(|record| record.custom_title.clone())
-            .or_else(|| Some(single_line_label(terminal.read(cx).title())))
-            .filter(|title| !title.is_empty())
-            .unwrap_or_else(|| tr!("right_panel.terminal"));
-        let location = self.render_terminal_location_for_id(terminal_id, cx);
         let expand_focus =
             self.transcript_control_focus(format!("docked-terminal-expand-{terminal_id}"), cx);
         let close_focus =
             self.transcript_control_focus(format!("docked-terminal-close-{terminal_id}"), cx);
+        // The armed second-press confirmation wears the composer's "Esc"
+        // badge — one more Escape inside the window hides the card.
+        let escape_armed = self.escape_stop_confirmation.is_armed_for(
+            EscapeStopTarget::DockedTerminal(terminal_id),
+            Instant::now(),
+        );
         let expand_button = div()
             .id(SharedString::from(format!(
                 "docked-terminal-expand-{terminal_id}"
@@ -3446,8 +3703,27 @@ impl Waku {
             .focus_visible(|style| style.bg(theme.focus_highlight()))
             .hover(|element| element.bg(theme.overlay))
             .active(|element| element.bg(theme.overlay_strong))
-            .child(icon("icons/x.svg", 13.0, theme.text_tertiary))
-            .tooltip(|window, cx| Tooltip::new(tr!("common.close")).build(window, cx))
+            .when(escape_armed, |element| {
+                element.bg(theme.inverse).child(
+                    div()
+                        .text_size(sp(12.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme.on_inverse)
+                        .child("Esc"),
+                )
+            })
+            .when(!escape_armed, |element| {
+                element.child(icon(
+                    if grouped {
+                        "icons/minus.svg"
+                    } else {
+                        "icons/x.svg"
+                    },
+                    13.0,
+                    theme.text_tertiary,
+                ))
+            })
+            .tooltip(|window, cx| Tooltip::new(tr!("shortcuts.dismiss")).build(window, cx))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.dismiss_docked_terminal(window, cx);
@@ -3458,6 +3734,70 @@ impl Waku {
                     cx.stop_propagation();
                 }
             }));
+        [
+            expand_button.into_any_element(),
+            close_button.into_any_element(),
+        ]
+    }
+
+    /// The docked terminal card pinned to the top of the main column —
+    /// in flow, so the surface underneath shifts down rather than being
+    /// covered. A single terminal uses a card header. In a split group,
+    /// the anchor pane's toolbar carries the card controls.
+    pub(super) fn render_docked_terminal_card(
+        &self,
+        terminal_id: Uuid,
+        width: f32,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.ensure_sidebar_terminal_repo_roots(cx);
+        let theme = Theme::current(cx);
+        let Some(terminal) = self.right_panel_terminals.get(&terminal_id).cloned() else {
+            return div().into_any_element();
+        };
+        // The view's column math needs its painted width — the card's
+        // margin, border, and inset mat shave the column's.
+        let inner_width =
+            (width - DOCKED_TERMINAL_MARGIN * 2.0 - 2.0 - DOCKED_TERMINAL_INSET * 2.0).max(0.0);
+        if (terminal.read(cx).panel_width() - inner_width).abs() > 0.5 {
+            terminal.update(cx, |terminal, _| terminal.set_panel_width(inner_width));
+        }
+        let card_height = (f32::from(window.viewport_size().height) * 0.4)
+            .clamp(DOCKED_TERMINAL_MIN_HEIGHT, DOCKED_TERMINAL_MAX_HEIGHT);
+        let record = self.terminal_records.get(&terminal_id);
+        let grouped = record.is_some_and(|record| !record.panes.is_empty());
+        let header = (!grouped).then(|| {
+            let title = record
+                .and_then(|record| record.custom_title.clone())
+                .or_else(|| Some(single_line_label(terminal.read(cx).title())))
+                .filter(|title| !title.is_empty())
+                .unwrap_or_else(|| tr!("right_panel.terminal"));
+            div()
+                .h(px(DOCKED_TERMINAL_HEADER_HEIGHT))
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .pl(px(10.0))
+                .pr(px(4.0))
+                .border_b(hairline())
+                .border_color(theme.border_subtle)
+                .child(icon("icons/terminal-square.svg", 13.0, theme.text_tertiary))
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(sp(12.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .child(SharedString::from(title)),
+                )
+                .child(self.render_terminal_location_for_id(terminal_id, cx))
+                .child(div().flex_1())
+                .child(self.render_terminal_actions(terminal_id, cx))
+                .children(self.render_docked_terminal_controls(terminal_id, false, cx))
+        });
         div()
             .flex_none()
             .w_full()
@@ -3469,15 +3809,18 @@ impl Waku {
             .child(
                 div()
                     .id(SharedString::from(format!("docked-terminal-{terminal_id}")))
+                    .debug_selector(|| "docked-terminal-card".into())
                     .key_context("DockedTerminal")
                     .on_action(
                         cx.listener(move |this, _: &CloseDockedTerminal, window, cx| {
                             this.close_main_terminal(terminal_id, window, cx);
                         }),
                     )
-                    .on_action(cx.listener(|this, _: &DismissDockedTerminal, window, cx| {
-                        this.dismiss_docked_terminal(window, cx);
-                    }))
+                    .on_action(
+                        cx.listener(move |this, _: &DismissDockedTerminal, window, cx| {
+                            this.dismiss_docked_terminal_action(terminal_id, window, cx);
+                        }),
+                    )
                     .w_full()
                     .h(px(card_height))
                     .flex()
@@ -3487,73 +3830,40 @@ impl Waku {
                     .border_color(theme.border_subtle)
                     .bg(theme.raised)
                     .shadow_md()
+                    .children(header)
                     .child(
-                        div()
-                            .h(px(DOCKED_TERMINAL_HEADER_HEIGHT))
-                            .flex_none()
-                            .flex()
-                            .items_center()
-                            .gap(px(6.0))
-                            .pl(px(10.0))
-                            .pr(px(4.0))
-                            .border_b(hairline())
-                            .border_color(theme.border_subtle)
-                            .child(icon("icons/terminal-square.svg", 13.0, theme.text_tertiary))
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_size(sp(12.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(SharedString::from(title)),
-                            )
-                            .child(location)
-                            .child(div().flex_1())
-                            .child(self.render_terminal_split_button(
-                                "docked-terminal-split",
-                                terminal_id,
-                                STANDALONE_TERMINAL_MAX_PANES,
-                                cx,
-                            ))
-                            .child(expand_button)
-                            .child(close_button),
-                    )
-                    .child(
+                        // The group needs a flex parent to claim the card's remaining height.
                         div()
                             .flex_1()
                             .min_h_0()
+                            .flex()
+                            .flex_col()
                             .px(px(DOCKED_TERMINAL_INSET))
                             .pb(px(DOCKED_TERMINAL_INSET))
-                            .child(
-                                if self
-                                    .terminal_records
-                                    .get(&terminal_id)
-                                    .is_some_and(|record| !record.panes.is_empty())
-                                {
-                                    self.render_terminal_group(
-                                        terminal_id,
-                                        TerminalGroupLayout::Grid,
-                                        window,
-                                        cx,
-                                    )
-                                } else {
-                                    self.terminal_drop_target(
-                                        div()
-                                            .id(SharedString::from(format!(
-                                                "terminal-body-drop-{terminal_id}"
-                                            )))
-                                            .flex_1()
-                                            .min_h_0()
-                                            .size_full()
-                                            .child(terminal),
-                                        terminal_id,
-                                        STANDALONE_TERMINAL_MAX_PANES,
-                                        cx,
-                                    )
-                                    .into_any_element()
-                                },
-                            ),
+                            .when(grouped, |body| body.pt(px(DOCKED_TERMINAL_INSET)))
+                            .child(if grouped {
+                                self.render_terminal_group(
+                                    terminal_id,
+                                    TerminalGroupLayout::Grid,
+                                    window,
+                                    cx,
+                                )
+                            } else {
+                                self.terminal_drop_target(
+                                    div()
+                                        .id(SharedString::from(format!(
+                                            "terminal-body-drop-{terminal_id}"
+                                        )))
+                                        .flex_1()
+                                        .min_h_0()
+                                        .size_full()
+                                        .child(terminal),
+                                    terminal_id,
+                                    STANDALONE_TERMINAL_MAX_PANES,
+                                    cx,
+                                )
+                                .into_any_element()
+                            }),
                     ),
             )
             .into_any_element()
@@ -3665,10 +3975,8 @@ impl Waku {
             .into_any_element()
     }
 
-    /// One cell of a split group — the terminal's view plus the kill
-    /// button overlaid at its toolbar's right edge, the convention the
-    /// embedded settings terminal established. The hairline frame
-    /// doubles as the cell separator and, tinted, as the focus marker.
+    /// One cell of a split group, with pane actions in its toolbar. The
+    /// border separates cells and highlights the focused terminal.
     fn render_terminal_pane(
         &self,
         terminal_id: Uuid,
@@ -3683,131 +3991,189 @@ impl Waku {
         let busy = view.read(cx).command_running();
         let close_focus =
             self.transcript_control_focus(format!("terminal-pane-close-{terminal_id}"), cx);
+        let controls = div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(2.0))
+            .child(self.render_terminal_actions(terminal_id, cx))
+            .child(
+                icon_button(
+                    SharedString::from(format!("terminal-pane-close-{terminal_id}")),
+                    "icons/x.svg",
+                    theme,
+                )
+                .track_focus(&close_focus)
+                .tab_index(0)
+                .focus_visible(|style| style.bg(theme.focus_highlight()))
+                .tooltip(Tooltip::text(tr!("common.close")))
+                .on_activation(cx, move |this, window, cx| {
+                    // The same running-command guard a surface close
+                    // gets: a busy pane's shell dies with the cell,
+                    // so it asks first.
+                    if busy {
+                        let focus = this.open_terminal_pane_close_dialog(terminal_id, cx);
+                        // The deferred dialog must draw before it can receive key actions.
+                        window.on_next_frame(move |window, _| {
+                            window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+                        });
+                    } else {
+                        this.close_terminal_pane(terminal_id, cx);
+                    }
+                }),
+            )
+            .when(
+                self.docked_terminal == Some(terminal_id)
+                    && self.docked_terminal_visible(terminal_id),
+                |controls| {
+                    controls.children(self.render_docked_terminal_controls(terminal_id, true, cx))
+                },
+            );
+        let toolbar = view
+            .read(cx)
+            .render_toolbar(Some(controls.into_any_element()), cx);
         div()
             .flex_1()
             .min_h_0()
             .min_w_0()
-            .relative()
+            .flex()
+            .flex_col()
+            .overflow_hidden()
             .border(hairline())
             .border_color(if focused { theme.accent } else { theme.border })
-            .child(view)
-            .child(
-                div().absolute().top(px(6.0)).right(px(6.0)).child(
-                    icon_button(
-                        SharedString::from(format!("terminal-pane-close-{terminal_id}")),
-                        "icons/x.svg",
-                        theme,
-                    )
-                    .track_focus(&close_focus)
-                    .tab_index(0)
-                    .focus_visible(|style| style.bg(theme.focus_highlight()))
-                    .tooltip(Tooltip::text(tr!("common.close")))
-                    .on_activation(cx, move |this, window, cx| {
-                        // The same running-command guard a surface close
-                        // gets: a busy pane's shell dies with the cell,
-                        // so it asks first.
-                        if busy {
-                            let focus = this.open_terminal_pane_close_dialog(terminal_id, cx);
-                            // The deferred dialog must draw before it can receive key actions.
-                            window.on_next_frame(move |window, _| {
-                                window.on_next_frame(move |window, cx| window.focus(&focus, cx));
-                            });
-                        } else {
-                            this.close_terminal_pane(terminal_id, cx);
-                        }
-                    }),
-                ),
-            )
+            .child(toolbar)
+            .child(div().flex_1().min_h_0().min_w_0().child(view))
             .into_any_element()
     }
 
-    /// The split control shared by the right-panel header's terminal tab
-    /// and the window header in terminal mode. At the surface's cap it
-    /// dims and stops answering — the history buttons' disabled
-    /// convention.
-    pub(super) fn render_terminal_split_button(
+    /// Pane-local actions use explicit ids because opening a menu moves keyboard focus.
+    pub(super) fn render_terminal_actions(
         &self,
-        id: &'static str,
-        anchor_id: Uuid,
-        max_panes: usize,
+        terminal_id: Uuid,
         cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
+    ) -> AnyElement {
         let theme = Theme::current(cx);
-        let down = self.sidebar_alt_modifier_down;
-        let at_cap = self.terminal_group_panes(anchor_id).len() >= max_panes;
-        let label = if at_cap {
-            tr!("terminal.split_at_max", max = max_panes)
-        } else {
-            tr!(if down {
-                "terminal.split_down"
-            } else {
-                "terminal.split_right"
-            })
-        };
-        let focus = self.transcript_control_focus(id, cx);
-        div()
-            .id(id)
-            .track_focus(&focus)
-            .when(!at_cap, |element| element.tab_index(0))
-            .size(px(26.0))
-            .rounded(px(8.0))
-            .flex_none()
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_default()
-            .tooltip(move |window, cx| {
-                if down {
-                    Tooltip::new(label.clone())
-                        .action(&SplitTerminalDown)
-                        .build(window, cx)
-                } else {
-                    Tooltip::new(label.clone())
-                        .action(&SplitTerminal)
-                        .build(window, cx)
+        let menu = self.menu_handle(format!("terminal-actions-{terminal_id}"), cx);
+        let trigger = icon_button(
+            SharedString::from(format!("terminal-actions-trigger-{terminal_id}")),
+            "icons/ellipsis-vertical.svg",
+            theme,
+        )
+        .focus_visible(|style| style.bg(theme.focus_highlight()))
+        .tooltip(Tooltip::text(tr!("terminal.actions")));
+        let waku = cx.entity().downgrade();
+        dropdown_menu(
+            trigger,
+            SharedString::from(format!("terminal-actions-menu-{terminal_id}")),
+            &menu,
+            MenuAlign::BelowRight,
+            move |cx| {
+                let Some(waku) = waku.upgrade() else {
+                    return Vec::new();
+                };
+                let (grouped, at_cap, maximized, standalone) = {
+                    let this = waku.read(cx);
+                    let anchor = this.terminal_group_anchor(terminal_id);
+                    let limit = if this.selected_terminal == Some(anchor)
+                        || this.docked_terminal == Some(anchor)
+                    {
+                        STANDALONE_TERMINAL_MAX_PANES
+                    } else {
+                        RIGHT_PANEL_TERMINAL_MAX_PANES
+                    };
+                    (
+                        this.terminal_group_panes(anchor).len() > 1,
+                        this.terminal_group_panes(anchor).len() >= limit,
+                        this.maximized_terminal_pane == Some(terminal_id),
+                        this.selected_terminal == Some(anchor),
+                    )
+                };
+                let mut items = Vec::new();
+                for (down, label, icon_path) in [
+                    (false, tr!("terminal.split_right"), "icons/split.svg"),
+                    (true, tr!("terminal.split_down"), "icons/split-down.svg"),
+                ] {
+                    let waku = waku.clone();
+                    items.push(
+                        MenuItem::new(label, move |window, cx| {
+                            waku.update(cx, |this, cx| {
+                                let anchor = this.terminal_group_anchor(terminal_id);
+                                let limit = if this.selected_terminal == Some(anchor)
+                                    || this.docked_terminal == Some(anchor)
+                                {
+                                    STANDALONE_TERMINAL_MAX_PANES
+                                } else {
+                                    RIGHT_PANEL_TERMINAL_MAX_PANES
+                                };
+                                if let Some(view) = this.right_panel_terminals.get(&terminal_id) {
+                                    window.focus(&view.read(cx).focus_handle(cx), cx);
+                                }
+                                this.split_terminal_in_direction(anchor, limit, down, window, cx);
+                            })
+                        })
+                        .icon(icon_path)
+                        .disabled(at_cap),
+                    );
                 }
-            })
-            .when(at_cap, |element| element.opacity(0.35))
-            .when(!at_cap, |element| {
-                element
-                    .focus_visible(|style| style.bg(theme.focus_highlight()))
-                    .hover(|element| element.bg(theme.overlay))
-                    .active(|element| element.bg(theme.overlay_strong))
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                        cx.stop_propagation();
-                    })
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        cx.stop_propagation();
-                        this.split_terminal_in_direction(
-                            anchor_id,
-                            max_panes,
-                            window.modifiers().alt,
-                            window,
-                            cx,
-                        );
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            this.split_terminal_in_direction(
-                                anchor_id,
-                                max_panes,
-                                window.modifiers().alt,
-                                window,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }
-                    }))
-            })
-            .child(icon(
-                if down {
-                    "icons/split-down.svg"
-                } else {
-                    "icons/split.svg"
-                },
-                13.0,
-                theme.text_tertiary,
-            ))
+                let maximize_waku = waku.clone();
+                items.push(
+                    MenuItem::new(
+                        if !grouped && standalone {
+                            tr!("terminal.minimize")
+                        } else if maximized {
+                            tr!("terminal.restore")
+                        } else {
+                            tr!("terminal.maximize")
+                        },
+                        move |window, cx| {
+                            maximize_waku.update(cx, |this, cx| {
+                                let anchor = this.terminal_group_anchor(terminal_id);
+                                if this.selected_terminal != Some(anchor) {
+                                    this.activate_terminal(anchor, true, window, cx);
+                                    if !grouped {
+                                        return;
+                                    }
+                                }
+                                if let Some(view) = this.right_panel_terminals.get(&terminal_id) {
+                                    window.focus(&view.read(cx).focus_handle(cx), cx);
+                                }
+                                this.toggle_terminal_maximize_action(
+                                    &ToggleTerminalMaximize,
+                                    window,
+                                    cx,
+                                );
+                            })
+                        },
+                    )
+                    .icon(if maximized || (!grouped && standalone) {
+                        "icons/minimize.svg"
+                    } else {
+                        "icons/maximize.svg"
+                    }),
+                );
+                if grouped {
+                    items.push(MenuItem::Separator);
+                    let extract_waku = waku.clone();
+                    items.push(
+                        MenuItem::new(tr!("terminal.move_pane_out"), move |window, cx| {
+                            extract_waku.update(cx, |this, cx| {
+                                this.move_terminal_pane_out(terminal_id, window, cx)
+                            })
+                        })
+                        .icon("icons/external-link.svg"),
+                    );
+                    items.push(
+                        MenuItem::new(tr!("terminal.unsplit_group"), move |window, cx| {
+                            waku.update(cx, |this, cx| {
+                                this.unsplit_terminal_group(terminal_id, window, cx)
+                            })
+                        })
+                        .icon("icons/ungroup.svg"),
+                    );
+                }
+                items
+            },
+        )
     }
 
     /// One terminal row in the Terminals group — also what a pinned
@@ -4397,6 +4763,84 @@ mod tests {
     use super::*;
 
     #[test]
+    fn checkout_navigation_distinguishes_primary_default_and_previous() {
+        use waku_protocol::workspace::RepoWorktree;
+        let entry = |path: &str, branch: &str, is_main| RepoWorktree {
+            path: path.into(),
+            head: String::new(),
+            branch: Some(branch.into()),
+            is_main,
+            dirty_files: None,
+            ahead: None,
+            behind: None,
+            last_commit_at: None,
+        };
+        let entries = vec![
+            entry("/repo", "dev", true),
+            entry("/main checkout", "main", false),
+        ];
+        let mut metadata = crate::git_branch::BranchMetadata {
+            repository: "/feature".into(),
+            current: Some("feature".into()),
+            detached_head: None,
+            default_branch: Some("feature".into()),
+            remote_default: Some("main".into()),
+            origin_url: None,
+            branches: Vec::new(),
+        };
+        assert_eq!(
+            checkout_destination(TerminalCheckoutTarget::Primary, &entries, &metadata, None)
+                .unwrap(),
+            PathBuf::from("/repo")
+        );
+        assert_eq!(
+            checkout_destination(
+                TerminalCheckoutTarget::DefaultBranch,
+                &entries,
+                &metadata,
+                None
+            )
+            .unwrap(),
+            PathBuf::from("/main checkout")
+        );
+        assert_eq!(
+            checkout_destination(
+                TerminalCheckoutTarget::Previous,
+                &entries,
+                &metadata,
+                Some("/old".into())
+            )
+            .unwrap(),
+            PathBuf::from("/old")
+        );
+        assert!(
+            checkout_destination(TerminalCheckoutTarget::Previous, &entries, &metadata, None)
+                .is_err()
+        );
+        metadata.remote_default = Some("trunk".into());
+        assert!(
+            checkout_destination(
+                TerminalCheckoutTarget::DefaultBranch,
+                &entries,
+                &metadata,
+                None
+            )
+            .is_err()
+        );
+        metadata.remote_default = None;
+        // The display fallback to the current feature branch is not a default.
+        assert!(
+            checkout_destination(
+                TerminalCheckoutTarget::DefaultBranch,
+                &entries,
+                &metadata,
+                None
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn maximizing_a_standalone_split_keeps_the_group_available_for_restore() {
         let anchor = Uuid::from_u128(1);
         let second = Uuid::from_u128(2);
@@ -4459,6 +4903,39 @@ mod tests {
         assert_eq!(new_terminal_split_target(None, Some(floating), None), None);
     }
 
+    #[test]
+    fn escape_in_the_floating_card_hides_arms_and_passes_through() {
+        // An idle group hides on a single press — no arm stands between
+        // a quiet shell and the sidebar row.
+        assert_eq!(
+            docked_terminal_escape(false, false, false),
+            DockedTerminalEscape::Hide
+        );
+        assert_eq!(
+            docked_terminal_escape(false, true, false),
+            DockedTerminalEscape::Hide
+        );
+        // A busy group's first press only arms — unless it lands on the
+        // busy pane itself, where Escape is real input for the program.
+        assert_eq!(
+            docked_terminal_escape(true, false, false),
+            DockedTerminalEscape::Arm
+        );
+        assert_eq!(
+            docked_terminal_escape(true, false, true),
+            DockedTerminalEscape::ArmPassthrough
+        );
+        // The confirming second press inside the window always hides.
+        assert_eq!(
+            docked_terminal_escape(true, true, false),
+            DockedTerminalEscape::Hide
+        );
+        assert_eq!(
+            docked_terminal_escape(true, true, true),
+            DockedTerminalEscape::Hide
+        );
+    }
+
     fn split_record(id: Uuid) -> TerminalRecord {
         TerminalRecord {
             session: Some(id),
@@ -4471,6 +4948,51 @@ mod tests {
             pane_of: None,
             panes: Vec::new(),
             pane_layout: None,
+        }
+    }
+
+    #[test]
+    fn ungrouping_preserves_shell_records_and_remaining_split_geometry() {
+        let ids = [Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4()];
+        let mut records = ids
+            .into_iter()
+            .map(|id| (id, split_record(id)))
+            .collect::<HashMap<_, _>>();
+        records.get_mut(&ids[0]).unwrap().panes = ids[1..].to_vec();
+        for id in &ids[1..] {
+            records.get_mut(id).unwrap().pane_of = Some(ids[0]);
+        }
+        records.get_mut(&ids[0]).unwrap().pane_layout = Some(terminal_layout_pair(
+            TerminalPaneLayout::Pane(ids[0]),
+            terminal_layout_pair(
+                TerminalPaneLayout::Pane(ids[1]),
+                TerminalPaneLayout::Pane(ids[2]),
+                true,
+            ),
+            false,
+        ));
+        ungroup_terminal_records(&mut records, ids[0], &[ids[1]]);
+        assert_eq!(terminal_group_ids(&records, ids[0]), [ids[0], ids[2]]);
+        assert_eq!(records[&ids[1]].pane_of, None);
+        assert_eq!(
+            records[&ids[0]].pane_layout,
+            Some(terminal_layout_pair(
+                TerminalPaneLayout::Pane(ids[0]),
+                TerminalPaneLayout::Pane(ids[2]),
+                false
+            ))
+        );
+        ungroup_terminal_records(&mut records, ids[0], &[ids[0], ids[2]]);
+        assert_eq!(records.len(), 3);
+        for id in ids {
+            let record = &records[&id];
+            assert!(
+                record.pane_of.is_none() && record.panes.is_empty() && record.pane_layout.is_none()
+            );
+            assert_eq!(record.session, Some(id));
+            assert_eq!(record.custom_title, Some(id.to_string()));
+            assert_eq!(record.working_directory, Some(PathBuf::from("/tmp")));
+            assert_eq!(record.opened_at, 42);
         }
     }
 

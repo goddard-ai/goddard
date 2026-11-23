@@ -22,7 +22,8 @@ jobs:
       matrix:
         os: [macos-latest, ubuntu-24.04, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    # A cold macOS build ran through the 90-minute limit before tests began.
+    timeout-minutes: ${{ matrix.os == 'macos-latest' && 150 || 90 }}
     env:
       RUSTC_WRAPPER: sccache
       # CI runners have no incremental state to reuse. Disabling incremental
@@ -93,6 +94,7 @@ jobs:
       # linker incompatibility fails here instead of during a release.
       - name: Run tests
         env:
+          _CL_: ${{ runner.os == 'Windows' && format('/FI"{0}/scripts/msvc-espeak-compat.h"', github.workspace) || '' }}
           RUSTFLAGS: ${{ (runner.os == 'Linux' && '-C linker=clang -C link-arg=-fuse-ld=mold') || (runner.os == 'Windows' && '-C linker=rust-lld') || '' }}
         run: cargo test --workspace --locked
 

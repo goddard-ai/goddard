@@ -1,5 +1,61 @@
 use super::*;
 
+pub(super) fn handle_driver_prompt_with_gate(
+    driver: &DriverHandle,
+    command: Command,
+    cancellation: &crate::server::RuntimeCancellation,
+) -> anyhow::Result<ResponsePayload> {
+    let Command::Prompt {
+        prompt,
+        attachments,
+        ..
+    } = command
+    else {
+        bail!("expected a prompt at the native enqueue boundary");
+    };
+    let result = driver.prompt_with_gate(prompt, attachments, &|enqueue| {
+        cancellation.deliver(|| {
+            enqueue();
+            Ok(())
+        })
+    });
+    if let Err(error) = result {
+        if !user_stopped_enqueue(&error, cancellation) {
+            return Err(error);
+        }
+    }
+    // The request was accepted, then cancelled by the queued user Stop.
+    // Its ordered terminal event closes the turn; a failure reply would make
+    // request-based clients replace that interruption with a failed turn.
+    Ok(ResponsePayload::Ack)
+}
+
+pub(super) fn user_stopped_enqueue(
+    error: &anyhow::Error,
+    cancellation: &crate::server::RuntimeCancellation,
+) -> bool {
+    cancellation.is_cancelled() && error.is::<driver::EnqueueStopped>()
+}
+
+pub(super) fn handle_driver_options_with_cancellation(
+    driver: &DriverHandle,
+    options: &waku_protocol::WireSessionOptions,
+    cancellation: &crate::server::RuntimeCancellation,
+) -> anyhow::Result<ResponsePayload> {
+    Ok(ResponsePayload::OptionsApplied {
+        applied: driver.apply_options_with_cancellation(
+            SessionOptions {
+                mode: decode_enum(&options.mode)?,
+                model: options.model.clone(),
+                reasoning_effort: options.reasoning_effort.clone(),
+                service_tier: options.service_tier.clone(),
+                context_window: options.context_window.clone(),
+            },
+            &|| cancellation.is_cancelled(),
+        ),
+    })
+}
+
 pub(super) fn handle_driver_command(
     driver: &DriverHandle,
     command: Command,
@@ -76,7 +132,9 @@ pub(super) fn handle_driver_command(
             let cursor = Some(serde_json::to_value(driver.fork(turns_to_remove)?)?);
             return Ok(ResponsePayload::Cursor { cursor });
         }
-        Command::AttachSession
+        Command::PromptWithConfiguration { .. }
+        | Command::SetTaskView { .. }
+        | Command::AttachSession
         | Command::ClaimManagedGoalTurn { .. }
         | Command::Start { .. }
         | Command::GetSettings
@@ -105,8 +163,11 @@ pub(super) fn handle_driver_command(
         | Command::LoadTaskState
         | Command::SaveTaskState { .. }
         | Command::UpdateTaskMetadata { .. }
+        | Command::SwitchSessionProvider { .. }
+        | Command::ApplySidebarIntent { .. }
         | Command::RemoveSession
         | Command::RemoveProject { .. }
+        | Command::RefreshSessionHistory
         | Command::HydrateSession { .. }
         | Command::IndexSession
         | Command::SearchSessionMessages { .. }
@@ -136,6 +197,7 @@ pub(super) fn handle_driver_command(
         | Command::AgentWireframe { .. }
         | Command::WireframeComments { .. }
         | Command::AgentRenameSelf { .. }
+        | Command::AgentScratch { .. }
         | Command::AgentProposeArchive { .. }
         | Command::AgentMergeSubmit
         | Command::AgentReadSession { .. }
@@ -178,6 +240,10 @@ pub(super) fn handle_driver_command(
         | Command::UpsertAutomation { .. }
         | Command::RemoveAutomation { .. }
         | Command::RunAutomationNow { .. }
+        | Command::GetProjectSyncInfo { .. }
+        | Command::PushProjectSync { .. }
+        | Command::PullProjectSync { .. }
+        | Command::SyncProjectWithFriend { .. }
         | Command::ShareProjectWithFriend { .. }
         | Command::UnshareProjectWithFriend { .. }
         | Command::EnableFriendSync { .. }
@@ -189,7 +255,10 @@ pub(super) fn handle_driver_command(
         | Command::SetFriendSessionSharing { .. }
         | Command::GetFriendSessions { .. }
         | Command::WatchFriendSession { .. }
-        | Command::UnwatchFriendSession { .. } => {
+        | Command::UnwatchFriendSession { .. }
+        | Command::ReadTranscriptWindow { .. }
+        | Command::ReadTranscriptPayload { .. }
+        | Command::FindTranscript { .. } => {
             bail!("daemon received a command in the wrong dispatch path")
         }
     }

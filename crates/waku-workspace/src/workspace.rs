@@ -73,15 +73,34 @@ fn reference_file(context: &waku_protocol::model::ReferenceContext, path: &Path)
 /// `Review*` operations read it.
 pub fn execute(operation: WorkspaceOperation, qa_branch: &str) -> anyhow::Result<WorkspaceResult> {
     Ok(match operation {
+        WorkspaceOperation::RecoverTaskWorkspace { .. } => {
+            bail!("task workspace recovery requires the session daemon")
+        }
+
+        WorkspaceOperation::StartLanding { id, cwd, base, strategy } => WorkspaceResult::LandingJob {
+            job: Some(waku_git::git_panel::enqueue_land(&cwd, id, None, base.as_deref(), strategy)?),
+        },
+        WorkspaceOperation::LandingJob { id } => WorkspaceResult::LandingJob { job: waku_git::landing_queue::job(id)? },
+        WorkspaceOperation::LandingQueue { cwd } => WorkspaceResult::LandingQueue { snapshot: waku_git::landing_queue::inspect(&cwd)? },
+        WorkspaceOperation::LandingSnapshot { queue_id } => WorkspaceResult::LandingQueue { snapshot: waku_git::landing_queue::snapshot(queue_id)? },
+        WorkspaceOperation::CancelQueuedLanding { id } => WorkspaceResult::LandingCanceled { outcome: waku_git::landing_queue::cancel(id)? },
         WorkspaceOperation::QaDefaults {
             cwd,
             preferred_branch,
         } => WorkspaceResult::QaDefaults {
             config: waku_vcs::qa::defaults(&cwd, &preferred_branch)?,
         },
-        WorkspaceOperation::QaStart { cwd, branch } => WorkspaceResult::QaStarted {
-            checkout: waku_vcs::qa::start(&cwd, &branch)?,
+        WorkspaceOperation::QaStart {
+            cwd,
+            branch,
+            primary_checkout,
+        } => WorkspaceResult::QaStarted {
+            checkout: waku_vcs::qa::start_in(&cwd, &branch, primary_checkout)?,
         },
+        WorkspaceOperation::QaFinish { cwd, checkout } => {
+            waku_vcs::qa::finish(&cwd, &checkout)?;
+            WorkspaceResult::Ack
+        }
         WorkspaceOperation::QaCheck { cwd, checkout } => {
             waku_vcs::qa::unchanged(&cwd, &checkout)?;
             WorkspaceResult::Ack
@@ -484,6 +503,7 @@ pub fn execute(operation: WorkspaceOperation, qa_branch: &str) -> anyhow::Result
             cwd,
             session_id,
             turn_count,
+            history_generation: _,
         } => {
             crate::checkpoint::capture_turn_start(&cwd, session_id, turn_count)?;
             WorkspaceResult::Ack
@@ -493,6 +513,7 @@ pub fn execute(operation: WorkspaceOperation, qa_branch: &str) -> anyhow::Result
             session_id,
             turn_count,
             untouched,
+            identity: _,
         } => WorkspaceResult::Checkpoint {
             checkpoint: if untouched {
                 crate::checkpoint::capture_untouched_turn(&cwd, session_id, turn_count)?
@@ -506,6 +527,10 @@ pub fn execute(operation: WorkspaceOperation, qa_branch: &str) -> anyhow::Result
         },
         WorkspaceOperation::CaptureRef { cwd, git_ref } => {
             crate::checkpoint::capture_ref(&cwd, &git_ref)?;
+            WorkspaceResult::Ack
+        }
+        WorkspaceOperation::CaptureCommittedRef { cwd, git_ref } => {
+            crate::checkpoint::capture_committed_ref(&cwd, &git_ref)?;
             WorkspaceResult::Ack
         }
         WorkspaceOperation::RestoreRef { cwd, git_ref } => {
@@ -654,6 +679,12 @@ pub fn execute(operation: WorkspaceOperation, qa_branch: &str) -> anyhow::Result
         WorkspaceOperation::CollectReviewDiff { cwd, source } => WorkspaceResult::ReviewDiff {
             data: collect_review_diff(&cwd, source)?,
         },
+        // Resolved and deleted by the daemon, which owns the scratch pool
+        // and the session->root-task mapping this function cannot see.
+        WorkspaceOperation::InspectTaskScratch { .. }
+        | WorkspaceOperation::ReclaimTaskScratch { .. } => {
+            bail!("task scratch operations are daemon-owned")
+        }
     })
 }
 
@@ -782,7 +813,7 @@ fn reclaimable_dirs(cwd: &Path) -> Vec<PathBuf> {
 /// One directory's on-disk size. `DirEntry::metadata` doesn't follow
 /// symlinks, so a linked subtree is charged once — the link's own bytes —
 /// rather than walked at its target.
-fn directory_size(path: &Path) -> u64 {
+pub fn directory_size(path: &Path) -> u64 {
     let mut total = 0u64;
     let mut pending = vec![path.to_path_buf()];
     while let Some(directory) = pending.pop() {

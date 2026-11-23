@@ -98,6 +98,7 @@ impl WakuBackend {
         planning: Option<waku_protocol::boss::BossPlan>,
         automation_run: Option<Uuid>,
     ) -> anyhow::Result<Uuid> {
+        let _admission = self.idle_shutdown.enter()?;
         if prompt.trim().is_empty() {
             bail!("agent sessions require a prompt");
         }
@@ -318,23 +319,26 @@ impl WakuBackend {
         // Fields the payload omits inherit the sending task's configuration,
         // but only while it runs the resolved provider — a different
         // provider's model and trait vocabularies may not carry over.
-        let sender_config = sender.and_then(|id| {
-            self.task_state
-                .lock()
-                .sessions
-                .iter()
-                .find(|session| session.id == id)
-                .map(|session| {
-                    (
-                        session.provider,
-                        session.model.clone(),
-                        session.reasoning_effort.clone(),
-                        session.service_tier.clone(),
-                        session.context_window.clone(),
-                        (session.runtime_mode, session.environment()),
-                    )
-                })
-        });
+        let sender_config = if let Some(id) = sender {
+            let mut state = self.task_state.lock();
+            if let Some(session) = state.sessions.iter_mut().find(|session| session.id == id) {
+                // Access mode and environment live in detail, not list columns.
+                // A restored supervisor must inherit its saved posture.
+                self.task_store.hydrate(session)?;
+                Some((
+                    session.provider,
+                    session.model.clone(),
+                    session.reasoning_effort.clone(),
+                    session.service_tier.clone(),
+                    session.context_window.clone(),
+                    (session.runtime_mode, session.environment()),
+                ))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         // `"auto"` hands provider and model selection to the same routing
         // pass `RouteTask` serves an Auto draft; when the eval backend
         // cannot answer it lands on the last-used target instead of
@@ -510,8 +514,17 @@ impl WakuBackend {
         driver: &DriverHandle,
         _sink: &EventSink,
     ) {
+        let _ = self.steer_first_prompt_context_with_cancellation(session_id, driver, None);
+    }
+
+    pub(super) fn steer_first_prompt_context_with_cancellation(
+        &self,
+        session_id: Uuid,
+        driver: &DriverHandle,
+        cancellation: Option<&crate::server::RuntimeCancellation>,
+    ) -> anyhow::Result<()> {
         if self.agent.context_steer_pending(session_id) {
-            return;
+            return Ok(());
         }
         let parent_index = self.side_chat_parent_block(session_id);
         let memory = self.session_memory_block(session_id, driver);
@@ -538,41 +551,55 @@ impl WakuBackend {
         .collect::<Vec<_>>()
         .join("\n\n");
         if block.is_empty() {
-            return;
-        }
-        // The index rides this steer — an accept settles it, a rejection
-        // leaves the flag so the next prompt retries.
-        if parent_index.is_some() {
-            self.agent.note_index_steer(session_id);
-        }
-        // Same for the project-memory block.
-        if memory.is_some() {
-            self.agent.note_memory_steer(session_id);
+            return Ok(());
         }
         // The steer lands as a user message mid-turn — frame the blocks as
         // context so the provider does not read them as a new instruction.
         let steer = format!(
             "Session context — background information only, not a new \
-             instruction. Continue the task you are already working on.\n\n{block}"
+         instruction. Continue the task you are already working on.\n\n{block}"
         );
-        self.agent.record_pending_steer(
-            session_id,
-            crate::agent::AgentPrompt {
-                prompt: steer.clone(),
-                transport: None,
-                sender: None,
-                queued_id: None,
-                submission_id: None,
-                context: Some(if memory.is_some() {
-                    crate::agent::ContextSteer::Memory
-                } else {
-                    crate::agent::ContextSteer::Blocks
-                }),
-                hidden: false,
-                report_trigger: None,
-            },
-        );
-        driver.steer(steer);
+        let pending = std::cell::RefCell::new(Some(crate::agent::AgentPrompt {
+            prompt: steer.clone(),
+            transport: None,
+            sender: None,
+            queued_id: None,
+            submission_id: None,
+            context: Some(if memory.is_some() {
+                crate::agent::ContextSteer::Memory
+            } else {
+                crate::agent::ContextSteer::Blocks
+            }),
+            hidden: false,
+            report_trigger: None,
+        }));
+        let enqueue = |send: &mut dyn FnMut()| {
+            // Bookkeeping and the native send cross the same Stop boundary.
+            if parent_index.is_some() {
+                self.agent.note_index_steer(session_id);
+            }
+            if memory.is_some() {
+                self.agent.note_memory_steer(session_id);
+            }
+            self.agent.record_pending_steer(
+                session_id,
+                pending
+                    .borrow_mut()
+                    .take()
+                    .expect("one context steer enqueue"),
+            );
+            send();
+            Ok(())
+        };
+        match cancellation {
+            Some(cancellation) => {
+                driver.steer_with_gate(steer, &|send| cancellation.deliver(|| enqueue(send)))
+            }
+            None => {
+                let mut steer = Some(steer);
+                enqueue(&mut || driver.steer(steer.take().expect("one context steer enqueue")))
+            }
+        }
     }
 
     /// The daemon-owned memory store: session transcript indexes and
@@ -686,11 +713,12 @@ fn project_memory_block(digest: Option<&str>, granted_buckets: usize) -> String 
          survive across sessions. Reach it through `goddard-agent memory`: \
          `overview` returns a bucket's compacted view, `scan QUERY` matches \
          note text, `zoom START END` expands a note range, `record \
-         --json|--json-file` appends a note, `summary` answers a pending \
+         --json|--json-file` proposes a note, `confirm PROPOSAL_ID` saves it \
+         only after reconsideration, `summary` answers a pending \
          compression request, and `buckets` lists every bucket you can use. \
          Memory is append-only — corrections are new notes and a repeated \
-         retry key never duplicates one; bucket creation and legacy import \
-         are Boss-only. {access} {} A rejected operation reports its reason and persists \
+         retry key never duplicates one; bucket creation and legacy inspection \
+         are Boss-only and direct import is human-only. {access} {} A rejected operation reports its reason and persists \
          nothing; a failed `record` is not saved anywhere else.",
         waku_protocol::boss::MEMORY_RECORDING_GUIDANCE,
     );

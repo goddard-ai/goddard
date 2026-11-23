@@ -1297,6 +1297,7 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut StreamSta
                 let (reason, reason_i18n) =
                     localized!("errors.provider_no_active_turn", provider = "OpenCode");
                 let _ = events.send(DriverEvent::SteerRejected {
+                    submission_id: None,
                     message: text,
                     reason,
                     reason_i18n: Some(reason_i18n),
@@ -1324,6 +1325,7 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut StreamSta
                     // The inbox event is authoritative; this 2xx is only the
                     // fallback for a response Goddard never sees.
                     let _ = events.send(DriverEvent::SteerAccepted {
+                        submission_id: None,
                         message: text,
                         sent_by_task: None,
                         hidden: false,
@@ -1332,6 +1334,7 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut StreamSta
                 }
                 Ok(None) => {
                     let _ = events.send(DriverEvent::SteerAccepted {
+                        submission_id: None,
                         message: text,
                         sent_by_task: None,
                         hidden: false,
@@ -2728,7 +2731,16 @@ fn request_permission(
     {
         return;
     }
-    if auto_replies(state.mode, &request.permission) || state.permissions.is_approved(&request) {
+    let readonly_agent = request.permission == "bash"
+        && !request.patterns.is_empty()
+        && request
+            .patterns
+            .iter()
+            .all(|command| crate::agent_readonly::readonly_agent_command(command));
+    if readonly_agent
+        || auto_replies(state.mode, &request.permission)
+        || state.permissions.is_approved(&request)
+    {
         state.permissions.responding.insert(request_id.to_owned());
         // Posted back through the worker's own channel rather than inline so
         // one slow reply cannot stall the decoding of the frames behind it.
@@ -3516,6 +3528,19 @@ mod tests {
     /// The id asymmetry is real: `permission.asked` carries `data.id` and the
     /// reply path takes that id, while `permission.replied` calls it
     /// `data.requestID`.
+    #[test]
+    fn readonly_agent_approval_bypasses_ask_mode() {
+        let mut harness = Harness::new(RuntimeMode::Ask);
+        harness.feed(json!({"type":"permission.asked", "data":{
+            "id":"per_read", "sessionID":"ses_1", "action":"bash",
+            "resources":["goddard-agent read task"], "save":["goddard-agent *"]
+        }}));
+        assert!(harness.drain().is_empty());
+        assert!(
+            matches!(harness.issued.try_recv(), Ok(DriverCommand::Respond { option_id, .. }) if option_id == "once")
+        );
+    }
+
     #[test]
     fn permission_requests_dedupe_and_translate_always_into_one_shot() {
         let mut harness = Harness::new(RuntimeMode::Ask);

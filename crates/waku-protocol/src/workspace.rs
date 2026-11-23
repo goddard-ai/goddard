@@ -17,15 +17,32 @@ use crate::model::{Checkpoint, ProviderKind};
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct QaConfig {
+    #[serde(default)]
+    pub primary_checkout: bool,
+    #[serde(default)]
+    pub dependencies_ready: bool,
+    #[serde(default)]
+    pub server_url: String,
     pub dev_command: String,
     pub install_command: String,
     pub branch: String,
+    /// None inherits the main window's last-used provider and model at start.
+    #[serde(default)]
+    pub provider: Option<crate::model::ProviderKind>,
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 /// Immutable identity of the checkout the human is testing.
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct QaCheckout {
+    #[serde(default)]
+    pub session_id: Option<Uuid>,
+    #[serde(default)]
+    pub original_head: Option<String>,
+    #[serde(default)]
+    pub original_branch: Option<String>,
     pub base_branch: String,
     pub base_sha: String,
     pub qa_branch: String,
@@ -642,18 +659,68 @@ impl ProjectFilesListing {
     }
 }
 
+/// A checkpoint belongs to one incarnation of a turn, never its reused number.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, TS)]
+pub struct TurnCheckpointIdentity {
+    pub turn_id: Uuid,
+    #[ts(type = "number")]
+    pub history_generation: u64,
+}
+
+impl TurnCheckpointIdentity {
+    pub fn for_turn(session: &crate::model::AgentSession, turn_count: usize) -> Option<Self> {
+        session
+            .turns
+            .iter()
+            .find(|turn| turn.turn_count == turn_count)
+            .map(|turn| Self {
+                turn_id: turn.id,
+                history_generation: session.history_generation,
+            })
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum WorkspaceOperation {
+    /// Recover a task's assigned checkout; new checkouts require explicit repair.
+    RecoverTaskWorkspace {
+        session_id: Uuid,
+        #[ts(type = "string | null")]
+        path: Option<PathBuf>,
+        restore: bool,
+    },
+
+    StartLanding {
+        id: uuid::Uuid,
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        base: Option<String>,
+        strategy: crate::git::PullStrategy,
+    },
+    LandingJob { id: uuid::Uuid },
+    LandingQueue {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+    },
+    LandingSnapshot { queue_id: uuid::Uuid },
+    CancelQueuedLanding { id: uuid::Uuid },
     QaDefaults {
         #[ts(type = "string")]
         cwd: PathBuf,
         preferred_branch: String,
     },
     QaStart {
+        #[serde(default)]
+        primary_checkout: bool,
         #[ts(type = "string")]
         cwd: PathBuf,
         branch: String,
+    },
+    QaFinish {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        checkout: QaCheckout,
     },
     QaCheck {
         #[ts(type = "string")]
@@ -956,6 +1023,22 @@ pub enum WorkspaceOperation {
         #[ts(type = "string[]")]
         paths: Vec<PathBuf>,
     },
+    /// On-disk size of the session's task scratch pool — the daemon-owned
+    /// `scratch/<root-task-id>` directory `agentScratch` hands out. Its
+    /// safety hinge is ownership rather than the git-ignored allowlist:
+    /// every byte under it is reproducible by contract. Returns
+    /// `TaskScratch` with zero bytes for unknown, archived, or empty
+    /// pools.
+    InspectTaskScratch {
+        session_id: Uuid,
+    },
+    /// Delete the session's task scratch pool and return the freed bytes —
+    /// the scratch counterpart of `ReclaimPaths`, resolving the session to
+    /// its root task server-side so a stale or foreign path can never be
+    /// targeted. Returns `Reclaim`.
+    ReclaimTaskScratch {
+        session_id: Uuid,
+    },
     GenerateCommitMessage {
         #[ts(type = "string")]
         cwd: PathBuf,
@@ -1216,6 +1299,9 @@ pub enum WorkspaceOperation {
         cwd: PathBuf,
         session_id: Uuid,
         turn_count: usize,
+        #[serde(default)]
+        #[ts(type = "number | null")]
+        history_generation: Option<u64>,
     },
     CaptureTurn {
         #[ts(type = "string")]
@@ -1224,8 +1310,17 @@ pub enum WorkspaceOperation {
         turn_count: usize,
         #[serde(default)]
         untouched: bool,
+        #[serde(default)]
+        identity: Option<TurnCheckpointIdentity>,
     },
     CaptureRef {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        git_ref: String,
+    },
+    /// Archive only committed content, preserving HEAD as the snapshot's
+    /// parent. Uncommitted files are intentionally excluded.
+    CaptureCommittedRef {
         #[ts(type = "string")]
         cwd: PathBuf,
         git_ref: String,
@@ -1402,6 +1497,13 @@ pub enum WorkspaceOperation {
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum WorkspaceResult {
+    TaskWorkspace {
+        workspace: Option<crate::model::SessionWorkspace>,
+    },
+
+    LandingJob { job: Option<crate::landing::LandingJob> },
+    LandingQueue { snapshot: crate::landing::LandingQueueSnapshot },
+    LandingCanceled { outcome: crate::landing::CancelLandingOutcome },
     QaDefaults {
         config: QaConfig,
     },
@@ -1493,6 +1595,14 @@ pub enum WorkspaceResult {
     Reclaim {
         reclaimed_bytes: u64,
         failures: Vec<ReclaimFailure>,
+    },
+    /// A task scratch pool's location and on-disk size, as reported by
+    /// `InspectTaskScratch`. `bytes` is zero when the pool is absent or
+    /// its task no longer qualifies.
+    TaskScratch {
+        #[ts(type = "string")]
+        path: PathBuf,
+        bytes: u64,
     },
     CommitMessage {
         message: String,

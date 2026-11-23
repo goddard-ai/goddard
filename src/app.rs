@@ -81,8 +81,8 @@ use crate::theme::{Theme, ThemeMode, hairline, sp};
 use crate::ui::text_field::TextField;
 use crate::ui::{
     MenuChip, ProjectNameSelector, activity_noun, activity_row_icon, column_resize, contain_scroll,
-    file_icon, goddard_logo, icon, icon_button, icon_button_tinted, motion, progress_ring,
-    provider_color, provider_mark, rem_scale, status_color, thinking, toggle_switch,
+    file_icon, goddard_logo, goddard_logo_tinted, icon, icon_button, icon_button_tinted, motion,
+    progress_ring, provider_color, provider_mark, rem_scale, status_color, thinking, toggle_switch,
 };
 use crate::{
     AddToChat, ArchiveSession, CancelProjectSwitch, CancelTaskSwitch, CancelTurn, CheckForUpdates,
@@ -231,11 +231,15 @@ pub(crate) fn prompt_answer_index(answer: usize) -> usize {
     answer.checked_sub(1000).unwrap_or(answer)
 }
 
-fn signal_event_pump(wake: &smol::channel::Sender<()>) {
+fn signal_event_pump(#[cfg_attr(test, allow(unused_variables))] wake: &smol::channel::Sender<()>) {
+    // Waking the pump task from a provider thread is normal in the app but
+    // forbidden under the deterministic test scheduler; tests drive
+    // `drain_event_pump` directly instead.
+    #[cfg(not(test))]
     let _ = wake.try_send(());
 }
 
-/// Source bytes of parsed messages kept across session switches.
+/// Source-byte budget for parsed messages from unvisited background transcripts.
 ///
 /// Measured at ~17x expansion into parsed structures, plus flattened text and
 /// shaped runs on top, so this is bounded by source size rather than entry
@@ -248,13 +252,6 @@ const MAX_CACHED_MESSAGE_SOURCE_BYTES: usize = 512 * 1024;
 /// practice. 8 is generous and caps the tree cache, the only large one, at a
 /// few hundred KB.
 const MAX_CACHED_WORKSPACES: usize = 8;
-/// How many hydrated session transcripts the app keeps resident. Hydration
-/// is a cache — a released session rehydrates through the same async fetch
-/// a cold open already uses — so a session nobody can see gets skeletonized
-/// again rather than holding its messages, blocks, and turns for the life
-/// of the window. Smaller than the daemon's own window: the daemon serves
-/// every connected client, the app needs only its recent view history.
-const RESIDENT_TRANSCRIPT_WINDOW: usize = 12;
 const STREAM_REMEASURE_TAIL_ROWS: usize = 3;
 /// Top-level markdown blocks the live reasoning peek renders, counted from
 /// the tail. The peek is a 400 px viewport pinned to the newest thought, so
@@ -435,6 +432,8 @@ struct ToastAction {
 
 #[derive(Clone, Debug)]
 enum ToastActionKind {
+    CancelQueuedLanding(Uuid),
+    SidebarArchive(Uuid),
     /// The unarchive confirmation's "View now" jump to the restored task.
     Session(Uuid),
     /// The archive confirmation's Undo — restores every task the toast
@@ -445,6 +444,7 @@ enum ToastActionKind {
     LocalhostUrl,
     /// A missing project folder's "Locate Folder…" picker.
     RelocateProject(Uuid),
+    RecoverWorkspace(Uuid),
     /// Open the created issue — the in-app GitHub browser when its project
     /// and number are known, the URL otherwise. `project` keys the browser.
     GitHubIssue {
@@ -555,6 +555,8 @@ enum RemoteImageState {
 /// mentions out of the user bubble.
 #[derive(Clone, Debug)]
 struct ComposerSubmission {
+    /// The provider/options selected when this prompt was admitted.
+    configuration: Option<waku_client::PromptConfiguration>,
     prompt: String,
     display_content: Option<String>,
     /// The user's own words for titles and a restored draft, kept apart from
@@ -572,7 +574,7 @@ struct ComposerSubmission {
     /// Transcript annotations already folded into `prompt`'s header, kept so a
     /// failed submission can restore them alongside the draft text.
     annotations: Vec<TranscriptAnnotation>,
-    /// The follow-up chip this submission delivers out of, if any. The id
+    /// The follow-up chip or offline recovery copy this sends from. The id
     /// doubles as the sent message's id — the convention daemon agent
     /// prompts already follow — so every `adopt_submitted_prompt` consumer,
     /// the daemon's stored copy included, retires the queue entry in the
@@ -588,8 +590,37 @@ struct ComposerSubmission {
 const CONTINUE_PROMPT: &str = "Continue the current task if able.";
 
 impl ComposerSubmission {
+    /// A recovery copy uses the user's composer text, retaining attachments,
+    /// atom payloads and annotations without duplicating annotation headers.
+    fn recovery_draft(&self) -> crate::persistence::ComposerDraft {
+        let source = self.human_content.clone().unwrap_or_else(|| {
+            self.display_content
+                .as_ref()
+                .map(|display| composer::atom_payload_content(display, &self.message_atoms))
+                .unwrap_or_else(|| self.prompt.clone())
+        });
+        let (text, inline_atoms) = composer::composer_draft_content(&source, &self.atoms);
+        crate::persistence::ComposerDraft {
+            text,
+            attachments: self
+                .attachments
+                .iter()
+                .cloned()
+                .map(ComposerAttachment::from)
+                .map(|attachment| crate::persistence::ComposerDraftAttachment::from(&attachment))
+                .collect(),
+            annotations: self
+                .annotations
+                .iter()
+                .map(crate::persistence::ComposerDraftAnnotation::from)
+                .collect(),
+            inline_atoms,
+        }
+    }
+
     fn plain(prompt: String) -> Self {
         Self {
+            configuration: None,
             prompt,
             display_content: None,
             human_content: None,
@@ -620,6 +651,7 @@ impl ComposerSubmission {
             QueuedMessage::with_presentation(self.prompt, self.display_content, self.attachments);
         message.atoms = self.message_atoms;
         message.hidden = self.hidden;
+        message.configuration = self.configuration;
         // A re-parked submission keeps the chip it came from: the stored
         // queue entry stays the same row delivery will later consume.
         if let Some(queued_id) = self.queued_id {
@@ -633,6 +665,7 @@ impl ComposerSubmission {
         // only a client-owned entry follows this submission's send.
         let queued_id = (!message.is_agent_owned()).then_some(message.id);
         Self {
+            configuration: message.configuration,
             prompt: message.content,
             display_content: message.display_content,
             human_content: None,
@@ -880,6 +913,7 @@ enum RightPanelSurface {
         number: u64,
     },
     Files,
+    Git,
     Diff,
     File(String),
     /// A file's blob at a git ref (`git show ref:path`), read-only. Opened
@@ -1087,6 +1121,7 @@ enum SidebarDockMotion {
 /// A turn whose checkpoint still has to be captured.
 struct PendingCheckpointCapture {
     session_id: Uuid,
+    identity: waku_protocol::TurnCheckpointIdentity,
     turn_count: usize,
     project_path: PathBuf,
     untouched: bool,
@@ -1112,10 +1147,8 @@ struct PreparedSubmission {
     /// `None` reuses an already-live runtime. `Some` contains the result of a
     /// provider process start performed on the background executor.
     driver: Option<anyhow::Result<PreparedDriver>>,
-    /// The routing decision an Auto submission produced — `None` on direct
-    /// starts and on route-RPC failures (which fall back to the draft's own
-    /// provider).
-    route_decision: Option<waku_protocol::routing::RouteDecision>,
+    /// The model and traits used by a successful Auto start, including a fallback.
+    started_route: Option<routing::StartedRoute>,
     /// A confident Auto routing adjustment, applied before the next prompt.
     turn_route: Option<routing::TurnRouteDecision>,
 }
@@ -1181,10 +1214,15 @@ enum ProviderBinary {
 struct PreparedDriver {
     handle: DriverHandle,
     events: Receiver<driver::DriverEventBatch>,
+    /// The daemon's accepted baseline for a first-start metadata edit.
+    registered_session: Option<Box<AgentSession>>,
     /// Stored session detail fetched while attaching to a skeleton's runtime:
     /// driver events are transcript writes, so the detail has to land before
     /// they do or what they build is never persistable.
     hydrated_session: Option<AgentSession>,
+    /// The bounded alternative to `hydrated_session` — a latest-turn window
+    /// materialized into the skeleton instead of the full detail.
+    transcript_window: Option<waku_protocol::transcript::TranscriptWindow>,
 }
 
 /// One daemon's catalog contribution to the merged project/session lists,
@@ -1268,14 +1306,19 @@ fn seed_remote_catalog(
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct EscapeStopTarget {
-    session_id: Uuid,
-    turn_id: Option<Uuid>,
+enum EscapeStopTarget {
+    Turn {
+        session_id: Uuid,
+        turn_id: Option<Uuid>,
+    },
+    /// The floating card's second-press hide — keyed to the anchor so a
+    /// different card never inherits the arm.
+    DockedTerminal(Uuid),
 }
 
 impl EscapeStopTarget {
     fn for_session(session: &AgentSession) -> Self {
-        Self {
+        Self::Turn {
             session_id: session.id,
             turn_id: session.active_turn_id(),
         }
@@ -1702,8 +1745,13 @@ struct NavigationRailVisualState {
 struct SessionRuntime {
     driver: DriverHandle,
     /// Invalidates stale ApplyOptions responses when settings change again or
-    /// this runtime is replaced while the RPC is in flight.
-    options_generation: u64,
+    /// this runtime is replaced while the RPC is in flight. A unique token
+    /// cannot collide with a replacement runtime's first options update.
+    options_generation: Uuid,
+    /// The one settings RPC currently owned by this runtime attachment.
+    options_in_flight: Option<Uuid>,
+    /// Desired settings waiting for an earlier update or active turn.
+    options_deferred: bool,
     events: Receiver<driver::DriverEventBatch>,
     pending_events: VecDeque<DriverEvent>,
     /// Presentation metadata for steering messages awaiting the provider's
@@ -1712,6 +1760,8 @@ struct SessionRuntime {
     /// Unsent steers waiting for a safe phase of their original turn.
     deferred_steers: VecDeque<runtime::DeferredSteer>,
     stream_phase: Option<StreamPhase>,
+    /// Last server-confirmed detail mode. None denotes legacy/friend streams.
+    detail_visible: Option<bool>,
     /// Newline-only reasoning deltas buffered while a reasoning block streams.
     /// Some providers (e.g. GLM via OpenRouter) emit every text chunk followed
     /// by a newline-only chunk; joined verbatim that renders one token per
@@ -2121,7 +2171,7 @@ fn persisted_panel_surface(surface: &RightPanelSurface) -> Option<PersistedRight
         RightPanelSurface::SideChat(session_id) => {
             Some(PersistedRightPanelSurface::SideChat(*session_id))
         }
-        RightPanelSurface::Goals => None,
+        RightPanelSurface::Goals | RightPanelSurface::Git => None,
         RightPanelSurface::Terminal(terminal_id) => {
             Some(PersistedRightPanelSurface::Terminal(*terminal_id))
         }
@@ -2427,6 +2477,26 @@ struct TranscriptScrollPosition {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct PendingSessionActivation {
     session_id: Uuid,
+    /// Before selection changes, race hydration against this request's deadline.
+    deferred: Option<(SessionActivationTransition, Instant)>,
+    show_loading: bool,
+}
+
+impl PendingSessionActivation {
+    fn deferred_transition(
+        self,
+        session_id: Uuid,
+        detail_loaded: bool,
+        expired_request: Option<Instant>,
+    ) -> Option<SessionActivationTransition> {
+        let (transition, requested_at) = self.deferred?;
+        (self.session_id == session_id
+            && match expired_request {
+                Some(expired) => expired == requested_at,
+                None => detail_loaded,
+            })
+        .then_some(transition)
+    }
 }
 
 #[derive(Clone)]
@@ -2578,6 +2648,16 @@ pub struct Waku {
     /// Session details currently being fetched from the daemon. Sidebar rows
     /// stay usable while the selected transcript hydrates asynchronously.
     session_hydrations: sessions::SessionHydrations,
+    transcript_preloads: transcript_preload::TranscriptPreloads,
+    /// The session+load pass whose delayed muted-logo reveal timer was
+    /// already armed — a hydration retry re-arms under its fresh stamp.
+    task_loading_reveal: Option<(Uuid, Instant)>,
+    /// Bounded transcript windows materialized into resident sessions. A
+    /// session present here holds a slice of its flattened stream, not the
+    /// complete transcript — `has_more_before`/`has_more_after` mark the
+    /// gaps, and such rows persist as skeletons so the slice never
+    /// overwrites the retained detail.
+    transcript_views: HashMap<Uuid, transcript_window::TranscriptViewState>,
     /// Unvisited runtimes in this drain round. Retained across yields so a
     /// busy selected task cannot starve background completions and approvals.
     driver_event_round: VecDeque<Uuid>,
@@ -2641,6 +2721,11 @@ pub struct Waku {
     home_directory: Option<PathBuf>,
     composer: Entity<ComposerInput>,
     user_input_answer: Entity<TextInput>,
+    /// Free-text answer fields for employee question cards surfaced in a
+    /// supervisor's transcript — the shared `user_input_answer` belongs to
+    /// the selected session's card, so each employee request mounts its own.
+    /// Entries are pruned once the session's pending questions settle.
+    employee_input_answers: HashMap<Uuid, Entity<TextInput>>,
     /// Drafts are independent of transcript persistence: started tasks key by
     /// session id, while blank New Task pages key by project id.
     composer_drafts: ComposerDrafts,
@@ -3058,10 +3143,8 @@ pub struct Waku {
     archive_dialog: Option<archive_dialog::ArchiveDialogState>,
     archive_preview_pending: HashSet<Uuid>,
     archive_preview_toasts: HashSet<u64>,
+    sidebar_intents: sidebar_intents::SidebarIntents,
     pending_task_metadata: task_metadata::PendingTaskMetadata,
-    task_metadata_workers: HashMap<waku_client::DaemonKey, Sender<task_metadata::MetadataRequest>>,
-    task_metadata_tx: Sender<task_metadata::MetadataResult>,
-    task_metadata_events: Receiver<task_metadata::MetadataResult>,
     /// Session ids of the most recent archive — the set the palette's
     /// "Undo last archive" restores. In-memory only: a restart drops it.
     /// Members join while their archive toast is still up, matching the
@@ -3100,14 +3183,15 @@ pub struct Waku {
     /// Window-modal note composer for Settings → Friends file sends, opened
     /// once the file picker returns a path.
     send_file_dialog: Option<send_file_dialog::SendFileDialogState>,
-    /// Goal operations accepted before the session's runtime exists. Goals
+    /// Thread controls accepted before the session's runtime exists. Goals
     /// attach to the provider thread, not to any turn, so `/goal` on a fresh
-    /// task starts the provider and these drain once it installs.
-    pending_goal_operations: HashMap<Uuid, Vec<crate::model::GoalOperation>>,
-    /// Sessions whose runtime is being started by a goal operation rather
+    /// task starts the provider and these drain once it installs. Compact
+    /// resumes an existing thread through the same path.
+    pending_runtime_operations: HashMap<Uuid, Vec<runtime::PendingRuntimeOperation>>,
+    /// Sessions whose runtime is being started by a thread control rather
     /// than a submission. Submissions queue behind this instead of racing a
     /// second provider process into existence.
-    goal_runtime_starts: HashSet<Uuid>,
+    control_runtime_starts: HashSet<Uuid>,
     /// When each session's goal accounting was last reported. The chip adds
     /// the wall clock since then while an active goal's turn runs, so elapsed
     /// pursuit time ticks live the way the Codex CLI shows it.
@@ -3250,6 +3334,8 @@ pub struct Waku {
     friend_session_closed_events: Receiver<(Uuid, bool)>,
     /// The Settings → Friends "add friend" code field.
     friend_code_input: Entity<TextInput>,
+    friend_add_open: bool,
+    friend_profile_open: bool,
     /// The Settings → Friends display-name field — the name friends see on
     /// our requests and offers.
     friend_name_input: Entity<TextInput>,
@@ -3340,7 +3426,11 @@ pub struct Waku {
         Result<waku_protocol::eval::Evaluation, String>,
     )>,
     runtimes: HashMap<Uuid, SessionRuntime>,
+    /// Cached detail missed output while only lifecycle events were observed.
+    stale_task_details: HashSet<Uuid>,
     runtime_attach_pending: HashSet<Uuid>,
+    runtime_submission_checks: HashMap<Uuid, runtime::RuntimeSubmissionCheck>,
+    employee_prompt_previews: HashMap<Uuid, Vec<Message>>,
     runtime_attach_misses: HashMap<Uuid, u8>,
     /// Automatic turn resumptions after a daemon restart, per session.
     /// Cleared when a turn completes successfully; capped so a daemon that
@@ -3389,6 +3479,9 @@ pub struct Waku {
     /// detached work, or a queued turn-checkpoint capture — and drain once it
     /// goes quiet. Unarchived or removed sessions drop out on the next pass.
     pending_workspace_cleanups: HashSet<Uuid>,
+    /// Explicit clean-and-archive choices; lost intent defaults to preserving work.
+    clean_archive_workspaces: HashSet<Uuid>,
+    archive_cleanup_wake_scheduled: bool,
     stream_state_dirty: bool,
     last_stream_save: Instant,
     /// User expansion overrides keyed by persisted transcript block index.
@@ -3458,6 +3551,8 @@ pub struct Waku {
     /// Groups the user has folded in either sidebar view. This is
     /// intentionally runtime-only, like transcript disclosure state.
     sidebar_collapsed_groups: HashSet<SidebarGroup>,
+    /// Automatic employee folds never become persisted manual choices.
+    sidebar_employee_folds: RefCell<sidebar::SidebarEmployeeFolds>,
     /// The Terminals group was opened by a deliberate gesture — its sidebar
     /// row or the Terminals chord — rather than unfolding to reveal a
     /// terminal selection. While held, picking a chat or a page leaves the
@@ -3474,6 +3569,10 @@ pub struct Waku {
     sidebar_alt_held: bool,
     sidebar_alt_modifier_down: bool,
     sidebar_alt_generation: u64,
+    /// Group-local Option: the sidebar group header whose eye control is
+    /// engaged — its member rows render exactly as if Option/Alt were held.
+    /// Click toggles it until group exit; keyboard activation pins it.
+    sidebar_group_alt: Cell<Option<sidebar::SidebarGroupAlt>>,
     /// Dormant sessions whose clean worktrees the background sweep has
     /// already snapshotted and removed — re-checked only when a session
     /// leaves dormancy. In-flight entries also dedupe a pass's spawns.
@@ -3503,10 +3602,15 @@ pub struct Waku {
     /// the "Show dormant" fold — runtime-only like the live reveal counts.
     sidebar_project_dormant_reveals: HashMap<SidebarGroup, usize>,
     /// Stable keyboard focus for each virtualized sidebar group header and
-    /// its hover-revealed New Task and open-library controls.
-    sidebar_group_header_focuses: RefCell<HashMap<SidebarGroup, FocusHandle>>,
-    sidebar_group_compose_focuses: RefCell<HashMap<SidebarGroup, FocusHandle>>,
-    sidebar_group_open_focuses: RefCell<HashMap<SidebarGroup, FocusHandle>>,
+    /// its hover-revealed New Task and open-library controls. The key pairs
+    /// the group with the header's occurrence among same-group headers,
+    /// since employee sections repeat once per boss.
+    sidebar_group_header_focuses: RefCell<HashMap<(SidebarGroup, usize), FocusHandle>>,
+    sidebar_group_compose_focuses: RefCell<HashMap<(SidebarGroup, usize), FocusHandle>>,
+    sidebar_group_open_focuses: RefCell<HashMap<(SidebarGroup, usize), FocusHandle>>,
+    /// Stable keyboard focus for each group header's group-local Option
+    /// control.
+    sidebar_group_alt_focuses: RefCell<HashMap<(SidebarGroup, usize), FocusHandle>>,
     /// Stable keyboard focus for each session row's hover-revealed archive
     /// control.
     sidebar_session_archive_focuses: RefCell<HashMap<Uuid, FocusHandle>>,
@@ -3552,6 +3656,16 @@ pub struct Waku {
     git_panel: Option<git_panel::GitPanelState>,
     /// The commit/push/sync the panel's action button is running, if any.
     git_panel_operation: Option<git_panel::GitPanelOperation>,
+    landing_operations: HashMap<Uuid, landing::NativeLanding>,
+    landing_panel_queue: Option<(PathBuf, waku_client::landing::LandingQueueSnapshot)>,
+    landing_cancellations: std::collections::HashSet<Uuid>,
+    landing_cancel_focus: HashMap<Uuid, FocusHandle>,
+    landing_task_titles: HashMap<Uuid, String>,
+    landing_panel_rows: Vec<waku_client::landing::LandingJob>,
+    landing_panel_total: usize,
+    landing_queue_expanded: bool,
+    landing_queue_focus: FocusHandle,
+    landing_queue_watch: Option<Uuid>,
     /// Guards snapshot/commit fetches against superseded panel state.
     git_panel_generation: u64,
     /// Per-file hover previews, keyed by path and section. A partially staged
@@ -4246,6 +4360,7 @@ pub struct Waku {
     /// rail a pointer instead of re-extracting every turn's snippets. Rebuilt
     /// by `navigation_turns` when the row-kinds fingerprint moves.
     transcript_navigation_turns: RefCell<Rc<Vec<TranscriptNavigationTurn>>>,
+    transcript_navigation_positions: RefCell<transcript::TranscriptNavigationPositions>,
     /// The row-kinds fingerprint `transcript_navigation_turns` was built from.
     transcript_navigation_turns_fingerprint: Cell<Option<u64>>,
     /// Response-footer copy content and completion time per message index,
@@ -4279,8 +4394,8 @@ pub struct Waku {
     pending_checkpoint_captures: Vec<PendingCheckpointCapture>,
     /// The (session, turn) captures currently running, so a repeated request —
     /// a turn that finishes while its own capture is still going — does not
-    /// fork a second `git add -A` over the same worktree.
-    checkpoint_captures_in_flight: HashSet<(Uuid, usize)>,
+    /// fork a second `git add -A`. A reused count after rewind is a new identity.
+    checkpoint_captures_in_flight: HashSet<(Uuid, waku_protocol::TurnCheckpointIdentity)>,
     /// Clock for the idle-session sweep, so the check costs one comparison per
     /// frame instead of a scan.
     last_idle_session_sweep: Instant,
@@ -4303,6 +4418,9 @@ pub struct Waku {
     /// back/forward history can restore where the transcript was instead of
     /// picking a fresh landing.
     transcript_scroll_positions: HashMap<Uuid, TranscriptScrollPosition>,
+    /// Retained task visits, newest first, bounded by the local preference.
+    /// Separate from scroll positions because a task parked at the tail has none.
+    viewed_transcripts: VecDeque<Uuid>,
     /// The landing the current session's activation chose. A runtime attach
     /// that lands after activation resets the rows again, so the same landing
     /// is re-applied there rather than snapping the transcript to its tail.
@@ -4520,6 +4638,7 @@ mod command_palette;
 mod commit_dialog;
 mod components;
 mod composer;
+mod counsel;
 mod daemon_degraded;
 mod deep_link;
 mod diagnostics_page;
@@ -4540,6 +4659,7 @@ mod incognito_dialog;
 mod issue_dialog;
 mod keybindings_page;
 mod keyboard_options;
+mod landing;
 mod memory_annotations;
 mod memory_card;
 mod model_picker;
@@ -4572,6 +4692,7 @@ mod sessions;
 mod settings;
 mod shortcuts_dialog;
 mod sidebar;
+mod sidebar_intents;
 mod skills_page;
 mod speech;
 mod speed_reader;
@@ -4584,8 +4705,10 @@ mod terminal_close_dialog;
 mod terminals;
 mod title_quality;
 mod transcript;
+mod transcript_preload;
 mod transcript_search;
 mod transcript_view;
+mod transcript_window;
 mod usage_meter;
 mod usage_page;
 mod voice_briefing;
@@ -4662,13 +4785,10 @@ pub use reset_credit_dialog::{ConfirmResetCreditDialog, DismissResetCreditDialog
 pub use send_file_dialog::{ConfirmSendFileDialog, DismissSendFileDialog};
 pub use settings::{FocusNext, FocusPrevious};
 pub use shortcuts_dialog::DismissShortcutsDialog;
-pub use sidebar::CancelSessionRename;
+pub use sidebar::{CancelSessionRename, ReleaseSidebarGroupAlt};
 use streaming::*;
 pub use terminal_close_dialog::{ConfirmTerminalClose, DismissTerminalClose};
-use terminals::{
-    RIGHT_PANEL_TERMINAL_MAX_PANES, STANDALONE_TERMINAL_MAX_PANES, TerminalGroupLayout,
-    TerminalRecord,
-};
+use terminals::{RIGHT_PANEL_TERMINAL_MAX_PANES, TerminalGroupLayout, TerminalRecord};
 use transcript::*;
 use transcript_view::ConversationNavigationRail;
 
@@ -4864,6 +4984,10 @@ impl Waku {
     /// the toast already showing instead of replacing it, so one Undo
     /// restores the whole group.
     pub(super) fn show_archived_toast(&mut self, session_id: Uuid) {
+        if let Some(batch) = self.sidebar_archive_batch(session_id) {
+            self.show_sidebar_archive_toast(batch);
+            return;
+        }
         let joined = match self.toast.as_mut().and_then(|toast| toast.action.as_mut()) {
             Some(ToastAction {
                 kind: ToastActionKind::Unarchive(session_ids),
@@ -4926,6 +5050,9 @@ impl Waku {
     /// most recently archived member. One-shot: the set clears whether the
     /// restore found anything or not.
     pub(super) fn undo_last_archive(&mut self, cx: &mut Context<Self>) {
+        if self.undo_sidebar_archive(cx) {
+            return;
+        }
         let restorable = still_archived_sessions(&self.state.sessions, &self.undoable_archive);
         self.undoable_archive.clear();
         match restorable.as_slice() {
@@ -5421,6 +5548,10 @@ impl Waku {
             .any(|run| run.toast_id == toast.id)
             || self.archive_preview_toasts.contains(&toast.id)
             || self
+                .landing_operations
+                .values()
+                .any(|entry| entry.operation.toast_id == Some(toast.id))
+            || self
                 .git_panel_operation
                 .as_ref()
                 .is_some_and(|operation| operation.toast_id == Some(toast.id))
@@ -5533,6 +5664,35 @@ impl Waku {
                 seed_remote_catalog(&mut state, &daemons, host, catalog);
             }
         }
+        let (event_wake_tx, event_wake_events) = smol::channel::bounded(1);
+        let sidebar_intents = sidebar_intents::SidebarIntents::open(
+            store
+                .remote_catalogs_path()
+                .with_extension("sidebar-intents.json"),
+            daemons.clone(),
+            event_wake_tx.clone(),
+        );
+        state
+            .sessions
+            .retain(|session| !sidebar_intents.task_removed(session.id));
+        for session in &mut state.sessions {
+            sidebar_intents.observe_task(session);
+        }
+        if state.selected_session.is_some_and(|id| {
+            sidebar_intents.is_archiving(&id)
+                || state
+                    .sessions
+                    .iter()
+                    .any(|s| s.id == id && s.archived_at.is_some())
+        }) {
+            state.selected_session = None;
+        }
+
+        let intent_workspace_cleanups = sidebar_intents
+            .cleanup_ids()
+            .into_iter()
+            .filter(|id| !daemons.session_owner(*id).is_remote())
+            .collect();
         let remote_catalogs_path = store.remote_catalogs_path();
         let home_directory = crate::projectless::home_directory();
         // Custom commands moved from this app's settings file into the
@@ -5555,6 +5715,11 @@ impl Waku {
             );
         }
         state.apply_daemon_settings(daemon_settings);
+        if state.sync_auto_favorite() {
+            if let Err(error) = store.save_app_settings(&state) {
+                eprintln!("could not save Auto favorite state: {error}");
+            }
+        }
         // The briefing key predates the inference section: hand it to the
         // daemon's secret store as the Vercel credential through the same
         // write-only slot the settings pane uses, then drop the file copy.
@@ -6025,9 +6190,18 @@ impl Waku {
         // Resolve colliding project names across the merged catalog — the
         // persisted list plus every seeded remote one.
         Project::resolve_display_names(&mut state.projects);
-        let projectless_save_error = projectless_migrated
-            .then(|| store.save(&mut state).err())
-            .flatten();
+        let projectless_save_error = if projectless_migrated {
+            let pending_metadata = sidebar_intents.strip_pending_task_metadata(&mut state);
+            let error = store.save(&mut state).err();
+            for (id, edit) in pending_metadata {
+                if let Some(session) = state.session_mut(id) {
+                    edit.apply(session);
+                }
+            }
+            error
+        } else {
+            None
+        };
         let startup_toast = projectless_migration_error
             .map(|error| tr!("errors.move_projectless_task", error = error))
             .or_else(|| {
@@ -6092,6 +6266,7 @@ impl Waku {
             window,
             cx,
         );
+        #[cfg(not(test))]
         crate::platform::set_sidebar_material_width(window, sidebar_width);
         crate::platform::set_trackpad_navigation_swipe_enabled(
             window,
@@ -6142,6 +6317,8 @@ impl Waku {
             // `git` invocations each — paid here, before the window has drawn
             // once. Queue them and let the first frames go out first.
             if let Some(turn_count) = interrupted_turn
+                && let Some(identity) =
+                    waku_protocol::TurnCheckpointIdentity::for_turn(session, turn_count)
                 && let Some(project_path) = session
                     .workspace
                     .path()
@@ -6150,6 +6327,7 @@ impl Waku {
             {
                 interrupted_turn_checkpoints.push(PendingCheckpointCapture {
                     session_id: session.id,
+                    identity,
                     turn_count,
                     project_path,
                     untouched: false,
@@ -6229,9 +6407,8 @@ impl Waku {
         let (plan_usage_tx, plan_usage_events) = unbounded();
         let (reset_credit_tx, reset_credit_events) = unbounded();
         let (agy_poll_tx, agy_poll_events) = unbounded();
-        let (event_wake_tx, event_wake_events) = smol::channel::bounded(1);
         let (task_state_sync_tx, task_state_sync_events) = unbounded();
-        let (task_metadata_tx, task_metadata_events) = unbounded();
+
         let (daemon_settings_tx, daemon_settings_events) = unbounded();
         let (daemon_recovery_tx, daemon_recovery_events) = unbounded();
         let (daemon_status_tx, daemon_status_events) = unbounded();
@@ -6394,7 +6571,7 @@ impl Waku {
             .detach();
             let project_switcher = project_switcher::ProjectSwitcherUi::new(project_switcher_focus);
             let keyboard_options = keyboard_options::KeyboardOptionsUi::new(cx.focus_handle());
-            let big_picture = big_picture::BigPictureUi::new(cx.focus_handle());
+            let big_picture = big_picture::BigPictureUi::new(cx.focus_handle(), cx);
 
             cx.on_focus(&updater_button_focus, window, |this: &mut Self, _, cx| {
                 this.set_updater_button_focused(true, cx);
@@ -6570,12 +6747,10 @@ impl Waku {
                             && !this.has_annotations()
                             && this.selected_session().is_some_and(|session| {
                                 this.session_awaits_continue(session)
+                                    || this.counsel_can_continue(session)
                                     || this.quarantine_handoff_transfer(session).is_some()
                             })
                         {
-                            // Empty-composer Enter uses the play button's
-                            // Continue flow for stopped or Partial turns
-                            // and unstarted quarantined transfers.
                             this.continue_interrupted_session(cx);
                         } else if let Some(submission) =
                             this.submission_with_attachments(prompt, cx)
@@ -6601,7 +6776,16 @@ impl Waku {
                             if this.live_deliverable_page().is_some() {
                                 return;
                             }
-                            if !this.big_picture.is_open() && this.accept_displayed_suggestion(cx) {
+                            if this.state.composer_enter_steers
+                                && !this.big_picture.is_open()
+                                && this.composer_session().is_some_and(|session| {
+                                    this.counsel_can_continue(session)
+                                })
+                            {
+                                this.continue_interrupted_session(cx);
+                            } else if !this.big_picture.is_open()
+                                && this.accept_displayed_suggestion(cx)
+                            {
                                 // A suggestion chip owns ⌘⏎ while the
                                 // composer is empty — its hint advertises
                                 // the chord.
@@ -6663,18 +6847,23 @@ impl Waku {
 
             cx.subscribe(
                 &user_input_answer,
-                |this: &mut Self, input, event: &InputEvent, cx| match event {
-                    InputEvent::Submit(answer) => {
-                        this.submit_user_input_custom_answer(answer.clone(), cx);
+                |this: &mut Self, input, event: &InputEvent, cx| {
+                    let Some(session_id) = this.state.selected_session else {
+                        return;
+                    };
+                    match event {
+                        InputEvent::Submit(answer) => {
+                            this.submit_user_input_custom_answer(session_id, answer.clone(), cx);
+                        }
+                        InputEvent::Edited => {
+                            let answer = input.read(cx).content().to_owned();
+                            this.update_user_input_custom_answer(session_id, answer, cx);
+                        }
+                        InputEvent::Focus
+                        | InputEvent::BackspaceOnEmpty
+                        | InputEvent::InlineAtomClicked(_)
+                        | InputEvent::InlineAtomActivated(_) => {}
                     }
-                    InputEvent::Edited => {
-                        let answer = input.read(cx).content().to_owned();
-                        this.update_user_input_custom_answer(answer, cx);
-                    }
-                    InputEvent::Focus
-                    | InputEvent::BackspaceOnEmpty
-                    | InputEvent::InlineAtomClicked(_)
-                    | InputEvent::InlineAtomActivated(_) => {}
                 },
             )
             .detach();
@@ -7146,6 +7335,11 @@ impl Waku {
             )
             .detach();
 
+            // Record navigation interests without waking the pump: waking
+            // from every notification can feed its own update cycle. Driver
+            // controls only queue changes; their workers own the RPC.
+            cx.observe_self(|this, _| this.sync_task_views()).detach();
+
             // Like T3 Code's adapter subscriptions feeding its ingestion
             // worker, provider threads push an edge into this bounded wake
             // channel. The UI does no standing scan: the short follow-up tick
@@ -7361,6 +7555,9 @@ impl Waku {
                 daemon_hostname,
                 daemon_lan_ip,
                 session_hydrations: sessions::SessionHydrations::default(),
+                transcript_preloads: transcript_preload::TranscriptPreloads::default(),
+                task_loading_reveal: None,
+                transcript_views: HashMap::new(),
                 driver_event_round: VecDeque::new(),
                 pending_session_cancels: HashSet::new(),
                 summon_card_cache: RefCell::new(None),
@@ -7379,6 +7576,7 @@ impl Waku {
                 home_directory,
                 composer,
                 user_input_answer,
+                employee_input_answers: HashMap::new(),
                 composer_drafts,
                 composer_draft_store,
                 composer_draft_save_generation: 0,
@@ -7406,6 +7604,8 @@ impl Waku {
                 project_switch_reset_pending: HashSet::new(),
                 settings_search,
                 friend_code_input,
+                friend_add_open: false,
+                friend_profile_open: false,
                 friend_name_input,
                 friend_nickname_input,
                 editing_friend_nickname: None,
@@ -7591,10 +7791,8 @@ impl Waku {
                 provider_switch_in_flight: HashSet::new(),
                 archive_preview_pending: HashSet::new(),
                 archive_preview_toasts: HashSet::new(),
+                sidebar_intents,
                 pending_task_metadata: task_metadata::PendingTaskMetadata::default(),
-                task_metadata_workers: HashMap::new(),
-                task_metadata_tx,
-                task_metadata_events,
                 undoable_archive: Vec::new(),
                 full_access_dialog: None,
                 incognito_dialog: None,
@@ -7602,8 +7800,8 @@ impl Waku {
                 goal_dialog: None,
                 goal_dialog_request: None,
                 send_file_dialog: None,
-                pending_goal_operations: HashMap::new(),
-                goal_runtime_starts: HashSet::new(),
+                pending_runtime_operations: HashMap::new(),
+                control_runtime_starts: HashSet::new(),
                 goal_observed_at: HashMap::new(),
                 commit_operation: None,
                 // Providers × workspaces; both scans are small, the cache
@@ -7680,7 +7878,10 @@ impl Waku {
                 inbox_suggestion_tx,
                 inbox_suggestion_events,
                 runtimes: HashMap::new(),
+                stale_task_details: HashSet::new(),
                 runtime_attach_pending: HashSet::new(),
+                runtime_submission_checks: HashMap::new(),
+                employee_prompt_previews: HashMap::new(),
                 runtime_attach_misses: HashMap::new(),
                 runtime_auto_resumes: HashMap::new(),
                 daemon_recovery_episode: None,
@@ -7692,7 +7893,9 @@ impl Waku {
                 response_fork_preparations: HashMap::new(),
                 pending_queue_drains: Vec::new(),
                 cancel_drains: HashMap::new(),
-                pending_workspace_cleanups: HashSet::new(),
+                pending_workspace_cleanups: intent_workspace_cleanups,
+                clean_archive_workspaces: HashSet::new(),
+                archive_cleanup_wake_scheduled: false,
                 stream_state_dirty: false,
                 last_stream_save: Instant::now(),
                 activities_expanded: HashMap::new(),
@@ -7725,11 +7928,13 @@ impl Waku {
                     SidebarGroup::Dormant,
                     SidebarGroup::Errands,
                 ]),
+                sidebar_employee_folds: RefCell::default(),
                 terminals_group_held_open: false,
                 focused_project: None,
                 sidebar_alt_held: false,
                 sidebar_alt_modifier_down: false,
                 sidebar_alt_generation: 0,
+                sidebar_group_alt: Cell::new(None),
                 dormant_worktrees_swept: RefCell::new(HashSet::new()),
                 dormant_sweep_scanned_at: Cell::new(None),
                 dormant_sweep_in_flight: Cell::new(false),
@@ -7742,6 +7947,7 @@ impl Waku {
                 sidebar_group_header_focuses: RefCell::new(HashMap::new()),
                 sidebar_group_compose_focuses: RefCell::new(HashMap::new()),
                 sidebar_group_open_focuses: RefCell::new(HashMap::new()),
+                sidebar_group_alt_focuses: RefCell::new(HashMap::new()),
                 sidebar_session_archive_focuses: RefCell::new(HashMap::new()),
                 sidebar_session_pin_focuses: RefCell::new(HashMap::new()),
                 sidebar_employee_archive_focuses: RefCell::new(HashMap::new()),
@@ -7763,6 +7969,16 @@ impl Waku {
                 git_panel_top_height,
                 git_panel: None,
                 git_panel_operation: None,
+                landing_operations: HashMap::new(),
+                landing_panel_queue: None,
+                landing_cancellations: std::collections::HashSet::new(),
+                landing_cancel_focus: HashMap::new(),
+                landing_task_titles: HashMap::new(),
+                landing_panel_rows: Vec::new(),
+                landing_panel_total: 0,
+                landing_queue_expanded: true,
+                landing_queue_focus: cx.focus_handle(),
+                landing_queue_watch: None,
                 git_panel_generation: 0,
                 git_panel_file_diffs: HashMap::new(),
                 git_panel_hover: None,
@@ -8091,6 +8307,7 @@ impl Waku {
                 queued_card_session: Cell::new(None),
                 queued_card_fade: Cell::new(None),
                 transcript_navigation_turns: RefCell::new(Rc::new(Vec::new())),
+                transcript_navigation_positions: RefCell::new(Default::default()),
                 transcript_navigation_turns_fingerprint: Cell::new(None),
                 assistant_footer_cache: RefCell::new(HashMap::new()),
                 assistant_footer_fingerprint: Cell::new(None),
@@ -8108,6 +8325,7 @@ impl Waku {
                 transcript_is_scrolled,
                 transcript_last_wheel_scroll,
                 transcript_scroll_positions: HashMap::new(),
+                viewed_transcripts: VecDeque::new(),
                 transcript_landing: None,
                 pending_sidebar_scroll: Cell::new(None),
                 transcript_status_markers_floating: Cell::new(None),
@@ -8240,5 +8458,7 @@ impl Waku {
     }
 }
 
+#[cfg(test)]
+mod sidebar_interaction_tests;
 #[cfg(test)]
 mod tests;

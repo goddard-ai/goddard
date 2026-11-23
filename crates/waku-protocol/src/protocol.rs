@@ -16,7 +16,7 @@ use crate::model::{
     AgentSession, AgentSessionSearchHit, AgentSessionTranscript, GoalOperation, HistorySourceKind,
     MessageAttachment, Project, ProjectMapIntent, ProviderKind, ProviderProbe,
     ProviderResumeCursor, ProviderSessionCatalogStatus, ProviderSessionHistory,
-    ProviderSessionSummary, SessionStatus, UserInputAnswer, UserInputQuestion,
+    ProviderSessionSummary, RuntimeMode, SessionStatus, UserInputAnswer, UserInputQuestion,
 };
 use crate::persistence::{
     ComposerDraftChange, ComposerDrafts, SessionMessageMatch, SessionMessageSearchScope,
@@ -121,6 +121,17 @@ pub enum ClientMessage {
         /// Self-reported device name shown on the approval prompt.
         device_name: String,
     },
+    /// Service-owner-only conditional shutdown. A lease is connection-bound.
+    PrepareIdleShutdown {
+        request_id: Uuid,
+    },
+    CommitIdleShutdown {
+        request_id: Uuid,
+        fence: Uuid,
+    },
+    ReleaseIdleShutdown {
+        fence: Uuid,
+    },
     Shutdown,
 }
 
@@ -199,11 +210,45 @@ pub enum Command {
     /// second app. It observes the session actor without starting, replacing,
     /// or otherwise mutating the provider process.
     AttachSession,
+    /// Select transcript detail for this connection. A nil session enables
+    /// summary-only delivery by default; real sessions receive an ordered
+    /// snapshot before their new delivery mode takes effect.
+    SetTaskView {
+        detail: bool,
+        generation: u64,
+        /// `Compact` strips bulk fields from detail events — the viewer
+        /// range-reads expanded payloads instead. Absent (`All`) preserves
+        /// full delivery for older clients.
+        #[serde(default)]
+        payloads: crate::transcript::TaskViewPayloadInterest,
+    },
     Start {
         options: WireDriverStartOptions,
     },
+    /// A prompt bound to the settings selected when the user submitted it.
+    /// Kept separate from legacy Prompt so older daemons reject the request
+    /// instead of ignoring settings they cannot enforce.
+    PromptWithConfiguration {
+        configuration: PromptConfiguration,
+        prompt: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        turn_id: Option<Uuid>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message_id: Option<Uuid>,
+        #[serde(default, skip_serializing_if = "crate::model::is_false")]
+        hidden: bool,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        attachments: Vec<MessageAttachment>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        presentation: Option<PromptPresentation>,
+    },
     Prompt {
         prompt: String,
+        /// Permission mode required by this turn, including hidden Resume
+        /// prompts. A stale runtime must be rejected before accepting input.
+        /// Older clients omit this field.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        runtime_mode: Option<RuntimeMode>,
         /// The ids the submitting client already gave this turn and its user
         /// message. The daemon republishes them with the submission so every
         /// other client attached to the runtime mirrors the same rows instead
@@ -387,9 +432,15 @@ pub enum Command {
         dirs: Vec<PathBuf>,
     },
     LoadTaskState,
+    ApplySidebarIntent {
+        intent: crate::sidebar_intent::SidebarIntent,
+    },
     /// Apply only the named metadata fields, then acknowledge their durable revision.
     UpdateTaskMetadata {
         updates: Vec<crate::task_metadata::TaskMetadataUpdate>,
+    },
+    SwitchSessionProvider {
+        request: ProviderSwitchRequest,
     },
     SaveTaskState {
         projects: Vec<Project>,
@@ -411,8 +462,30 @@ pub enum Command {
     RemoveProject {
         project_id: Uuid,
     },
+    /// Read current native history for an idle Codex task. The client guards,
+    /// appends, and saves the suffix through the ordinary task-save path.
+    RefreshSessionHistory,
     HydrateSession {
         session_id: Uuid,
+    },
+    /// Read one bounded slice of the flattened transcript — the task-open,
+    /// history-page, and search-reveal shape. `request.session_id` must match
+    /// the request envelope's session.
+    ReadTranscriptWindow {
+        request: crate::transcript::TranscriptWindowRequest,
+    },
+    /// Range-read one lazy transcript field — a message body or activity
+    /// payload. `request.session_id` must match the request envelope's
+    /// session.
+    ReadTranscriptPayload {
+        request: crate::transcript::TranscriptPayloadRequest,
+    },
+    /// Occurrence-level find over the whole retained transcript — message
+    /// bodies and lazy tool fields alike — without paging history to the
+    /// client first. `request.session_id` must match the request envelope's
+    /// session.
+    FindTranscript {
+        request: crate::transcript::TranscriptFindRequest,
     },
     /// Insert the request session's rendered transcript index into the
     /// daemon-owned memory store — the canonical record provider switches,
@@ -717,6 +790,12 @@ pub enum Command {
     AgentRenameSelf {
         title: String,
     },
+    /// Ensure or list scratch directories for the calling task —
+    /// daemon-owned folders that survive restarts and are deleted when the
+    /// owning task is archived or removed.
+    AgentScratch {
+        operation: crate::scratch::ScratchOperation,
+    },
     /// Scoped agent credential only: propose archiving daemon tasks. The
     /// daemon parks a permission card on the calling session and archives
     /// only what the user approves — never on the request alone.
@@ -946,9 +1025,30 @@ pub enum Command {
     AgentResources {
         operation: crate::resources::ResourceOperation,
     },
-    /// Share one of my projects with a friend. The daemon resolves the
-    /// project's name and `origin` URL from `project_path` and re-sends
-    /// the friend our full shared set.
+    /// Read the source checkout's origin and current branch without modifying it.
+    GetProjectSyncInfo {
+        project_path: PathBuf,
+    },
+    /// Push only committed changes, after rechecking origin and branch.
+    PushProjectSync {
+        project_path: PathBuf,
+        origin_url: String,
+        branch: String,
+    },
+    /// Resolve exactly one registered project by origin. Refuse dirty trees,
+    /// branch mismatches and divergence; check_only performs the preflight.
+    PullProjectSync {
+        origin_url: String,
+        branch: String,
+        check_only: bool,
+    },
+    /// Share the project and establish our side of a Friends sync pairing.
+    /// The recipient opts into the shared project through Friends.
+    SyncProjectWithFriend {
+        node_id: String,
+        project_path: PathBuf,
+    },
+    /// Share one of my projects with a friend, resolving its origin daemon-side.
     ShareProjectWithFriend {
         node_id: String,
         #[ts(type = "string")]
@@ -1096,7 +1196,7 @@ pub struct WireDriverStartOptions {
     pub provider_cursor: Option<Value>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct WireSessionOptions {
     pub mode: String,
@@ -1104,6 +1204,54 @@ pub struct WireSessionOptions {
     pub reasoning_effort: Option<String>,
     pub service_tier: Option<String>,
     pub context_window: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptConfiguration {
+    pub provider: ProviderKind,
+    pub options: crate::model::SessionOptions,
+}
+
+/// Commit a desktop handoff against the transcript used to prepare it.
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderSwitchRequest {
+    pub source: ProviderKind,
+    pub history_generation: u64,
+    pub boundary: crate::model::TranscriptBoundary,
+    pub configuration: PromptConfiguration,
+    pub resume_cursor: Option<ProviderResumeCursor>,
+    pub handoff: String,
+}
+
+/// The user's transcript text and inline presentation, when the provider
+/// receives expanded text or the composer displays rich content.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptPresentation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_content: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub atoms: Vec<crate::model::MessageAtom>,
+}
+
+impl PromptConfiguration {
+    /// Capture the task's selected values, independently of provider facts.
+    pub fn for_session(session: &AgentSession) -> Self {
+        Self {
+            provider: session.provider,
+            options: crate::model::SessionOptions {
+                mode: session.runtime_mode,
+                model: session.model.clone(),
+                reasoning_effort: session.reasoning_effort.clone(),
+                service_tier: session.service_tier.clone(),
+                context_window: session.context_window.clone(),
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -1123,6 +1271,22 @@ pub struct WireDriverEvent {
 }
 
 impl WireDriverEvent {
+    /// High-volume transcript content; lifecycle and attention stay deliverable
+    /// without an open transcript. Terminal and friend routing is independent.
+    pub fn is_task_detail(&self) -> bool {
+        match self.kind.as_str() {
+            "textDelta" | "reasoningDelta" | "activity" | "usageUpdated" => true,
+            "richActivity" => !matches!(
+                self.payload.get("tool_name").and_then(Value::as_str),
+                Some(crate::model::BOSS_SUMMON_TOOL_NAME | crate::model::MEMORY_RECORD_TOOL_NAME)
+            ),
+            "backgroundWork" => {
+                self.payload.get("type").and_then(Value::as_str) == Some("outputDelta")
+            }
+            _ => false,
+        }
+    }
+
     pub fn new(kind: impl Into<String>, payload: Value) -> Self {
         Self {
             kind: kind.into(),
@@ -1150,6 +1314,11 @@ pub struct SequencedEvent {
     rename_all_fields = "camelCase"
 )]
 pub enum ServerMessage {
+    IdleShutdown {
+        request_id: Uuid,
+        fence: Option<Uuid>,
+        committed: bool,
+    },
     Hello {
         protocol_version: u32,
         daemon_version: String,
@@ -1162,6 +1331,17 @@ pub enum ServerMessage {
         /// to retrieve through.
         #[serde(default)]
         agent_cli_available: bool,
+        /// Supports connection-scoped task detail with snapshot handoff.
+        #[serde(default)]
+        task_views_available: bool,
+        /// Supports bounded transcript reads — `readTranscriptWindow`,
+        /// `readTranscriptPayload`, `findTranscript`, and compact task-view
+        /// payloads. Older daemons omit it; clients keep using
+        /// `hydrateSession`.
+        #[serde(default)]
+        transcript_windows_available: bool,
+        #[serde(default)]
+        landing_queue_available: bool,
     },
     Rejected {
         message: String,
@@ -1251,6 +1431,10 @@ pub enum ServerMessage {
     PairDeclined {
         message: String,
     },
+    LandingQueueChanged {
+        queue_id: Uuid,
+        revision: u64,
+    },
     ShuttingDown,
 }
 
@@ -1332,11 +1516,14 @@ pub struct DaemonSessionSample {
 /// One process-memory sample written by the daemon's stats sampler — see
 /// [`Command::GetDaemonStats`]. Also the per-line shape of
 /// `daemon-stats.jsonl` in the daemon's data directory.
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct DaemonStatsSample {
     /// Unix seconds when the sample was taken.
     pub at: u64,
+    /// The memory probe skipped a busy daemon lock; those fields are from an earlier sample.
+    #[serde(default)]
+    pub probe_deferred: bool,
     /// The daemon process's own resident size. `None` on platforms without
     /// a sampler implementation, or before the first sample lands.
     pub daemon_rss_mb: Option<u64>,
@@ -1378,25 +1565,39 @@ pub struct DaemonStatsSample {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestPoolSample {
+    /// Worker slots successfully started for this pool.
+    #[serde(default)]
+    pub workers: u32,
+    /// Maximum number of jobs admitted to the execution queue.
+    #[serde(default)]
+    pub queue_capacity: u32,
+    /// Milliseconds since the oldest waiting job was submitted, including deferred admission.
+    #[serde(default)]
+    pub oldest_waiting_ms: u64,
     /// Requests submitted to this pool since boot.
     pub submits: u64,
-    /// Jobs sitting in the bounded queue right now — at or above the
-    /// worker count means every worker is busy.
+    /// Jobs waiting for a worker in the execution or bounded admission queue.
     pub queued: u32,
-    /// Submits that blocked at all waiting for queue capacity.
+    /// Submits that waited at least one millisecond for queue capacity.
     pub waited: u64,
-    /// Cumulative milliseconds submits spent waiting for capacity.
+    /// Cumulative milliseconds submits spent waiting for queue capacity.
     pub wait_ms: u64,
     /// Longest single submit wait.
     pub max_wait_ms: u64,
-    /// Submits turned away after waiting out the capacity timeout — the
-    /// "daemon is busy" errors the client sees.
+    /// Submits rejected because admission capacity was full, the deadline
+    /// expired, or the pool workers were unavailable.
     pub rejected: u64,
     /// Per-command counters keyed by the command's wire `type` tag —
     /// `workspace:*` entries add the operation tag so a pinned queue names
     /// its jobs. Empty on daemons that predate command attribution.
     #[serde(default)]
     pub commands: BTreeMap<String, RequestCommandSample>,
+    /// Requests occupying workers at sample time.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub active: Vec<RequestTimingSample>,
+    /// Bounded tail of slow requests and admission failures from this boot.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent_slow: Vec<RequestTimingSample>,
 }
 
 /// One command's counters inside a pool's [`RequestPoolSample`]. `queued`,
@@ -1407,7 +1608,7 @@ pub struct RequestPoolSample {
 pub struct RequestCommandSample {
     /// Jobs of this command submitted since boot.
     pub submits: u64,
-    /// Jobs of this command waiting in the queue right now.
+    /// Jobs of this command waiting for a worker in either bounded queue.
     pub queued: u32,
     /// Jobs of this command a worker is running right now.
     pub running: u32,
@@ -1417,12 +1618,52 @@ pub struct RequestCommandSample {
     pub running_ms: u64,
     /// Jobs of this command finished since boot.
     pub completed: u64,
+    /// Cumulative time between admission to the execution queue and worker pickup.
+    #[serde(default)]
+    pub queue_ms: u64,
+    /// Longest single wait between admission and worker pickup.
+    #[serde(default)]
+    pub max_queue_ms: u64,
     /// Cumulative milliseconds spent running this command.
     pub run_ms: u64,
     /// Longest single completed run.
     pub max_run_ms: u64,
-    /// Submits of this command turned away after the capacity timeout.
+    /// Submits of this command rejected when admission failed or timed out.
     pub rejected: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum RequestTimingOutcome {
+    Ok,
+    Error,
+    Panicked,
+    AdmissionBusy,
+    WorkersUnavailable,
+}
+
+/// Timing only. This contains no client identifiers, request data, or error text.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestTimingSample {
+    /// Sequence within this pool and daemon boot.
+    pub sequence: u64,
+    pub operation: String,
+    /// Unix timestamp in milliseconds when sampled or completed.
+    pub at_ms: u64,
+    pub admission_ms: u64,
+    pub queue_ms: u64,
+    pub worker_ms: u64,
+    /// Present while running inside an instrumented phase.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase_ms: Option<u64>,
+    /// Time spent in completed phases. Nested phase timings can overlap.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub completed_phases_ms: BTreeMap<String, u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<RequestTimingOutcome>,
 }
 
 /// One label's subprocess counters in a [`DaemonStatsSample`]. `spawns`,
@@ -1453,6 +1694,9 @@ pub struct SubprocessLabelSample {
     rename_all_fields = "camelCase"
 )]
 pub enum ResponsePayload {
+    SidebarIntent {
+        result: crate::sidebar_intent::SidebarIntentResult,
+    },
     WireframeComments {
         page: crate::wireframe_comments::WireframeCommentsPage,
     },
@@ -1475,6 +1719,11 @@ pub enum ResponsePayload {
         result: crate::boss::BossResult,
     },
     Ack,
+    ProjectSyncInfo {
+        project_path: PathBuf,
+        origin_url: String,
+        branch: String,
+    },
     ManagedGoalTurnClaimed {
         claimed: bool,
     },
@@ -1610,6 +1859,18 @@ pub enum ResponsePayload {
     Session {
         session: Option<AgentSession>,
     },
+    /// One bounded transcript slice, as read for `readTranscriptWindow`.
+    TranscriptWindow {
+        window: crate::transcript::TranscriptWindow,
+    },
+    /// One payload byte range, as read for `readTranscriptPayload`.
+    TranscriptPayload {
+        payload: crate::transcript::TranscriptPayload,
+    },
+    /// Occurrence results for `findTranscript`.
+    TranscriptFind {
+        result: crate::transcript::TranscriptFindResult,
+    },
     SessionMessageMatches {
         matches: Vec<SessionMessageMatch>,
     },
@@ -1698,6 +1959,13 @@ pub enum ResponsePayload {
     /// free-form clarification, or a cancellation.
     AgentAskResult {
         outcome: AgentAskOutcome,
+    },
+    /// The ensured directory for a `get`, or the task's scratch pool plus
+    /// its named entries for `list`.
+    AgentScratch {
+        #[ts(type = "string")]
+        path: PathBuf,
+        entries: Vec<crate::scratch::ScratchEntry>,
     },
     /// The preference-ordered provider/model list an `agentListModels`
     /// resolved.
@@ -1789,6 +2057,24 @@ impl std::fmt::Debug for KeyedError {
 impl std::error::Error for KeyedError {}
 
 impl RpcError {
+    /// Required prompt settings were refused before provider execution.
+    pub fn configuration_rejected(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            i18n: None,
+            code: Some(RpcErrorCode::ConfigurationRejected),
+        }
+    }
+
+    /// The daemon refused this request before executing its handler.
+    pub fn admission_busy(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            i18n: None,
+            code: Some(RpcErrorCode::AdmissionBusy),
+        }
+    }
+
     /// The message a client should show: the i18n semantic rendered in this
     /// process's locale when present, the daemon's fallback text otherwise.
     pub fn localized_message(&self) -> String {
@@ -1799,6 +2085,19 @@ impl RpcError {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub enum RpcErrorCode {
+    /// No handler ran; admission can be attempted again when capacity opens.
+    AdmissionBusy,
+    /// The prompt did not execute under its required configuration.
+    ConfigurationRejected,
+    /// A newer daemon supplied a code this client does not recognize.
+    #[serde(other)]
+    Unknown,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 pub struct RpcError {
     pub message: String,
@@ -1806,7 +2105,19 @@ pub struct RpcError {
     /// `None` for provider text and opaque errors — render `message` as-is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub i18n: Option<WireTranslation>,
+    /// Machine-readable error semantics. Absent on older daemons and for
+    /// opaque/provider failures; those must not be assumed safe to retry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<RpcErrorCode>,
 }
+
+impl std::fmt::Display for RpcError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.localized_message())
+    }
+}
+
+impl std::error::Error for RpcError {}
 
 impl From<anyhow::Error> for RpcError {
     fn from(error: anyhow::Error) -> Self {
@@ -1819,6 +2130,13 @@ impl From<anyhow::Error> for RpcError {
                 .chain()
                 .find_map(|cause| cause.downcast_ref::<KeyedError>())
                 .map(|keyed| keyed.i18n.clone()),
+            code: error
+                .chain()
+                .filter_map(|cause| cause.downcast_ref::<RpcError>())
+                .find_map(|rpc| {
+                    (rpc.code == Some(RpcErrorCode::ConfigurationRejected))
+                        .then_some(RpcErrorCode::ConfigurationRejected)
+                }),
         }
     }
 }
@@ -1847,7 +2165,62 @@ pub(crate) mod base64_bytes {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn task_detail_filter_preserves_serialized_memory_and_summon_cards() {
+        use crate::model::{ActivityItem, ActivityKind, DriverEvent};
+        for (tool, filtered) in [
+            (crate::model::BOSS_SUMMON_TOOL_NAME, false),
+            (crate::model::MEMORY_RECORD_TOOL_NAME, false),
+            ("read_file", true),
+        ] {
+            let activity = ActivityItem::new(None, ActivityKind::Tool, "tool", None, true)
+                .with_tool_name(Some(tool));
+            let wire =
+                crate::driver_wire::event_to_wire(DriverEvent::RichActivity(activity)).unwrap();
+            assert_eq!(wire.is_task_detail(), filtered, "{tool}");
+        }
+    }
+
     use super::*;
+
+    #[test]
+    fn rpc_error_codes_preserve_old_and_future_wire_errors() {
+        let legacy: RpcError = serde_json::from_value(serde_json::json!({
+            "message": "provider failed"
+        }))
+        .unwrap();
+        assert_eq!(legacy.code, None);
+        let future: RpcError = serde_json::from_value(serde_json::json!({
+            "message": "new failure",
+            "code": "futureError"
+        }))
+        .unwrap();
+        assert_eq!(future.code, Some(RpcErrorCode::Unknown));
+        let busy = RpcError::admission_busy("wait for capacity");
+        let wire = serde_json::to_value(&busy).unwrap();
+        assert_eq!(wire["code"], "admissionBusy");
+        assert_eq!(busy.to_string(), "wait for capacity");
+        let opaque = RpcError::from(anyhow::anyhow!("provider failed"));
+        assert_eq!(opaque.code, None);
+        assert!(serde_json::to_value(opaque).unwrap().get("code").is_none());
+
+        // Required-settings refusal survives backend context wrapping.
+        let rejected = RpcError::from(
+            anyhow::Error::new(RpcError::configuration_rejected("settings refused"))
+                .context("starting prompt"),
+        );
+        assert_eq!(rejected.code, Some(RpcErrorCode::ConfigurationRejected));
+        assert!(rejected.message.contains("settings refused"));
+        assert_eq!(
+            serde_json::to_value(rejected).unwrap()["code"],
+            "configurationRejected"
+        );
+        // A handler cannot claim the dispatcher's safe-to-retry admission code.
+        let handler_busy = RpcError::from(anyhow::Error::new(RpcError::admission_busy(
+            "provider busy",
+        )));
+        assert_eq!(handler_busy.code, None);
+    }
 
     #[test]
     fn binary_payloads_use_base64_json_strings() {

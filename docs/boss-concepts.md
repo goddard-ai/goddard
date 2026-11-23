@@ -96,12 +96,17 @@ Feature Developer, Bug Investigator, or Verifier — or a custom persona you
 have saved. Selecting a role changes only the instructions; memory buckets,
 integrations, and other grants are assigned separately.
 
-Keep memory notes to one or a few sentences: a durable decision, verified finding
-needed later, preference, or hard-won constraint a future session would otherwise
-rediscover. Never store status reports, progress recaps, verification logs, check
-matrices, or “what I did” summaries; use the turn-end report and task transcript.
-If a note needs more than a few sentences or mostly describes the current
-assignment's state, report it instead.
+Memory is optional, selective recall across tasks. Keep only concise context
+useful later and costly to rediscover, with its source and scope. Task progress
+and verification results belong in reports or transcripts. Documentation,
+source-code summaries, standing instructions, and approvals belong in their
+original sources, not memory.
+
+When an agent runs `goddard-agent memory record`, it receives the proposed text
+and a reminder to reconsider whether it belongs. Nothing enters shared memory
+until the same agent runs `goddard-agent memory confirm PROPOSAL_ID` in a
+separate call. Unsuitable proposals can be abandoned; revised text needs a new
+proposal. Proposals expire after ten minutes or a daemon restart.
 
 Memory is supplementary. Keep the original transcripts for what was said and
 done, and plans for what was reviewed. A memory summary does not replace their

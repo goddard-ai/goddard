@@ -326,7 +326,7 @@ fn completion_and_report_commit_together_and_survive_readmission() {
     let employee = f.employee("reporter");
     let id = employee.session_id;
     f.service.enqueue_ticket(employee, ticket("work")).unwrap();
-    f.service.mark_dispatching(id, 1, None).unwrap();
+    f.service.mark_dispatching(id, 1, None, false).unwrap();
     f.service.mark_working(id, 1).unwrap();
     f.service
         .begin_finishing(id, false, false, ExpiryCause::Finished)
@@ -383,7 +383,7 @@ fn acknowledged_completion_cannot_be_recreated_by_a_late_finish() {
     let employee = f.employee("reporter");
     let id = employee.session_id;
     f.service.enqueue_ticket(employee, ticket("work")).unwrap();
-    f.service.mark_dispatching(id, 1, None).unwrap();
+    f.service.mark_dispatching(id, 1, None, false).unwrap();
     f.service.mark_working(id, 1).unwrap();
     f.service
         .begin_finishing(id, false, false, ExpiryCause::Finished)

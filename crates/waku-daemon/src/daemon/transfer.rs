@@ -87,6 +87,7 @@ pub(super) fn create_transfer_session(
     // Sandbox isolation is the safety boundary for received files, so the
     // task starts with full autonomy inside that boundary.
     session.runtime_mode = waku_protocol::model::RuntimeMode::FullAccess;
+    session.pending_provider_context = session.initial_friend_context();
     let session_id = session.id;
     state.push_session(session);
     task_store.save(&mut state)?;
@@ -321,6 +322,7 @@ pub(super) fn create_chat_session(
     session.push_message(crate::model::MessageRole::Assistant, delivery.text.clone());
     session.finish_active_turn(TurnStatus::Completed);
     session.status = SessionStatus::Idle;
+    session.pending_provider_context = session.initial_friend_context();
     let session_id = session.id;
     state.push_session(session);
     task_store.save(&mut state)?;

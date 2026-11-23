@@ -12,6 +12,12 @@ pub(super) fn inputs() -> Value {
 
 pub(super) fn availability(path: &str) -> Value {
     match path {
+        "boss counsel handoff" => {
+            json!({"roles":["counsel"],"scopedAgentCallable":true,"conditions":["Boss experiment enabled","The active Counsel turn must answer a human message containing an explicit instruction to relay"]})
+        }
+        path if path.starts_with("boss counsel ") => {
+            json!({"roles":["counsel","human"],"conditions":["Boss experiment enabled","Counsel drafts, delivers human-approved instructions, and records reported completion; only the human client can approve, defer, or dismiss recommendations","send is Counsel-only and carries the record's stored instruction at the approved revision — never a freshly worded message"]})
+        }
         path if path.starts_with("boss instructions ") => {
             json!({"roles":["boss","human"],"conditions":["Only the live Boss chat can use scoped credentials","Employee and planning credentials cannot read or modify user obligations","Boss-created pins must cite a visible original human message"]})
         }
@@ -169,6 +175,13 @@ pub(super) fn aggregate() -> Value {
             .as_str()
             .expect("operation type tag");
         let paths: &[&str] = match name {
+            "counsel" => &[
+                "boss counsel view",
+                "boss counsel propose",
+                "boss counsel send",
+                "boss counsel handoff",
+                "boss counsel complete",
+            ],
             "instructionPin" => &[
                 "boss instructions list",
                 "boss instructions show",
@@ -243,6 +256,7 @@ pub(super) fn aggregate() -> Value {
                 "boss memory create",
                 "boss memory overview",
                 "boss memory record",
+                "boss memory confirm",
                 "boss memory summary",
                 "boss memory scan",
                 "boss memory zoom",
@@ -262,6 +276,7 @@ pub(super) fn aggregate() -> Value {
         );
         let human_only = matches!(name, "open" | "finalizePlan" | "setAvatarStyle");
         let output = match name {
+            "counsel" => "counsel",
             "view" | "rename" | "renameEmployee" | "regenerateAvatar" | "setAvatarStyle"
             | "upsertPersona" | "deletePersona" | "setEmployeeIcon" | "updatePlanItems"
             | "setPlanItemState" | "setPlanOutcome" | "createOutcome" | "setOutcomeState"
@@ -283,6 +298,7 @@ pub(super) fn aggregate() -> Value {
             "speak" => "speak",
             "memory" => "memory",
             "eval" => "eval",
+            "publishDeliverable" => "deliverablePublished",
             _ => "saved",
         };
         let script = if human_only {
@@ -304,7 +320,7 @@ pub(super) fn aggregate() -> Value {
 }
 
 fn script_contract() -> Value {
-    json!({"entryPoint":"boss script","scope":"fresh per invocation","examplesByOperation":script_examples(),"maxBytes":262144,"wallClockSeconds":30,"maxOperations":1000000,"imports":false,"hostReplyLimits":{"aggregateStringBytes":65536,"jsonNodes":32768,"nestingLevels":32,"overflow":"successful resultOmitted marker with dispatched:true; use direct commands for full data"},"execution":"Sequential, no rollback: a failure stops later ops; earlier accepted ops remain committed. Print acknowledgements and verify ids/revisions before retrying. Identical chain create retries reuse requestId, definition and supervisor.","stateResults":"Script state mutations return accepted/revision/entity ids; chain create returns chainId/requestId, chain show returns only that chain; direct commands retain their wire results.","result":"{type: eval, value: any JSON value (null for unit), output: captured print/debug text}","functions":["op(operation: map) -> tagged script result map","view() -> state digest (revision, sessionId, counts)","roster() -> string","context() -> string","automation(action: map) -> bounded list or compact acknowledgement","summon(fields: map) -> employee UUID string","setResourcePolicy(policy: map) -> BossResourcePolicy map","control(sessionId: UUID string, action: map|string) -> unit","resume(sessionId: UUID string) -> unit","transcript(sessionId: UUID string[, turn: integer]) -> transcript map","readFile(path: string) -> {path, content}","writeFile(path: string, content: string) -> unit","listFiles([path: string]) -> file array","createFolder(path: string) -> unit","publishDeliverable(path: string[, name: string]) -> unit","dismissDeliverable(id: UUID string) -> unit","speak(parts: string|array) -> integer","browse(url: string[, title: string]) -> browse result map","terminal(title: string, cwd: string[, command: string]) -> terminal result map","upsertPersona(persona: map) -> compact acknowledgement","setEmployeeIcon(sessionId: UUID string, icon: string|unit) -> compact acknowledgement","rename(name: string) -> compact acknowledgement","renameEmployee(sessionId: UUID string, name: string) -> compact acknowledgement","regenerateAvatar([sessionId: UUID string]) -> compact acknowledgement","memory(operation: map) -> memory result map","help() -> string"],"examples":["op(#{type: \"createOutcome\", outcome: \"Ship CLI guide\", successCriteria: \"Complete offline help\"})","control(\"EMPLOYEE_UUID\", #{type: \"steer\", prompt: \"Use revised scope\", jobTitle: \"Review schema\"})"],"examplePlaceholders":"Replace EMPLOYEE_UUID with an actual employee UUID; examples are never executed by discovery."})
+    json!({"entryPoint":"boss script","scope":"fresh per invocation","examplesByOperation":script_examples(),"maxBytes":262144,"wallClockSeconds":30,"maxOperations":1000000,"imports":false,"hostReplyLimits":{"aggregateStringBytes":65536,"jsonNodes":32768,"nestingLevels":32,"overflow":"successful resultOmitted marker with dispatched:true; use direct commands for full data"},"execution":"Sequential, no rollback: a failure stops later ops; earlier accepted ops remain committed. Print acknowledgements and verify ids/revisions before retrying. Identical chain create retries reuse requestId, definition and supervisor.","stateResults":"Script state mutations return accepted/revision/entity ids; chain create returns chainId/requestId, chain show returns only that chain; direct commands retain their wire results.","result":"{type: eval, value: any JSON value (null for unit), output: captured print/debug text}","functions":["op(operation: map) -> tagged script result map","view() -> state digest (revision, sessionId, counts)","roster() -> string","context() -> string","automation(action: map) -> bounded list or compact acknowledgement","summon(fields: map) -> employee UUID string","setResourcePolicy(policy: map) -> BossResourcePolicy map","control(sessionId: UUID string, action: map|string) -> unit","resume(sessionId: UUID string) -> unit","transcript(sessionId: UUID string[, turn: integer]) -> transcript map","readFile(path: string) -> {path, content}","writeFile(path: string, content: string) -> unit","listFiles([path: string]) -> file array","createFolder(path: string) -> unit","publishDeliverable(path: string[, name: string]) -> {deliverable, reference}","dismissDeliverable(id: UUID string) -> unit","speak(parts: string|array) -> integer","browse(url: string[, title: string]) -> browse result map","terminal(title: string, cwd: string[, command: string]) -> terminal result map","upsertPersona(persona: map) -> compact acknowledgement","setEmployeeIcon(sessionId: UUID string, icon: string|unit) -> compact acknowledgement","rename(name: string) -> compact acknowledgement","renameEmployee(sessionId: UUID string, name: string) -> compact acknowledgement","regenerateAvatar([sessionId: UUID string]) -> compact acknowledgement","memory(operation: map) -> memory result map","help() -> string"],"examples":["op(#{type: \"createOutcome\", outcome: \"Ship CLI guide\", successCriteria: \"Complete offline help\"})","control(\"EMPLOYEE_UUID\", #{type: \"steer\", prompt: \"Use revised scope\", jobTitle: \"Review schema\"})"],"examplePlaceholders":"Replace EMPLOYEE_UUID with an actual employee UUID; examples are never executed by discovery."})
 }
 
 fn script_examples() -> Value {
@@ -322,4 +338,17 @@ fn script_examples() -> Value {
 
 fn constraint_contract() -> Value {
     json!({"summon":["outcomeId and newOutcome are mutually exclusive","finishesOutcome requires an outcome with explicit success criteria and no other live finisher; conflicts with afterSuccess","prerequisites require existing outcomeId and sibling assignment UUIDs","item requires plan; unknown/closed outcome or plan and done/dropped items reject","requestId retries must carry identical fields","worktree requires baseBranch; adopt requires finished-owner adoptWorktree","PermissionOverrides inherit per field and clamp employee supervisor grants","resources must fit host capacity; contested resources queue","priority is stored but FIFO is unchanged"],"setOutcomeState":["completed requires nonempty evidence and no pending handoffs","cancelled stops live assignments; open reopens"],"resolveHandoff":["Handoff must be pending on outcome","assign references an existing follow-up assignment","completeOutcome requires evidence; other pending handoffs block completion"],"attachPlan":["Plan must be approved; attaching does not start work or change outcome state"],"setOutcomeWaiting":["waiting=null clears wait; snoozedUntil=null clears snooze","until.at and snoozedUntil are Unix timestamps; dependency waits persist until resolved/cleared"],"control":["setPlan fields are tri-state: omitted keeps, null clears; changing plan without item drops allocation","setWorkspace allows local or worktree, never adopt; worktree requires baseBranch","setModel provider/model must exist in catalog; omitted effort resolves target default","setPermissions updates per field; cannot exceed supervisor grants","steer supports optional jobTitle; CLI boss prompt --delivery steer cannot retitle, use script control"],"personaDefault":["keep, adopt and chooseEmployeeBase require human client; scoped agents are rejected","Choose base in Settings > Boss > Personas; no CLI command is invented"],"finalizePlan":["Human client only; all scoped agent calls rejected without creating an approval request","Unscoped human call requires planFile; approval freezes document"],"setResourcePolicy":["expectedRevision must match; liveLimit >= 0; hardCap >= liveLimit","Lowering caps does not stop active work"],"files":["Relative paths only; traversal and symlinks rejected","Finalized plan documents are frozen; persona Markdown uses persona upsert"],"automation":["update requires existing id; create ignores supplied id","Workspace worktree requires baseBranch; existing requires sessionId","Schedule fields must be in range; scheduled/webhook configuration is validated by daemon"]})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn direct_counsel_handoff_advertises_only_the_counsel_role() {
+        let schema = crate::leaf_schema("boss counsel handoff");
+        assert_eq!(schema["availability"]["roles"], json!(["counsel"]));
+        assert_eq!(schema["availability"]["scopedAgentCallable"], true);
+        assert_eq!(schema["outputs"]["json"]["type"], "saved");
+    }
 }

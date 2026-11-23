@@ -21,6 +21,17 @@ impl WakuBackend {
         prompt: String,
         sender: Option<Uuid>,
     ) {
+        self.send_agent_steer_with_id(driver, session_id, prompt, sender, None);
+    }
+
+    pub(super) fn send_agent_steer_with_id(
+        &self,
+        driver: &DriverHandle,
+        session_id: Uuid,
+        prompt: String,
+        sender: Option<Uuid>,
+        submission_id: Option<Uuid>,
+    ) {
         let transport = agent_prompt_envelope(&self.task_state, session_id, sender, &prompt);
         self.agent.record_pending_steer(
             session_id,
@@ -30,7 +41,7 @@ impl WakuBackend {
                 sender,
                 // A direct steer never parks — no chip to mirror.
                 queued_id: None,
-                submission_id: None,
+                submission_id,
                 context: None,
                 hidden: false,
                 report_trigger: None,
@@ -128,7 +139,18 @@ impl WakuBackend {
         delivery: AgentPromptDelivery,
         events: EventSink,
     ) -> anyhow::Result<ResponsePayload> {
-        self.require_agent_tools()?;
+        let counsel = sender.filter(|id| self.boss.is_counsel(*id));
+        // Counsel relays human input under its own experiment flag plus
+        // the Boss one it rides on. Unmanaged agents still need the
+        // separate cross-task tools setting.
+        if counsel.is_some() {
+            anyhow::ensure!(
+                self.counsel_enabled(),
+                "Counsel is disabled by the experiment setting"
+            );
+        } else {
+            self.require_agent_tools()?;
+        }
         if prompt.trim().is_empty() {
             bail!("agent prompts require a prompt");
         }
@@ -148,6 +170,26 @@ impl WakuBackend {
             );
         }
         let target = self.resolve_agent_target(task_id, thread_id, provider)?;
+        if let Some(counsel) = counsel {
+            self.require_counsel_human_turn(counsel)?;
+            let state = self.task_state.lock();
+            anyhow::ensure!(
+                !self.boss.is_managed(target)
+                    && self.boss.employee_including_retired(target).is_none()
+                    && state.sessions.iter().any(|session| {
+                        session.id == target
+                            && !session.boss_managed
+                            && !session.incognito
+                            && session.planning.is_none()
+                            && session.side_chat_of.is_none()
+                            && session.friend_peer_id.is_none()
+                            && !state.projects.iter().any(|project| {
+                                project.id == session.project_id && project.is_friends()
+                            })
+                    }),
+                "Counsel can message existing normal tasks; use the Counsel handoff command for Boss"
+            );
+        }
         // An address resolved against a stale Boss pointer still means "the
         // Boss" — deliver it to the committed owner exactly once.
         let target = self.boss_active_alias(target);
@@ -157,7 +199,9 @@ impl WakuBackend {
         // task-prompt path below instead. Managed senders that are not boss
         // principals cannot get here: employees are refused above.
         if self.boss.is_managed(target)
-            || sender.is_some_and(|id| self.boss.is_managed(id) && !self.boss.is_boss_principal(id))
+            || sender.is_some_and(|id| {
+                counsel.is_none() && self.boss.is_managed(id) && !self.boss.is_boss_principal(id)
+            })
         {
             use waku_protocol::boss::EmployeeLifecycle;
             self.boss.require_control(sender, target)?;
@@ -193,7 +237,7 @@ impl WakuBackend {
                     .iter()
                     .any(|employee| employee.session_id == target);
             if was_expired {
-                self.requeue_employee(target, |ticket, started| {
+                self.requeue_employee(target, sender, |ticket, started| {
                     if started {
                         ticket.prompt.clear();
                         ticket.pending_prompts.push(prompt.clone());
@@ -288,21 +332,37 @@ impl WakuBackend {
         report_trigger: Option<crate::model::ReportTrigger>,
         events: &EventSink,
     ) -> anyhow::Result<()> {
-        // A queued event addressed to a retired Boss chat belongs to the
-        // committed owner — retarget before it is enqueued or mirrored so
-        // the successor receives it exactly once.
+        let mut message = crate::model::QueuedMessage::agent(prompt, sender);
+        message.id = queued_id.unwrap_or_else(Uuid::new_v4);
+        message.hidden = hidden;
+        message.report_trigger = report_trigger;
+        self.queue_agent_message(target, message, events)
+    }
+
+    /// Queue a durable daemon message, including any delivery-time references.
+    pub(super) fn queue_agent_message(
+        &self,
+        target: Uuid,
+        mut message: crate::model::QueuedMessage,
+        events: &EventSink,
+    ) -> anyhow::Result<()> {
+        let _admission = self.idle_shutdown.enter()?;
+        let crate::model::QueuedMessageSource::Agent { sent_by: sender } = message.source else {
+            anyhow::bail!("daemon prompt must be agent-owned");
+        };
+        let prompt = message.content.clone();
+        let hidden = message.hidden;
+        let queued_id = message.id;
+        // Rotation preserves the message and its task references together.
         let target = self.boss_active_alias(target);
-        let plan_finalized = report_trigger
+        let plan_finalized = message
+            .report_trigger
             .as_ref()
             .is_some_and(|trigger| trigger.kind == crate::model::ReportTriggerKind::PlanFinalized);
-        let queued_id = queued_id.unwrap_or_else(Uuid::new_v4);
-        // The parked id doubles as the delivered message's — the trigger's
-        // dedupe identity matches it so a redriven delivery folds onto the
-        // same marker.
-        let report_trigger = report_trigger.map(|mut trigger| {
+        if let Some(trigger) = &mut message.report_trigger {
             trigger.event_id = queued_id;
-            trigger
-        });
+        }
+        let report_trigger = message.report_trigger.clone();
         self.agent.enqueue(
             target,
             crate::agent::AgentPrompt {
@@ -322,15 +382,11 @@ impl WakuBackend {
         if managed {
             // Result indexes must survive a failed supervisor launch and a
             // subsequent daemon restart, even when the supervisor was idle.
-            mirror_agent_queued_prompt(
+            mirror_agent_queued_message(
                 &self.task_state,
                 &self.task_store,
                 target,
-                queued_id,
-                &prompt,
-                sender,
-                hidden,
-                report_trigger.clone(),
+                message.clone(),
             )?;
         }
         // A queued or dispatching ticket owns no settled runtime — park
@@ -388,15 +444,11 @@ impl WakuBackend {
             // into the session document so every client renders the parked
             // prompt as a queued follow-up chip.
             if !managed {
-                mirror_agent_queued_prompt(
+                mirror_agent_queued_message(
                     &self.task_state,
                     &self.task_store,
                     target,
-                    queued_id,
-                    &prompt,
-                    sender,
-                    hidden,
-                    report_trigger,
+                    message.clone(),
                 )?;
             }
             if let Some(runtime_id) = self.runtime_id_for(target) {

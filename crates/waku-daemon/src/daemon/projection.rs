@@ -1,5 +1,145 @@
 use super::*;
 
+/// A filtered client's transcript can be intentionally incomplete. Keep the
+/// daemon's provider projection while accepting ordinary client-owned fields
+/// through the existing save/metadata rules.
+pub(super) fn preserve_task_view_projection(existing: &AgentSession, incoming: &mut AgentSession) {
+    use crate::model::{MessageRole, SessionWorkspace};
+    // A UI save captured during preparation may arrive after the worker
+    // registered its checkout. NewWorktree is draft intent, never a move
+    // away from an assigned workspace, even if the transcript cursor is current.
+    if matches!(incoming.workspace, SessionWorkspace::NewWorktree { .. })
+        && matches!(existing.workspace, SessionWorkspace::Worktree { .. })
+    {
+        incoming.workspace.clone_from(&existing.workspace);
+    }
+    let presentations: HashMap<_, _> = incoming
+        .messages
+        .iter()
+        .map(|message| (message.id, message))
+        .collect();
+    let mut messages = existing.messages.clone();
+    for message in &mut messages {
+        // Landing settles its existing progress row. Accept the terminal
+        // banner once; a delayed progress save must never restore the old text.
+        if message.role == MessageRole::System
+            && message.turn_id.is_none()
+            && message.notice.is_none()
+            && let Some(completed) = presentations.get(&message.id)
+            && completed.role == MessageRole::System
+            && completed.turn_id.is_none()
+            && matches!(
+                completed.notice,
+                Some(crate::model::TranscriptNotice::Landed { .. })
+            )
+        {
+            message.content.clone_from(&completed.content);
+            message.notice.clone_from(&completed.notice);
+        }
+        if message.role == MessageRole::User
+            && let Some(presentation) = presentations.get(&message.id)
+            && presentation.role == message.role
+            && presentation.content == message.content
+            && (presentation.display_content.is_some()
+                || !presentation.attachments.is_empty()
+                || !presentation.atoms.is_empty())
+        {
+            message
+                .display_content
+                .clone_from(&presentation.display_content);
+            if !presentation.attachments.is_empty() {
+                message.attachments.clone_from(&presentation.attachments);
+            }
+            message.atoms.clone_from(&presentation.atoms);
+        }
+    }
+    let mut turns = existing.turns.clone();
+    let mut preparation_failures = HashSet::new();
+    for turn in &mut turns {
+        if turn.status == TurnStatus::Running
+            && !turn.provider_turn_started
+            && let Some(failed) = incoming.turns.iter().find(|candidate| {
+                candidate.id == turn.id
+                    && !candidate.provider_turn_started
+                    && candidate.status != TurnStatus::Running
+            })
+        {
+            preparation_failures.insert(turn.id);
+            turn.status = failed.status;
+            turn.interruption = failed.interruption;
+            turn.completed_at = failed.completed_at;
+        }
+    }
+    messages.extend(
+        incoming
+            .messages
+            .iter()
+            .filter(|message| {
+                message.notice.is_some()
+                    && message
+                        .turn_id
+                        .is_some_and(|id| preparation_failures.contains(&id))
+                    && !messages.iter().any(|known| known.id == message.id)
+            })
+            .cloned()
+            .collect::<Vec<_>>(),
+    );
+    // Preparing a prompt captures its starting checkpoint before dispatch.
+    // Keep that new human intent, but never resurrect an already known turn.
+    if existing.active_turn_id().is_none()
+        && let Some(turn) = incoming.turns.last().filter(|turn| {
+            turn.status == TurnStatus::Running
+                && !turn.provider_turn_started
+                && !existing.turns.iter().any(|known| known.id == turn.id)
+        })
+        && let Some(prompt) = incoming
+            .messages
+            .iter()
+            .find(|message| message.turn_id == Some(turn.id) && message.role == MessageRole::User)
+    {
+        turns.push(turn.clone());
+        messages.push(prompt.clone());
+    }
+    let known: HashSet<_> = messages.iter().map(|message| message.id).collect();
+    // Workspace/provider changes and other client-authored notices are
+    // append-only presentation. They cannot replace provider output.
+    messages.extend(
+        incoming
+            .messages
+            .iter()
+            .filter(|message| message.role == MessageRole::System && !known.contains(&message.id))
+            .cloned(),
+    );
+    incoming.messages = messages;
+    incoming.turns = turns;
+    incoming
+        .transcript_blocks
+        .clone_from(&existing.transcript_blocks);
+    incoming.runtime_event_cursor = existing.runtime_event_cursor;
+    incoming.antigravity_acp |= existing.antigravity_acp;
+    if incoming.provider == existing.provider {
+        incoming
+            .provider_cursor
+            .clone_from(&existing.provider_cursor);
+        incoming.context_usage.clone_from(&existing.context_usage);
+        incoming
+            .available_commands
+            .clone_from(&existing.available_commands);
+    }
+    if !incoming
+        .thread_goal
+        .as_ref()
+        .is_some_and(|goal| goal.managed_id.is_some())
+    {
+        incoming.thread_goal.clone_from(&existing.thread_goal);
+    }
+    if preparation_failures.is_empty() {
+        incoming.status = existing.status;
+    }
+    incoming.last_reply_at = existing.last_reply_at;
+    incoming.updated_at = incoming.updated_at.max(existing.updated_at);
+}
+
 /// Queued tickets carry the requested selection before dispatch moves provider
 /// cursors. Project it to clients without changing the runtime's stored pair.
 pub(super) fn project_employee_selection(
@@ -148,18 +288,23 @@ pub(super) fn merge_session_list_columns(
     if incoming.updated_at < existing.updated_at {
         return false;
     }
+    let configuration = waku_protocol::task_metadata::TaskMetadataEdit::capture(
+        waku_protocol::task_metadata::TaskMetadataField::Configuration,
+        if incoming.metadata_revision >= existing.metadata_revision {
+            &incoming
+        } else {
+            existing
+        },
+    );
     existing.metadata_revision = existing.metadata_revision.max(incoming.metadata_revision);
     existing.title = incoming.title;
+    // Placeholder provenance lives in detail, not SQLite list columns.
+    // A list-only save can invalidate it by changing the title, but cannot
+    // supply a replacement value.
+    existing.auto_title_is_prompt &= existing.auto_title == incoming.auto_title;
     existing.auto_title = incoming.auto_title;
     existing.agent_rename_allowed = incoming.agent_rename_allowed;
     existing.project_id = incoming.project_id;
-    // A client that never applied the confirmed activation cannot own the
-    // effective fields — its copy is pre-activation requested state.
-    if incoming.config_activation >= existing.config_activation {
-        existing.provider = incoming.provider;
-        existing.model = incoming.model;
-        existing.reasoning_effort = incoming.reasoning_effort;
-    }
     existing.config_activation = existing.config_activation.max(incoming.config_activation);
     if !has_active_runtime {
         existing.status = incoming.status;
@@ -181,25 +326,39 @@ pub(super) fn merge_session_list_columns(
     if existing.planning.is_none() {
         existing.planning = incoming.planning;
     }
+    configuration.apply(existing);
     true
 }
 
 pub(super) fn merge_stale_session_metadata(existing: &mut AgentSession, incoming: AgentSession) {
+    let revision = existing.metadata_revision.max(incoming.metadata_revision);
+    let configuration = waku_protocol::task_metadata::TaskMetadataEdit::capture(
+        waku_protocol::task_metadata::TaskMetadataField::Configuration,
+        if incoming.metadata_revision >= existing.metadata_revision {
+            &incoming
+        } else {
+            existing
+        },
+    );
     if incoming.updated_at >= existing.updated_at {
+        // A confirmed move's first prompt consumes its notice. Stable chats
+        // keep daemon-owned transcripts but still owe this client-owned edit.
+        if incoming.detail_loaded
+            && incoming.metadata_revision >= existing.metadata_revision
+            && incoming.workspace == existing.workspace
+            && incoming.workspace_moved_from.is_none()
+        {
+            existing.workspace_moved_from = None;
+        }
         existing.metadata_revision = existing.metadata_revision.max(incoming.metadata_revision);
         existing.title = incoming.title;
         existing.agent_rename_allowed = incoming.agent_rename_allowed;
         existing.project_id = incoming.project_id;
-        // Same confirmed-activation guard as the list-column merge: a
-        // client whose copy predates the activation cannot overwrite the
-        // effective provider/model/effort, only the mark itself.
-        if incoming.config_activation >= existing.config_activation {
-            existing.provider = incoming.provider;
-            existing.model = incoming.model;
-            existing.reasoning_effort = incoming.reasoning_effort;
-        }
         existing.config_activation = existing.config_activation.max(incoming.config_activation);
-        existing.runtime_mode = incoming.runtime_mode;
+        // Skeletons carry the default access mode, not an explicit edit.
+        if incoming.detail_loaded {
+            existing.runtime_mode = incoming.runtime_mode;
+        }
         existing.service_tier = incoming.service_tier;
         existing.context_window = incoming.context_window;
         existing.agent_preset = incoming.agent_preset;
@@ -253,6 +412,8 @@ pub(super) fn merge_stale_session_metadata(existing: &mut AgentSession, incoming
             existing.queued_messages.push(queued);
         }
     }
+    existing.metadata_revision = revision;
+    configuration.apply(existing);
 }
 
 /// Client saves never mutate the daemon-owned slice of a follow-up queue:

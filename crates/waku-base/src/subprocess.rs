@@ -19,6 +19,7 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::io;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -125,15 +126,40 @@ impl Drop for Permit {
 }
 
 fn acquire_on(tokens: &PermitTokens, label: String, deadline: Instant) -> io::Result<Permit> {
+    acquire_cancellable_on(tokens, label, deadline, None)
+}
+
+fn acquire_cancellable_on(
+    tokens: &PermitTokens,
+    label: String,
+    deadline: Instant,
+    cancellation: Option<&AtomicBool>,
+) -> io::Result<Permit> {
     {
         let mut stats = stats().lock().expect("subprocess stats lock");
         stats.entry(label.clone()).or_default().in_flight += 1;
     }
     let waited = Instant::now();
-    let held = deadline
-        .checked_duration_since(waited)
-        .filter(|remaining| !remaining.is_zero())
-        .is_some_and(|remaining| tokens.1.recv_timeout(remaining).is_ok());
+    let held = loop {
+        if cancellation.is_some_and(|cancelled| cancelled.load(Ordering::Acquire)) {
+            break false;
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break false;
+        }
+        let wait = if cancellation.is_some() {
+            remaining.min(Duration::from_millis(10))
+        } else {
+            remaining
+        };
+        match tokens.1.recv_timeout(wait) {
+            Ok(()) => break true,
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break false,
+        }
+    };
+    let cancelled = cancellation.is_some_and(|cancelled| cancelled.load(Ordering::Acquire));
     let expired = Instant::now() >= deadline;
     let wait_ms = waited.elapsed().as_millis() as u64;
     {
@@ -141,13 +167,19 @@ fn acquire_on(tokens: &PermitTokens, label: String, deadline: Instant) -> io::Re
         let entry = stats.entry(label.clone()).or_default();
         entry.wait_ms += wait_ms;
         entry.max_wait_ms = entry.max_wait_ms.max(wait_ms);
-        if !held || expired {
+        if !held || expired || cancelled {
             entry.in_flight = entry.in_flight.saturating_sub(1);
         }
     }
-    if !held || expired {
+    if !held || expired || cancelled {
         if held {
             let _ = tokens.0.try_send(());
+        }
+        if cancelled {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                format!("subprocess `{label}` cancelled waiting for a spawn slot"),
+            ));
         }
         return Err(io::Error::new(
             io::ErrorKind::TimedOut,
@@ -170,6 +202,14 @@ pub fn acquire(label: String) -> io::Result<Permit> {
 /// same deadline; a timed-out request never starts a child without a permit.
 pub fn acquire_until(label: String, deadline: Instant) -> io::Result<Permit> {
     acquire_on(permits(), label, deadline)
+}
+
+pub fn acquire_cancellable_until(
+    label: String,
+    deadline: Instant,
+    cancellation: &AtomicBool,
+) -> io::Result<Permit> {
+    acquire_cancellable_on(permits(), label, deadline, Some(cancellation))
 }
 
 #[cfg(test)]
@@ -238,6 +278,66 @@ mod tests {
         assert_eq!(snapshot()[&label].spawns, 0);
         assert!(tokens.1.try_recv().is_err());
         drop(first);
+        assert!(tokens.1.try_recv().is_ok());
+        assert!(tokens.1.try_recv().is_err());
+    }
+
+    #[test]
+    fn cancellation_releases_a_saturated_waiter_without_minting_a_token() {
+        let tokens = test_tokens(1);
+        let held = acquire_on(
+            &tokens,
+            "cancel-test-holder".into(),
+            Instant::now() + Duration::from_secs(5),
+        )
+        .unwrap();
+        let cancellation = AtomicBool::new(false);
+        let label = "cancel-test-waiter";
+        std::thread::scope(|scope| {
+            let waiter = scope.spawn(|| {
+                acquire_cancellable_on(
+                    &tokens,
+                    label.into(),
+                    Instant::now() + Duration::from_secs(5),
+                    Some(&cancellation),
+                )
+            });
+            let deadline = Instant::now() + Duration::from_secs(5);
+            // Observe admission while the sole slot is held, rather than
+            // assuming a sleep proves that this waiter has entered the queue.
+            while snapshot()
+                .get(label)
+                .is_none_or(|value| value.in_flight == 0)
+            {
+                assert!(Instant::now() < deadline, "waiter did not enter admission");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            // Record one whole wait, rather than the internal polling slices.
+            std::thread::sleep(Duration::from_millis(35));
+            let signalled = Instant::now();
+            cancellation.store(true, Ordering::Release);
+            let error = waiter
+                .join()
+                .unwrap()
+                .err()
+                .expect("cancelled admission must fail");
+            assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+            assert!(signalled.elapsed() < Duration::from_millis(250));
+        });
+        let sample = &snapshot()[label];
+        assert_eq!(sample.in_flight, 0);
+        assert_eq!(sample.spawns, 0);
+        assert!(sample.max_wait_ms >= 30);
+        assert!(tokens.1.try_recv().is_err());
+        drop(held);
+        let fresh = acquire_on(
+            &tokens,
+            "cancel-test-recovered".into(),
+            Instant::now() + Duration::from_secs(5),
+        )
+        .unwrap();
+        assert!(tokens.1.try_recv().is_err());
+        drop(fresh);
         assert!(tokens.1.try_recv().is_ok());
         assert!(tokens.1.try_recv().is_err());
     }

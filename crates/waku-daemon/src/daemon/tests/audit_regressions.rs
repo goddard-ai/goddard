@@ -61,7 +61,7 @@ fn audit_failed_resume_preserves_parked_prompts() {
         state.mark_session_dirty(session_id);
         backend.task_store.save(&mut state).unwrap();
     }
-    assert!(backend.resume_employee(session_id).is_err());
+    assert!(backend.resume_employee(session_id, None).is_err());
     let state = backend.task_state.lock();
     assert!(
         state
@@ -81,6 +81,10 @@ fn audit_failed_resume_preserves_parked_prompts() {
 #[test]
 fn audit_completion_delivery_retries_with_the_same_message_identity() {
     let root = std::env::temp_dir().join(format!("boss-completion-outbox-{}", Uuid::new_v4()));
+    let settings = DaemonSettingsStore::open(root.join("settings.json")).unwrap();
+    let mut document = settings.get();
+    document.boss_experiment_enabled = true;
+    settings.replace(document).unwrap();
     let (backend, supervisor, employee_id, parent, _) = employee_finish_fixture(&root);
     backend
         .boss
@@ -119,12 +123,16 @@ fn audit_completion_delivery_retries_with_the_same_message_identity() {
     } else {
         std::fs::remove_file(&continuity).unwrap();
     }
-    let manifest = backend.boss.root().join("boss.json");
-    std::fs::remove_file(&manifest).unwrap();
-    std::fs::create_dir(&manifest).unwrap();
+    let database = rusqlite::Connection::open(backend.task_store.path()).unwrap();
+    database
+        .execute_batch(
+            "CREATE TRIGGER reject_report_ack BEFORE UPDATE ON boss_coordinator
+             BEGIN SELECT RAISE(ABORT, 'write failure'); END;",
+        )
+        .unwrap();
     assert!(backend.deliver_completion_report(report.clone()).is_err());
-    assert_eq!(backend.boss.pending_completion_reports().len(), 1);
-    std::fs::remove_dir(&manifest).unwrap();
+    database.execute_batch("DROP TRIGGER reject_report_ack;").unwrap();
+    drop(database);
     backend.deliver_completion_report(report).unwrap();
     assert!(backend.boss.pending_completion_reports().is_empty());
     let state = backend.task_state.lock();
