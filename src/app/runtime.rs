@@ -7219,7 +7219,7 @@ impl Waku {
             return;
         }
         let session_id = session.id;
-        let Some(submission) = self.interrupted_session_continue_submission(session_id) else {
+        let Some(submission) = self.interrupted_session_continue_submission(session_id, cx) else {
             return;
         };
         if self.big_picture.is_open() {
@@ -7237,7 +7237,7 @@ impl Waku {
         session_id: Uuid,
         cx: &mut Context<Self>,
     ) {
-        let Some(submission) = self.interrupted_session_continue_submission(session_id) else {
+        let Some(submission) = self.interrupted_session_continue_submission(session_id, cx) else {
             return;
         };
         self.submit_composer_submission_to(session_id, submission, cx);
@@ -7249,6 +7249,7 @@ impl Waku {
     fn interrupted_session_continue_submission(
         &mut self,
         session_id: Uuid,
+        cx: &mut Context<Self>,
     ) -> Option<ComposerSubmission> {
         if self.model_picker_has_no_providers() {
             return None;
@@ -7266,13 +7267,27 @@ impl Waku {
         let resend = interrupted
             .then(|| composer::undelivered_turn_resend(session))
             .flatten();
-        // A client-owned entry already queued resumes the session on its
-        // own — a hidden nudge behind it would fire a redundant invisible
-        // turn once the queue drains.
-        let nudge_covered = session
-            .queued_messages
-            .iter()
-            .any(|message| !message.is_agent_owned());
+        let stopped = Self::latest_turn_was_user_stopped(session);
+        if stopped
+            && resend.is_none()
+            && let Some(message) = session.queued_messages.iter().find(|message| {
+                !message.is_agent_owned() && message.hidden && message.content == CONTINUE_PROMPT
+            })
+        {
+            self.stopped_queue_sends
+                .entry(session_id)
+                .or_default()
+                .insert(message.id);
+            self.drain_queued_message(session_id, cx);
+            return None;
+        }
+        // Follow-ups after other kinds of interruption can resume on their
+        // own. A manual Stop holds them until a subsequent turn finishes.
+        let nudge_covered = !stopped
+            && session
+                .queued_messages
+                .iter()
+                .any(|message| !message.is_agent_owned());
         Some(match resend {
             Some((turn_id, message_id, mut submission)) => {
                 // The dead turn's annotations move to the resend so an
@@ -8394,17 +8409,22 @@ impl Waku {
         let stopped = Self::latest_turn_was_user_stopped(session);
         let requested = self.stopped_queue_sends.remove(&session_id);
         let Some(message) = self.state.session_mut(session_id).and_then(|session| {
-            session
-                .queued_messages
-                .iter()
-                .position(|queued| {
-                    !queued.is_agent_owned()
-                        && (!stopped
-                            || requested
-                                .as_ref()
-                                .is_some_and(|ids| ids.contains(&queued.id)))
-                })
-                .map(|index| session.queued_messages.remove(index))
+            let explicitly_requested = requested.as_ref().and_then(|ids| {
+                session
+                    .queued_messages
+                    .iter()
+                    .position(|queued| !queued.is_agent_owned() && ids.contains(&queued.id))
+            });
+            let index = explicitly_requested.or_else(|| {
+                if stopped {
+                    return None;
+                }
+                session
+                    .queued_messages
+                    .iter()
+                    .position(|queued| !queued.is_agent_owned())
+            })?;
+            Some(session.queued_messages.remove(index))
         }) else {
             return;
         };
@@ -8825,17 +8845,18 @@ impl Waku {
         // Wait for the checkpoint, runtime, workspace, and settings to be
         // ready before sending. An explicit send after Stop keeps its own
         // queue entry eligible while the earlier follow-ups stay parked.
+        let waiting_for_cancel = self.session_is_draining_cancel(session_id);
         if self.ending_checkpoint_pending(session_id)
             || self.control_runtime_starts.contains(&session_id)
             || self.runtime_attach_pending.contains(&session_id)
             || self.worktree_move_pending.contains(&session_id)
-            || self.session_is_draining_cancel(session_id)
+            || waiting_for_cancel
             || self.runtimes.get(&session_id).is_some_and(|runtime| {
                 runtime.options_in_flight.is_some() || runtime.options_deferred
             })
         {
             if (!submission.hidden || submission.prompt == CONTINUE_PROMPT)
-                && Self::latest_turn_was_user_stopped(session)
+                && (waiting_for_cancel || Self::latest_turn_was_user_stopped(session))
                 && !session.is_busy()
             {
                 let id = *submission.queued_id.get_or_insert_with(Uuid::new_v4);

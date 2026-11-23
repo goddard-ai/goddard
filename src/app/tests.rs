@@ -5859,20 +5859,24 @@ fn continue_state_tracks_the_queued_resume() {
     session.begin_turn("do the thing");
     session.finish_active_turn(TurnStatus::Interrupted);
     session.status = SessionStatus::Idle;
-    assert_eq!(continue_state(&session), ContinueState::Ready);
+    assert_eq!(continue_state(&session, None), ContinueState::Ready);
 
     // A visible follow-up drains into a turn by itself — a hidden nudge
     // behind it would only stack a redundant invisible turn.
     session
         .queued_messages
         .push(QueuedMessage::new("follow up"));
-    assert_eq!(continue_state(&session), ContinueState::Covered);
+    assert_eq!(continue_state(&session, None), ContinueState::Covered);
 
     // The parked continue nudge arms the button over everything else.
     let mut nudge = QueuedMessage::new(CONTINUE_PROMPT);
     nudge.hidden = true;
+    let requested = HashSet::from([nudge.id]);
     session.queued_messages.push(nudge);
-    assert_eq!(continue_state(&session), ContinueState::Armed);
+    assert_eq!(continue_state(&session, None), ContinueState::Armed);
+    session.turns.last_mut().unwrap().interruption = Some(waku_protocol::model::TurnInterruption::You);
+    assert_eq!(continue_state(&session, None), ContinueState::Ready);
+    assert_eq!(continue_state(&session, Some(&requested)), ContinueState::Armed);
 }
 
 /// A submission aimed at an expired employee never reaches the provider
@@ -11415,6 +11419,7 @@ mod live_employee_approvals {
 
     fn model_selection_app(
         cx: &mut gpui::TestAppContext,
+        skip_drawing: bool,
     ) -> (
         parking_lot::MutexGuard<'static, ()>,
         FakeDaemon,
@@ -11424,7 +11429,9 @@ mod live_employee_approvals {
         Uuid,
         Uuid,
     ) {
-        cx.skip_drawing();
+        if skip_drawing {
+            cx.skip_drawing();
+        }
         let (env, directory) = isolated_env();
         let project = Project::from_path(directory.join("project"));
         std::fs::create_dir_all(&project.path).unwrap();
@@ -11478,7 +11485,7 @@ mod live_employee_approvals {
         cx: &mut gpui::TestAppContext,
     ) {
         let (_env, daemon, _supervisor, view, vcx, session_id, runtime_id) =
-            model_selection_app(cx);
+            model_selection_app(cx, true);
         update_app(vcx, &view, |waku, window, cx| {
             waku.choose_model(
                 ProviderKind::Claude,
@@ -11546,7 +11553,7 @@ mod live_employee_approvals {
 
     #[gpui::test]
     fn selected_model_precedes_an_immediate_prompt(cx: &mut gpui::TestAppContext) {
-        let (_env, daemon, _supervisor, view, vcx, session_id, _) = model_selection_app(cx);
+        let (_env, daemon, _supervisor, view, vcx, session_id, _) = model_selection_app(cx, true);
         update_app(vcx, &view, |waku, window, cx| {
             let began = Instant::now();
             waku.choose_model(
@@ -11614,7 +11621,7 @@ mod live_employee_approvals {
     #[gpui::test]
     fn selected_model_survives_ordinary_task_owner_validation(cx: &mut gpui::TestAppContext) {
         let (_env, daemon, _supervisor, view, vcx, session_id, runtime_id) =
-            model_selection_app(cx);
+            model_selection_app(cx, true);
         *daemon.response_hook.lock() = Some(Arc::new(move |_, command| {
             matches!(command, Command::AttachSession).then(|| ResponseOutcome::Ok {
                 payload: ResponsePayload::SessionRuntime {
@@ -11682,7 +11689,7 @@ mod live_employee_approvals {
     #[gpui::test]
     fn stopped_turn_keeps_follow_ups_until_explicit_steer_finishes(cx: &mut gpui::TestAppContext) {
         let (_env, daemon, _supervisor, view, vcx, session_id, runtime_id) =
-            model_selection_app(cx);
+            model_selection_app(cx, true);
         let parked = QueuedMessage::new("keep this queued");
         let steer = QueuedMessage::new("send this first");
         let steer_id = steer.id;
@@ -11754,9 +11761,58 @@ mod live_employee_approvals {
     }
 
     #[gpui::test]
+    fn empty_enter_resumes_a_stopped_turn_before_queued_follow_ups(cx: &mut gpui::TestAppContext) {
+        let (_env, daemon, _supervisor, view, vcx, session_id, runtime_id) =
+            model_selection_app(cx, false);
+        update_app(vcx, &view, |waku, window, cx| {
+            crate::input::init(cx);
+            let session = waku.state.session_mut(session_id).unwrap();
+            session.begin_turn("active prompt");
+            session.mark_active_turn_provider_started();
+            session.status = SessionStatus::Working;
+            session.queued_messages.push(QueuedMessage::new("follow up"));
+            waku.cancel_session_turn(session_id, cx);
+            waku.refocus_composer(window, cx);
+        });
+        vcx.simulate_keystrokes("enter");
+        let finish = || {
+            waku_client::event_to_wire(DriverEvent::TurnFinished {
+                success: true,
+                summary: None,
+                summary_i18n: None,
+            })
+            .unwrap()
+        };
+        daemon.send_event(session_id, runtime_id, 1, finish());
+        let sent_prompts = || {
+            daemon
+                .commands_for(session_id)
+                .into_iter()
+                .filter_map(|command| match command {
+                    Command::Prompt { prompt, hidden, .. }
+                    | Command::PromptWithConfiguration { prompt, hidden, .. } => {
+                        Some((prompt, hidden))
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        wait_for(vcx, &view, |_| !sent_prompts().is_empty());
+        assert_eq!(sent_prompts(), [(CONTINUE_PROMPT.into(), true)]);
+        read_app(vcx, &view, |waku| {
+            let session = &waku.state.sessions[0];
+            assert_eq!(session.queued_messages.len(), 1);
+            assert_eq!(session.queued_messages[0].content, "follow up");
+        });
+        daemon.send_event(session_id, runtime_id, 2, finish());
+        wait_for(vcx, &view, |_| sent_prompts().len() == 2);
+        assert_eq!(sent_prompts()[1], ("follow up".into(), false));
+    }
+
+    #[gpui::test]
     fn queued_prompts_keep_the_configuration_selected_for_each(cx: &mut gpui::TestAppContext) {
         let (_env, daemon, _supervisor, view, vcx, session_id, runtime_id) =
-            model_selection_app(cx);
+            model_selection_app(cx, true);
         update_app(vcx, &view, |waku, window, cx| {
             for (model, prompt) in [
                 ("first-model", "first prompt"),
@@ -11858,7 +11914,7 @@ mod live_employee_approvals {
 
     #[gpui::test]
     fn rejected_prompt_configuration_fails_without_stale_execution(cx: &mut gpui::TestAppContext) {
-        let (_env, daemon, _supervisor, view, vcx, session_id, _) = model_selection_app(cx);
+        let (_env, daemon, _supervisor, view, vcx, session_id, _) = model_selection_app(cx, true);
         daemon
             .reject_configured_prompts
             .store(true, Ordering::Release);
@@ -12006,7 +12062,7 @@ mod live_employee_approvals {
     fn rushed_sidebar_group_updates_when_rush_is_toggled(cx: &mut gpui::TestAppContext) {
         use super::super::sidebar::SidebarGroup;
 
-        let (_env, _daemon, _supervisor, view, vcx, session_id, _) = model_selection_app(cx);
+        let (_env, _daemon, _supervisor, view, vcx, session_id, _) = model_selection_app(cx, true);
         update_app(vcx, &view, |waku, _, cx| {
             let session = waku.state.session_mut(session_id).unwrap();
             session.begin_turn("Rushed task");

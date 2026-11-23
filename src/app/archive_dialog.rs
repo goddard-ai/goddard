@@ -266,10 +266,14 @@ impl Waku {
         let mut submission = ComposerSubmission::plain(prompt);
         let queued_id = Uuid::new_v4();
         submission.queued_id = Some(queued_id);
-        self.stopped_queue_sends
-            .entry(session_id)
-            .or_default()
-            .insert(queued_id);
+        if self.state.sessions.iter().any(|session| {
+            session.id == session_id && Self::latest_turn_was_user_stopped(session)
+        }) {
+            self.stopped_queue_sends
+                .entry(session_id)
+                .or_default()
+                .insert(queued_id);
+        }
         self.enqueue_follow_up_submission(session_id, submission, cx);
         self.drain_queued_message(session_id, cx);
     }

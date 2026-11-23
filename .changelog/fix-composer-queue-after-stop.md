@@ -1,1 +1,1 @@
-- Stopping a turn keeps follow-up prompts queued. Use Steer to send a queued prompt when you’re ready.
+- Stopping a turn keeps follow-up prompts queued. Press Enter in the empty desktop composer to resume, or use Steer to send a queued prompt.

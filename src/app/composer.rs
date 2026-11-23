@@ -543,17 +543,21 @@ pub(super) enum ContinueState {
     Covered,
 }
 
-pub(super) fn continue_state(session: &AgentSession) -> ContinueState {
-    if session
-        .queued_messages
-        .iter()
-        .any(queued_message_is_continue)
-    {
+pub(super) fn continue_state(
+    session: &AgentSession,
+    requested: Option<&HashSet<Uuid>>,
+) -> ContinueState {
+    let stopped = Waku::latest_turn_was_user_stopped(session);
+    if session.queued_messages.iter().any(|message| {
+        queued_message_is_continue(message)
+            && (!stopped || requested.is_some_and(|ids| ids.contains(&message.id)))
+    }) {
         ContinueState::Armed
-    } else if session
-        .queued_messages
-        .iter()
-        .any(|message| !message.hidden)
+    } else if !stopped
+        && session
+            .queued_messages
+            .iter()
+            .any(|message| !message.hidden)
     {
         ContinueState::Covered
     } else {
@@ -7191,8 +7195,9 @@ impl Waku {
                                 this.submit_composer_card_draft(&send_route, cx);
                             })),
                         ComposerSubmitAction::Continue => {
-                            let continue_state =
-                                session.map_or(ContinueState::Ready, continue_state);
+                            let continue_state = session.map_or(ContinueState::Ready, |session| {
+                                continue_state(session, self.stopped_queue_sends.get(&session.id))
+                            });
                             let armed = continue_state != ContinueState::Ready;
                             let live = !armed && can_continue;
                             let tooltip = match continue_state {
