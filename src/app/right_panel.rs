@@ -3594,7 +3594,8 @@ mod tests {
             id: Uuid::parse_str("6e72122c-db05-47c2-b582-0044fde480e7").unwrap(),
             name: "Opals review".into(),
             path: root
-                .join("published/6e72122c-db05-47c2-b582-0044fde480e7")
+                .join("published")
+                .join("6e72122c-db05-47c2-b582-0044fde480e7")
                 .join(filename)
                 .to_string_lossy()
                 .into_owned(),
@@ -3702,7 +3703,7 @@ mod tests {
             transcript_link_route("https://example.com/review.md", None),
             TranscriptLinkRoute::External
         );
-        let unpublished = root.join("unpublished/review.md");
+        let unpublished = root.join("unpublished").join("review.md");
         assert_eq!(
             transcript_link_route(&unpublished.to_string_lossy(), None),
             TranscriptLinkRoute::PanelFile(unpublished.to_string_lossy().into_owned(), None)
