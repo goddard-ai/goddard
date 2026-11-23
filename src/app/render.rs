@@ -672,6 +672,7 @@ impl Render for Waku {
         let keyboard_options = self.render_keyboard_options(window, cx);
         let big_picture = self.render_big_picture(window, cx);
         if self.settings_page.is_some() {
+            self.chat_intro_focus = None;
             let speed_reader = self.render_speed_reader_overlay(cx);
             let command_palette = self.render_command_palette(window, cx);
             let qa_setup = self.render_qa_setup(cx);
@@ -830,6 +831,11 @@ impl Render for Waku {
             .map(|(header, page)| (Some(header), Some(page)))
             .unwrap_or((None, None));
         let screen = self.main_screen(deliverable_page.is_some());
+        let chat_intro = self.render_chat_intro(
+            screen == MainScreen::Session && !panels.panel_fullscreen,
+            window,
+            cx,
+        );
         let computer_use = self.render_computer_use_overlay(window, cx);
         let speed_reader = self.render_speed_reader_overlay(cx);
         let command_palette = self.render_command_palette(window, cx);
@@ -1363,6 +1369,7 @@ impl Render for Waku {
             .children(ssh_prompt)
             .children(sync_branch_modal)
             .children(git_panel_overlays)
+            .children(chat_intro)
             .children(image_preview)
             .children(task_switcher)
             .children(project_switcher)

@@ -2027,6 +2027,10 @@ struct AppState {
     /// not an added security or privacy boundary.
     #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
     incognito_disclosure_acknowledged: bool,
+    #[serde(default)]
+    boss_intro_dismissed: bool,
+    #[serde(default)]
+    counsel_intro_dismissed: bool,
     /// The environment the last session ran in, seeded into the next draft.
     #[serde(default, skip_serializing_if = "SessionEnvironment::is_local")]
     last_environment: SessionEnvironment,
@@ -2240,6 +2244,8 @@ pub struct PersistedState {
     /// not an added security or privacy boundary.
     #[serde(default, skip_serializing_if = "waku_protocol::model::is_false")]
     pub incognito_disclosure_acknowledged: bool,
+    pub boss_intro_dismissed: bool,
+    pub counsel_intro_dismissed: bool,
     /// The environment the last session ran in, seeded into the next draft.
     /// Read through [`Self::last_environment`], which folds in the legacy
     /// `last_sandboxed` flag.
@@ -2958,6 +2964,8 @@ impl PersistedState {
             project_runtime_modes: HashMap::new(),
             full_access_acknowledged: false,
             incognito_disclosure_acknowledged: false,
+            boss_intro_dismissed: false,
+            counsel_intro_dismissed: false,
             last_environment: SessionEnvironment::Local,
             last_sandboxed: false,
             last_model: None,
@@ -3704,6 +3712,8 @@ impl PersistedState {
             project_runtime_modes: self.project_runtime_modes.clone(),
             full_access_acknowledged: self.full_access_acknowledged,
             incognito_disclosure_acknowledged: self.incognito_disclosure_acknowledged,
+            boss_intro_dismissed: self.boss_intro_dismissed,
+            counsel_intro_dismissed: self.counsel_intro_dismissed,
             last_environment: self.last_environment(),
             last_sandboxed: false,
             last_model: self.last_model.clone(),
@@ -3918,6 +3928,8 @@ impl PersistedState {
         self.project_runtime_modes = app_state.project_runtime_modes;
         self.full_access_acknowledged = app_state.full_access_acknowledged;
         self.incognito_disclosure_acknowledged = app_state.incognito_disclosure_acknowledged;
+        self.boss_intro_dismissed = app_state.boss_intro_dismissed;
+        self.counsel_intro_dismissed = app_state.counsel_intro_dismissed;
         self.last_environment =
             resolve_last_environment(app_state.last_environment, app_state.last_sandboxed);
         self.last_sandboxed = false;
@@ -6910,6 +6922,27 @@ mod tests {
             serde_json::from_value(serde_json::to_value(state.app_state()).unwrap()).unwrap(),
         );
         assert!(restored.sidebar_collapsed_groups.is_empty());
+    }
+
+    #[test]
+    fn chat_intro_dismissals_round_trip_independently() {
+        let mut state = PersistedState::empty();
+        let legacy = serde_json::from_str(r#"{"app_state_version":1}"#).unwrap();
+        state.apply_app_state(legacy);
+        assert!(!state.boss_intro_dismissed);
+        assert!(!state.counsel_intro_dismissed);
+
+        for (boss, counsel) in [(true, false), (false, true), (true, true)] {
+            state.boss_intro_dismissed = boss;
+            state.counsel_intro_dismissed = counsel;
+            let encoded = serde_json::to_value(state.app_state()).unwrap();
+            let mut restored = PersistedState::empty();
+            restored.apply_app_state(serde_json::from_value(encoded).unwrap());
+            assert_eq!(
+                (restored.boss_intro_dismissed, restored.counsel_intro_dismissed),
+                (boss, counsel)
+            );
+        }
     }
 
     #[test]

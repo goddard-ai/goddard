@@ -7870,3 +7870,20 @@ counsel.sources:
 
 counsel.open_boss:
   en: "Open Boss"
+
+boss.intro_title:
+  en: Meet Boss
+boss.intro_description:
+  en: Give Boss a goal and say how you’ll know it’s done. Boss assigns work to AI employees and reports back.
+boss.intro_example:
+  en: “Fix the crash when opening Settings in the mobile app and show me how you verified the fix.”
+boss.intro_try:
+  en: Try asking
+boss.intro_start:
+  en: Start chatting
+counsel.intro_title:
+  en: Meet Counsel
+counsel.intro_description:
+  en: Counsel reviews your recent work and suggests what to do next. Approve a recommendation to send it to Boss.
+counsel.intro_example:
+  en: “Based on my recent work, what should I tackle next?”

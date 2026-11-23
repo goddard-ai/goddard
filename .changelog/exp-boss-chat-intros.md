@@ -1,0 +1,1 @@
+- Open Boss or Counsel for the first time to see how that chat works and an example of what to ask.

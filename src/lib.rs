@@ -421,6 +421,7 @@ pub fn run() {
         crate::app::init_full_access_dialog_keys(cx);
         crate::app::init_daemon_degraded_keys(cx);
         crate::app::init_incognito_dialog_keys(cx);
+        crate::app::init_chat_intro_keys(cx);
         crate::app::init_terminal_close_dialog_keys(cx);
         crate::app::init_close_dialog_keys(cx);
         crate::app::init_provider_switch_dialog_keys(cx);

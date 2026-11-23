@@ -3180,6 +3180,7 @@ pub struct Waku {
     provider_switch_in_flight: HashSet<Uuid>,
     /// The keyboard-shortcut cheatsheet opened from the sidebar footer.
     shortcuts_dialog: Option<shortcuts_dialog::ShortcutsDialogState>,
+    chat_intro_focus: Option<(Uuid, FocusHandle)>,
     goal_dialog: Option<goal_dialog::GoalDialogState>,
     goal_dialog_request: Option<goal_dialog::GoalDialogRequest>,
     /// Window-modal note composer for Settings → Friends file sends, opened
@@ -4641,6 +4642,7 @@ mod command_palette;
 mod commit_dialog;
 mod components;
 mod composer;
+mod chat_intro;
 mod counsel;
 mod daemon_degraded;
 mod deep_link;
@@ -4749,6 +4751,7 @@ pub use full_access_dialog::init as init_full_access_dialog_keys;
 pub use git_panel::init as init_git_panel_keys;
 pub use goal_dialog::init as init_goal_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;
+pub use chat_intro::init as init_chat_intro_keys;
 pub use incognito_dialog::init as init_incognito_dialog_keys;
 pub use issue_dialog::init as init_issue_dialog_keys;
 pub use provider_switch_dialog::init as init_provider_switch_dialog_keys;
@@ -7802,6 +7805,7 @@ impl Waku {
                 full_access_dialog: None,
                 incognito_dialog: None,
                 shortcuts_dialog: None,
+                chat_intro_focus: None,
                 goal_dialog: None,
                 goal_dialog_request: None,
                 send_file_dialog: None,
