@@ -149,6 +149,11 @@ fn employee_archive_guard_preserves_dirty_and_unlanded_work() {
         WakuBackend::employee_archive_blocker(&session).unwrap(),
         Some((path, "unlanded commits")) if path == worktree
     ));
+    std::fs::remove_dir_all(&worktree).unwrap();
+    assert_eq!(
+        WakuBackend::employee_archive_blocker(&session).unwrap(),
+        None
+    );
     std::fs::remove_dir_all(root).ok();
 }
 

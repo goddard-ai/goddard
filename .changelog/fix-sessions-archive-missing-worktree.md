@@ -1,0 +1,1 @@
+- Archive tasks even when their worktree directory has already been deleted manually.

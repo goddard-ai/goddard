@@ -182,8 +182,15 @@ fn is_checkout(cwd: &Path) -> anyhow::Result<bool> {
 
 /// What archiving a checkout would stash: every dirty working-tree file and
 /// the subjects of commits on HEAD no other ref has. `Ok(None)` outside a
-/// work tree. `base` is the worktree's recorded base branch.
+/// work tree. A deleted directory has an empty preview: there is nothing
+/// left to preserve. `base` is the worktree's recorded base branch.
 pub fn archive_preview(cwd: &Path, base: Option<&str>) -> anyhow::Result<Option<ArchivePreview>> {
+    if !cwd
+        .try_exists()
+        .context("could not inspect archive directory")?
+    {
+        return Ok(Some(ArchivePreview::default()));
+    }
     if !git_optional_stdout(cwd, &["rev-parse", "--is-inside-work-tree"])?
         .is_some_and(|answer| answer == "true")
     {
@@ -1240,6 +1247,24 @@ mod tests {
         let root = std::env::temp_dir().join(format!("waku-preview-test-{}", Uuid::new_v4()));
         fs::create_dir_all(&root).unwrap();
         assert!(archive_preview(&root, None).unwrap().is_none());
+    }
+
+    #[test]
+    fn archive_preview_tolerates_deleted_paths_but_preserves_file_deletions() {
+        let root = repository();
+        fs::remove_file(root.join("README.md")).unwrap();
+        let preview = archive_preview(&root, None).unwrap().unwrap();
+        assert!(
+            preview
+                .files
+                .iter()
+                .any(|file| file.path == "README.md" && file.status == "D")
+        );
+
+        fs::remove_dir_all(&root).unwrap();
+        let preview = archive_preview(&root, None).unwrap().unwrap();
+        assert!(preview.files.is_empty());
+        assert!(preview.unpushed_commits.is_empty());
     }
 
     #[test]

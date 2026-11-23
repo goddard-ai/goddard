@@ -1174,6 +1174,10 @@ impl WakuBackend {
             return Ok(None);
         };
 
+        // A manually deleted checkout has no remaining work to discard.
+        if !path.try_exists()? {
+            return Ok(None);
+        }
         let status = crate::git_commit::git_stdout(
             path,
             &["status", "--porcelain=v1", "--untracked-files=all"],
