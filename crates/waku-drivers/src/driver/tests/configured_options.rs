@@ -273,14 +273,24 @@ fn deepseek_http_refusal_and_partial_update_prevent_stale_prompt_execution() {
             context_window: (model == "unsupported-window").then(|| "1m".to_owned()),
         };
         let (events, _received) = test_event_channel();
-        let driver = DriverHandle::from_control(Arc::new(
+        let start = || {
             deepseek::DeepSeekDriver::start(
-                launch_options(binary, root.clone(), "local/initial-model"),
-                events,
+                launch_options(binary.clone(), root.clone(), "local/initial-model"),
+                events.clone(),
             )
-            .unwrap(),
-        ))
-        .with_initial_options(selected("initial-model"));
+        };
+        // A hosted runner can stall the subprocess before its ready line.
+        // Retry only startup, before any configuration or prompt assertions.
+        let driver = match start() {
+            Err(error) if error.to_string().starts_with("timed out starting DeepSeek Harness") => {
+                eprintln!("DeepSeek fixture ({target}) startup: {error:#}. Retrying once.");
+                start()
+            }
+            result => result,
+        }
+        .unwrap_or_else(|error| panic!("DeepSeek fixture ({target}) startup failed: {error:#}"));
+        let driver = DriverHandle::from_control(Arc::new(driver))
+            .with_initial_options(selected("initial-model"));
         let prepared = driver.prepare_prompt_options(selected(target));
         let applied = prepared.is_ok();
         if applied {
