@@ -9766,13 +9766,13 @@ mod live_employee_approvals {
     }
 
     #[gpui::test]
-    fn git_shortcut_hides_focused_tab_and_keeps_commit_overview_in_main_area(
+    fn git_panel_shortcuts_navigate_history_search_and_commit_overview(
         cx: &mut gpui::TestAppContext,
     ) {
         use super::super::{RightPanelSurface, ToggleGitPanel, render::MainScreen};
         use waku_client::git::CommitEntry;
         use waku_client::workspace::{
-            ReviewDiffData, ReviewDiffSource, WorkspaceOperation, WorkspaceResult,
+            CommitSearchScope, ReviewDiffData, ReviewDiffSource, WorkspaceOperation, WorkspaceResult,
         };
 
         let (_env, dir) = isolated_env();
@@ -9807,6 +9807,27 @@ mod live_employee_approvals {
                         deletions: 0,
                     }],
                 },
+                WorkspaceOperation::SearchCommits {
+                    query,
+                    scope: CommitSearchScope::Head,
+                    offset: 0,
+                    ..
+                } if query == "older" => WorkspaceResult::CommitSearch {
+                    entries: ["1", "2"]
+                        .map(|sha| CommitEntry {
+                            sha: sha.repeat(40),
+                            short_sha: sha.repeat(7),
+                            subject: "Older result".into(),
+                            body: String::new(),
+                            author: "Author".into(),
+                            author_email: String::new(),
+                            authored_at: 0,
+                            additions: 0,
+                            deletions: 0,
+                        })
+                        .into(),
+                    next_offset: None,
+                },
                 WorkspaceOperation::CommitDiff { .. } => WorkspaceResult::ReviewDiff {
                     data: ReviewDiffData {
                         source: ReviewDiffSource::Commit,
@@ -9825,6 +9846,7 @@ mod live_employee_approvals {
         let (view, vcx) = test_app(cx, supervisor);
         update_app(vcx, &view, |waku, window, cx| {
             cx.bind_keys([gpui::KeyBinding::new("secondary-alt-g", ToggleGitPanel, None)]);
+            waku_ui::input::init(cx);
             super::super::git_panel::init(cx);
             cx.set_reduce_motion(true);
             waku.state.git_panel_enabled = true;
@@ -9886,6 +9908,36 @@ mod live_employee_approvals {
             read_app(vcx, &view, |waku| waku.main_screen(false)),
             MainScreen::Session
         );
+
+        vcx.simulate_keystrokes("secondary-f");
+        vcx.update(|window, cx| window.simulate_next_frame(cx));
+        vcx.simulate_input("older");
+        vcx.run_until_parked();
+        cx.executor().advance_clock(Duration::from_millis(200));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            vcx.run_until_parked();
+            vcx.update(|window, cx| window.simulate_next_frame(cx));
+            if vcx.debug_bounds("git-search-result-1").is_some() {
+                break;
+            }
+            assert!(Instant::now() < deadline, "search results did not appear");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        vcx.simulate_keystrokes("down enter");
+        vcx.update(|window, cx| window.simulate_next_frame(cx));
+        read_app(vcx, &view, |waku| {
+            assert_eq!(
+                waku.git_panel_commit_diff.as_ref().unwrap().sha,
+                "2".repeat(40)
+            );
+        });
+        vcx.simulate_keystrokes("escape");
+        vcx.update(|window, cx| window.simulate_next_frame(cx));
+        assert!(vcx.debug_bounds("git-search-result-1").is_some());
+        vcx.simulate_keystrokes("escape");
+        vcx.update(|window, cx| window.simulate_next_frame(cx));
+        assert!(vcx.debug_bounds("git-panel-commit-0").is_some());
     }
 
     // Deliver the late snapshot explicitly so the ordering is deterministic.

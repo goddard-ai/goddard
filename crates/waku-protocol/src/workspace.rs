@@ -13,6 +13,15 @@ use crate::git::{
 };
 use crate::model::{Checkpoint, ProviderKind};
 
+/// The refs whose reachable commits are included in a search.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum CommitSearchScope {
+    Head,
+    Base { branch: Option<String> },
+    AllRefs,
+}
+
 /// Confirmed commands for a project's local QA sessions.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -1225,6 +1234,14 @@ pub enum WorkspaceOperation {
         skip: usize,
         limit: usize,
     },
+    /// Search commit metadata from the selected refs on the workspace host.
+    SearchCommits {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        scope: CommitSearchScope,
+        query: String,
+        offset: usize,
+    },
     /// `git log` for `@{upstream} --not HEAD`, paged like `ListCommits`:
     /// the commits the tracking branch has that the checkout lacks.
     ListUpstreamCommits {
@@ -1646,6 +1663,10 @@ pub enum WorkspaceResult {
     },
     Commits {
         entries: Vec<CommitEntry>,
+    },
+    CommitSearch {
+        entries: Vec<CommitEntry>,
+        next_offset: Option<usize>,
     },
     CommitEntry {
         entry: CommitEntry,

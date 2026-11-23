@@ -4353,6 +4353,7 @@ fn workspace_operation_kind(operation: &WorkspaceOperation) -> &'static str {
         WorkspaceOperation::Land { .. } => "land",
         WorkspaceOperation::RebaseOnto { .. } => "rebaseOnto",
         WorkspaceOperation::ListCommits { .. } => "listCommits",
+        WorkspaceOperation::SearchCommits { .. } => "searchCommits",
         WorkspaceOperation::ListBaseCommits { .. } => "listBaseCommits",
         WorkspaceOperation::ListUpstreamCommits { .. } => "listUpstreamCommits",
         WorkspaceOperation::ResolveRemoteFile { .. } => "resolveRemoteFile",

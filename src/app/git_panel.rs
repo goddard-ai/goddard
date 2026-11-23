@@ -7,7 +7,7 @@
 use std::rc::Rc;
 
 use gpui::{
-    ElementId, HighlightStyle, InteractiveText, KeyBinding, PathBuilder, Point, StyledText,
+    ElementId, HighlightStyle, InteractiveText, KeyBinding, PathBuilder, Point, StyledText, Task,
     UnderlineStyle, actions,
 };
 
@@ -15,7 +15,7 @@ use waku_client::git::{
     CommitEntry, GitFileChange, GitPanelSnapshot, LandOutcome, LandTarget, PullOutcome,
     PullStrategy, RebaseOutcome, SyncInProgress, UpstreamStatus,
 };
-use waku_client::workspace::{WorkspaceOperation, WorkspaceResult};
+use waku_client::workspace::{CommitSearchScope, WorkspaceOperation, WorkspaceResult};
 
 use crate::ui::ActivationExt;
 
@@ -26,12 +26,19 @@ actions!(
     [
         GitPanelPrimaryAction,
         ConfirmGitPanelModal,
-        DismissGitPanelModal
+        DismissGitPanelModal,
+        FocusCommitSearch,
+        ConfirmCommitSearch,
+        ClearCommitSearch,
+        NextCommitSearchResult,
+        PreviousCommitSearchResult
     ]
 );
 
 const PANEL_CONTEXT: &str = "GitPanel";
 const PANEL_INPUT_CONTEXT: &str = "GitPanel > TextInput";
+const COMMIT_SEARCH_CONTEXT: &str = "GitCommitSearch";
+const COMMIT_SEARCH_INPUT_CONTEXT: &str = "GitCommitSearch > TextInput";
 const COMMIT_OVERVIEW_CONTEXT: &str = "GitCommitOverview";
 const MODAL_CONTEXT: &str = "GitPanelModal";
 
@@ -52,6 +59,23 @@ fn journal_git_action(pending: &GitPanelPending) -> Option<action_predictions::J
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([
+        KeyBinding::new("secondary-f", FocusCommitSearch, Some(PANEL_CONTEXT)),
+        KeyBinding::new("escape", ClearCommitSearch, Some(COMMIT_SEARCH_CONTEXT)),
+        KeyBinding::new(
+            "enter",
+            ConfirmCommitSearch,
+            Some(COMMIT_SEARCH_INPUT_CONTEXT),
+        ),
+        KeyBinding::new(
+            "down",
+            NextCommitSearchResult,
+            Some(COMMIT_SEARCH_INPUT_CONTEXT),
+        ),
+        KeyBinding::new(
+            "up",
+            PreviousCommitSearchResult,
+            Some(COMMIT_SEARCH_INPUT_CONTEXT),
+        ),
         KeyBinding::new(
             "secondary-enter",
             GitPanelPrimaryAction,
@@ -277,6 +301,7 @@ pub(super) struct GitPanelState {
     /// Load or operation failure, shown under the commit box.
     pub error: Option<String>,
     pub commits: Vec<CommitEntry>,
+    commit_search: GitCommitSearch,
     pub commits_loading: bool,
     /// Base ref requested for the history list when a task is choosing its
     /// starting branch. `None` asks the daemon to resolve the default base.
@@ -299,6 +324,44 @@ pub(super) struct GitPanelState {
     pub commits_scrollbar: Rc<ScrollbarState>,
     pub action_focus: FocusHandle,
     pub land_focus: FocusHandle,
+}
+
+struct GitCommitSearch {
+    input: Entity<TextInput>,
+    query: String,
+    all_refs: bool,
+    entries: Vec<CommitEntry>,
+    next_offset: Option<usize>,
+    selected: usize,
+    loading: bool,
+    failed: bool,
+    generation: u64,
+    task: Option<Task<()>>,
+    scroll: ScrollHandle,
+    scrollbar: Rc<ScrollbarState>,
+}
+
+impl GitCommitSearch {
+    fn new(input: Entity<TextInput>) -> Self {
+        Self {
+            input,
+            query: String::new(),
+            all_refs: false,
+            entries: Vec::new(),
+            next_offset: None,
+            selected: 0,
+            loading: false,
+            failed: false,
+            generation: 0,
+            task: None,
+            scroll: ScrollHandle::new(),
+            scrollbar: ScrollbarState::new(),
+        }
+    }
+
+    fn active(&self) -> bool {
+        !self.query.is_empty()
+    }
 }
 
 /// A file row's hover preview state, tracked per `(path, staged)` pair.
@@ -724,6 +787,25 @@ impl Waku {
                 .accessibility_label(tr!("commit.message"))
                 .placeholder(tr!("commit.message_placeholder"))
         });
+        let search_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .tab_index(0)
+                .accessibility_label(tr!("git_panel.search_commits"))
+                .placeholder(tr!("git_panel.search_commits"))
+        });
+        cx.subscribe(&search_input, |this, input, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Edited)
+                && let Some(panel) = this.git_panel.as_mut()
+                && panel.commit_search.input == input
+            {
+                let query = input.read(cx).content().trim().to_owned();
+                if query != panel.commit_search.query {
+                    panel.commit_search.query = query;
+                    this.restart_git_commit_search(Duration::from_millis(180), cx);
+                }
+            }
+        })
+        .detach();
         self.git_panel = Some(GitPanelState {
             id: Uuid::new_v4(),
             workspace,
@@ -734,6 +816,7 @@ impl Waku {
             snapshot_loading: false,
             error: None,
             commits: Vec::new(),
+            commit_search: GitCommitSearch::new(search_input),
             commits_loading: false,
             commit_base,
             commits_from_base,
@@ -951,6 +1034,13 @@ impl Waku {
         if upstream_expanded {
             self.fetch_git_panel_upstream_commits(cx);
         }
+        if self
+            .git_panel
+            .as_ref()
+            .is_some_and(|panel| panel.commit_search.active())
+        {
+            self.restart_git_commit_search(Duration::ZERO, cx);
+        }
     }
 
     /// The upstream section header toggles its list; the first expand fetches
@@ -1050,7 +1140,7 @@ impl Waku {
         panel.commits_loading = true;
         let panel_id = panel.id;
         let workspace = panel.workspace.clone();
-        let base = panel.base.clone();
+        let base = panel.commit_base.clone();
         let commits_from_base = panel.commits_from_base;
         let Some(client) = self.workspace_client_for_path(&workspace) else {
             if let Some(panel) = self.git_panel.as_mut() {
@@ -1109,6 +1199,154 @@ impl Waku {
         })
         .detach();
         cx.notify();
+    }
+
+    fn restart_git_commit_search(&mut self, delay: Duration, cx: &mut Context<Self>) {
+        let Some(panel) = self.git_panel.as_mut() else {
+            return;
+        };
+        let search = &mut panel.commit_search;
+        search.generation = search.generation.wrapping_add(1);
+        search.task = None;
+        search.entries.clear();
+        search.next_offset = None;
+        search.selected = 0;
+        search.loading = false;
+        search.failed = false;
+        search.scroll.set_offset(Point::default());
+        self.git_panel_commit_hover = None;
+        cx.notify();
+        self.fetch_git_commit_search(delay, cx);
+    }
+
+    fn fetch_git_commit_search(&mut self, delay: Duration, cx: &mut Context<Self>) {
+        let Some(panel) = self.git_panel.as_ref() else {
+            return;
+        };
+        let search = &panel.commit_search;
+        if !search.active() || search.loading {
+            return;
+        }
+        let panel_id = panel.id;
+        let generation = search.generation;
+        let workspace = panel.workspace.clone();
+        let scope = if search.all_refs {
+            CommitSearchScope::AllRefs
+        } else if panel.commits_from_base {
+            CommitSearchScope::Base {
+                branch: panel.commit_base.clone(),
+            }
+        } else {
+            CommitSearchScope::Head
+        };
+        let query = search.query.clone();
+        let offset = search.next_offset.unwrap_or(0);
+        let client = self.workspace_client_for_path(&workspace);
+        let Some(panel) = self.git_panel.as_mut() else {
+            return;
+        };
+        let search = &mut panel.commit_search;
+        let Some(client) = client else {
+            search.failed = true;
+            cx.notify();
+            return;
+        };
+        search.loading = true;
+        search.failed = false;
+        search.task = Some(cx.spawn(async move |this, cx| {
+            if !delay.is_zero() {
+                cx.background_executor().timer(delay).await;
+            }
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    client.request(WorkspaceOperation::SearchCommits {
+                        cwd: workspace,
+                        scope,
+                        query,
+                        offset,
+                    })
+                })
+                .await;
+            let _ = this.update(cx, move |this, cx| {
+                let Some(panel) = this.git_panel.as_mut() else {
+                    return;
+                };
+                let search = &mut panel.commit_search;
+                if panel.id != panel_id || search.generation != generation {
+                    return;
+                }
+                search.loading = false;
+                match result {
+                    Ok(WorkspaceResult::CommitSearch {
+                        entries,
+                        next_offset,
+                    }) => {
+                        search.entries.extend(entries);
+                        search.next_offset = next_offset;
+                    }
+                    _ => search.failed = true,
+                }
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+
+    fn focus_git_commit_search(&self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(panel) = self
+            .git_panel
+            .as_ref()
+            .filter(|panel| panel.snapshot.is_some())
+        else {
+            return false;
+        };
+        window.focus(&panel.commit_search.input.read(cx).focus_handle(cx), cx);
+        true
+    }
+
+    fn clear_git_commit_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(input) = self
+            .git_panel
+            .as_ref()
+            .map(|panel| panel.commit_search.input.clone())
+        else {
+            return;
+        };
+        if input.read(cx).content().is_empty() {
+            cx.propagate();
+            return;
+        }
+        input.update(cx, |input, cx| input.clear(cx));
+        self.focus_git_commit_search(window, cx);
+    }
+
+    fn move_git_commit_search_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
+        let Some(search) = self
+            .git_panel
+            .as_mut()
+            .map(|panel| &mut panel.commit_search)
+        else {
+            return;
+        };
+        if let Some(next) =
+            command_palette::next_selection_index(search.selected, search.entries.len(), delta)
+        {
+            search.selected = next;
+            search.scroll.scroll_to_item(next);
+            cx.notify();
+        }
+    }
+
+    fn confirm_git_commit_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(search) = self.git_panel.as_ref().map(|panel| &panel.commit_search) else {
+            return;
+        };
+        if let Some(entry) = search.entries.get(search.selected).cloned() {
+            self.open_git_panel_commit_diff(&entry, window, cx);
+        } else if search.failed {
+            self.fetch_git_commit_search(Duration::ZERO, cx);
+        }
     }
 
     /// Fetch a file row's hover diff once; a Ready/Failed entry is cached
@@ -2856,7 +3094,12 @@ impl Waku {
     }
 
     /// Open the selected commit in the main area.
-    fn open_git_panel_commit_diff(&mut self, entry: &CommitEntry, cx: &mut Context<Self>) {
+    fn open_git_panel_commit_diff(
+        &mut self,
+        entry: &CommitEntry,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.git_panel_commit_hover = None;
         // Re-clicking the open commit collapses the expanded view.
         if self
@@ -2868,10 +3111,17 @@ impl Waku {
             cx.notify();
             return;
         }
-        let Some(workspace) = self.git_panel.as_ref().map(|panel| panel.workspace.clone()) else {
+        let Some(panel) = self.git_panel.as_ref() else {
             return;
         };
-        self.open_commit_diff(workspace, entry, cx);
+        let search_active = panel.commit_search.active();
+        self.open_commit_diff(panel.workspace.clone(), entry, cx);
+        if search_active {
+            window.focus(
+                &self.transcript_control_focus("git-commit-overview", cx),
+                cx,
+            );
+        }
     }
 
     /// Shared by Git panel rows and transcript SHAs.
@@ -3572,6 +3822,11 @@ impl Waku {
                 self.git_tab_focus(cx)
             })
             .key_context(PANEL_CONTEXT)
+            .on_action(cx.listener(|this, _: &FocusCommitSearch, window, cx| {
+                if !this.focus_git_commit_search(window, cx) {
+                    cx.propagate();
+                }
+            }))
             .on_action(cx.listener(|this, _: &GitPanelPrimaryAction, _, cx| {
                 this.run_git_panel_primary(cx);
             }))
@@ -4035,7 +4290,7 @@ impl Waku {
             let scrolled = -panel.commits_scroll.offset().y;
             panel.commits_scroll.max_offset().y - scrolled <= px(160.0)
         };
-        if commits_near_end {
+        if commits_near_end && !panel.commit_search.active() {
             self.ensure_more_git_panel_commits(cx);
         }
         let Some(panel) = self.git_panel.as_ref() else {
@@ -5049,13 +5304,276 @@ impl Waku {
         section.into_any_element()
     }
 
-    /// The paged commit list. Rows mark commits the upstream lacks and dwell
-    /// for their full message; a click opens the commit overview.
+    fn render_git_commit_search_input(&self, panel: &GitPanelState, cx: &mut Context<Self>) -> Div {
+        let theme = Theme::current(cx);
+        let handle = self.menu_handle("git-commit-search-scope", cx);
+        let branch_scope = if panel.commits_from_base {
+            panel
+                .commit_base
+                .clone()
+                .unwrap_or_else(|| tr!("git_panel.search_default_base"))
+        } else {
+            panel
+                .snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.branch.clone())
+                .unwrap_or_default()
+        };
+        let all_refs = tr!("git_panel.search_all_refs");
+        let current = panel.commit_search.all_refs;
+        let weak = cx.entity().downgrade();
+        let panel_id = panel.id;
+        let scope_label = if current {
+            all_refs.clone()
+        } else {
+            branch_scope.clone()
+        };
+        let clear_focus = self.transcript_control_focus("git-commit-search-clear", cx);
+        let scope = dropdown_menu(
+            MenuChip::new("git-commit-search-scope")
+                .label(scope_label.clone())
+                .tooltip(scope_label)
+                .height(px(26.0))
+                .max_w(px(124.0))
+                .outlined()
+                .selected(handle.is_open()),
+            "git-commit-search-scope-menu",
+            &handle,
+            MenuAlign::BelowRight,
+            move |_| {
+                [(false, branch_scope.clone()), (true, all_refs.clone())]
+                    .into_iter()
+                    .map(|(all_refs, label)| {
+                        let weak = weak.clone();
+                        MenuItem::new(label, move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                if let Some(panel) = this.git_panel.as_mut()
+                                    && panel.id == panel_id
+                                    && panel.commit_search.all_refs != all_refs
+                                {
+                                    panel.commit_search.all_refs = all_refs;
+                                    this.restart_git_commit_search(Duration::ZERO, cx);
+                                }
+                            });
+                        })
+                        .selected(all_refs == current)
+                    })
+                    .collect()
+            },
+        );
+        div()
+            .flex_none()
+            .px(px(10.0))
+            .pb(px(4.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .h(px(26.0))
+                    .px(px(6.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(5.0))
+                    .rounded(px(6.0))
+                    .border(hairline())
+                    .border_color(theme.border)
+                    .bg(theme.inset)
+                    .text_size(sp(12.0))
+                    .text_color(theme.text)
+                    .child(icon("icons/search.svg", 12.0, theme.text_tertiary))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .child(panel.commit_search.input.clone()),
+                    )
+                    .when(panel.commit_search.active(), |field| {
+                        field.child(
+                            div()
+                                .id("git-commit-search-clear")
+                                .track_focus(&clear_focus)
+                                .tab_index(0)
+                                .size(px(20.0))
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded(px(4.0))
+                                .aria_label(tr!("git_panel.clear_search"))
+                                .tooltip(Tooltip::text(tr!("git_panel.clear_search")))
+                                .hover(|style| style.bg(theme.overlay))
+                                .focus_visible(|style| style.bg(theme.focus_highlight()))
+                                .child(icon("icons/x.svg", 12.0, theme.text_tertiary))
+                                .on_activation(cx, |this, window, cx| {
+                                    this.clear_git_commit_search(window, cx);
+                                }),
+                        )
+                    }),
+            )
+            .child(scope)
+    }
+
+    fn render_git_commit_search_rows(
+        &self,
+        search: &GitCommitSearch,
+        width: f32,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let theme = Theme::current(cx);
+        let mut rows: Vec<_> = search
+            .entries
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| {
+                self.render_git_panel_commit_row(
+                    entry,
+                    index,
+                    false,
+                    None,
+                    width,
+                    "git-search-result",
+                    cx,
+                )
+                .flex_none()
+                .when(index == search.selected, |row| {
+                    row.bg(theme.focus_highlight()).child(icon(
+                        "icons/chevron-right.svg",
+                        10.0,
+                        theme.text_secondary,
+                    ))
+                })
+                .into_any_element()
+            })
+            .collect();
+        let status = if search.loading {
+            Some(tr!("git_panel.searching_commits"))
+        } else if search.failed {
+            Some(tr!("git_panel.search_failed"))
+        } else if rows.is_empty() {
+            Some(tr!("git_panel.no_matching_commits"))
+        } else {
+            None
+        };
+        if let Some(status) = status {
+            rows.push(Self::git_panel_section_label(status, &theme));
+        }
+        if !search.loading && (search.failed || search.next_offset.is_some()) {
+            let focus = self.transcript_control_focus("git-commit-search-more", cx);
+            rows.push(
+                div()
+                    .id("git-commit-search-more")
+                    .flex_none()
+                    .track_focus(&focus)
+                    .tab_index(0)
+                    .h(px(28.0))
+                    .px(px(10.0))
+                    .flex()
+                    .items_center()
+                    .text_size(sp(12.0))
+                    .text_color(theme.accent)
+                    .hover(|row| row.bg(theme.overlay))
+                    .focus_visible(|row| row.bg(theme.focus_highlight()))
+                    .child(if search.failed {
+                        tr!("common.retry")
+                    } else {
+                        tr!("git_panel.search_more")
+                    })
+                    .on_activation(cx, |this, _, cx| {
+                        this.fetch_git_commit_search(Duration::ZERO, cx)
+                    })
+                    .into_any_element(),
+            );
+        }
+        rows
+    }
+
     fn render_git_panel_commits(&self, width: f32, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let Some(panel) = self.git_panel.as_ref() else {
             return div().into_any_element();
         };
+        let search = &panel.commit_search;
+        let active = search.active();
+        let (scroll, scrollbar_state) = if active {
+            (search.scroll.clone(), search.scrollbar.clone())
+        } else {
+            (
+                panel.commits_scroll.clone(),
+                panel.commits_scrollbar.clone(),
+            )
+        };
+        let wheel = scroll.clone();
+        div()
+            .key_context(COMMIT_SEARCH_CONTEXT)
+            .on_action(cx.listener(|this, _: &ClearCommitSearch, window, cx| {
+                this.clear_git_commit_search(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ConfirmCommitSearch, window, cx| {
+                this.confirm_git_commit_search(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &NextCommitSearchResult, _, cx| {
+                this.move_git_commit_search_selection(1, cx);
+            }))
+            .on_action(cx.listener(|this, _: &PreviousCommitSearchResult, _, cx| {
+                this.move_git_commit_search_selection(-1, cx);
+            }))
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .relative()
+            .child(Self::git_panel_section_label(
+                tr!("git_panel.commits"),
+                &theme,
+            ))
+            .when_some(panel.snapshot.as_ref(), |section, snapshot| {
+                section
+                    .child(Self::git_panel_branch_row(snapshot, &theme))
+                    .child(self.render_git_commit_search_input(panel, cx))
+            })
+            .child(
+                div()
+                    .id(if active {
+                        "git-commit-search-results"
+                    } else {
+                        "git-panel-commits"
+                    })
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .track_scroll(&scroll)
+                    .on_scroll_wheel(move |_, _, cx| contain_scroll(&wheel, cx))
+                    .when(active, |viewport| {
+                        viewport
+                            .flex()
+                            .flex_col()
+                            .children(self.render_git_commit_search_rows(search, width, cx))
+                    })
+                    .when(!active, |viewport| {
+                        viewport.child(self.render_git_panel_history(panel, width, cx))
+                    }),
+            )
+            .child(scrollbar::edge_fade(
+                scroll.clone(),
+                scrollbar::FadeEdge::Bottom,
+                theme.surface,
+            ))
+            .child(scrollbar::vertical(&scroll, &scrollbar_state))
+            .into_any_element()
+    }
+
+    /// The paged commit list. Rows mark commits the upstream lacks and dwell
+    /// for their full message; a click opens the commit overview.
+    fn render_git_panel_history(
+        &self,
+        panel: &GitPanelState,
+        width: f32,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let theme = Theme::current(cx);
         let ahead = panel
             .snapshot
             .as_ref()
@@ -5132,39 +5650,7 @@ impl Waku {
                     .child(tr!("git_panel.no_commits")),
             );
         }
-        let scroll = panel.commits_scroll.clone();
-        let scrollbar_state = panel.commits_scrollbar.clone();
-        let wheel = scroll.clone();
-        div()
-            .flex_1()
-            .min_h_0()
-            .flex()
-            .flex_col()
-            .relative()
-            .child(Self::git_panel_section_label(
-                tr!("git_panel.commits"),
-                &theme,
-            ))
-            .when_some(panel.snapshot.as_ref(), |section, snapshot| {
-                section.child(Self::git_panel_branch_row(snapshot, &theme))
-            })
-            .child(
-                div()
-                    .id("git-panel-commits")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .track_scroll(&scroll)
-                    .on_scroll_wheel(move |_, _, cx| contain_scroll(&wheel, cx))
-                    .child(rows),
-            )
-            .child(scrollbar::edge_fade(
-                scroll.clone(),
-                scrollbar::FadeEdge::Bottom,
-                theme.surface,
-            ))
-            .child(scrollbar::vertical(&scroll, &scrollbar_state))
-            .into_any_element()
+        rows
     }
 
     fn render_git_panel_commit_row(
@@ -5239,8 +5725,8 @@ impl Waku {
             .on_hover(cx.listener(move |this, hovered, _, cx| {
                 this.git_panel_commit_row_hovered(sha.clone(), *hovered, cx);
             }))
-            .on_activation(cx, move |this, _, cx| {
-                this.open_git_panel_commit_diff(&entry_for_click, cx);
+            .on_activation(cx, move |this, window, cx| {
+                this.open_git_panel_commit_diff(&entry_for_click, window, cx);
             })
             .children(popover)
     }
@@ -6063,6 +6549,15 @@ impl Waku {
 
     fn close_git_commit_overview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.dismiss_git_panel_modal(cx);
+        if (self.git_panel_visible || self.git_tab_visible())
+            && self
+                .git_panel
+                .as_ref()
+                .is_some_and(|panel| panel.commit_search.active())
+            && self.focus_git_commit_search(window, cx)
+        {
+            return;
+        }
         if self.git_panel_visible {
             window.focus(&self.right_panel_focus, cx);
         } else if self.git_tab_visible() {

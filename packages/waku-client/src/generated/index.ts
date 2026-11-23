@@ -96,6 +96,7 @@ export type { CodexResetCreditOutcome } from "./CodexResetCreditOutcome";
 export type { Command } from "./Command";
 export type { CommandScope } from "./CommandScope";
 export type { CommitEntry } from "./CommitEntry";
+export type { CommitSearchScope } from "./CommitSearchScope";
 export type { CommitSnapshot } from "./CommitSnapshot";
 export type { CompletionConflict } from "./CompletionConflict";
 export type { ComposerDraft } from "./ComposerDraft";

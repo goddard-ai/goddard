@@ -13,6 +13,8 @@ use waku_protocol::git::{
     PullOutcome, PullStrategy, PushBaseOutcome, RebaseOutcome, SyncInProgress, UpstreamStatus,
 };
 
+use waku_protocol::workspace::CommitSearchScope;
+
 use crate::git_branch::remote_url;
 use crate::git_commit::{
     command_error, ensure_repository, git_capture, git_optional_stdout, git_stdout, git_success,
@@ -948,16 +950,23 @@ pub fn base_commits(
     limit: usize,
 ) -> anyhow::Result<Vec<CommitEntry>> {
     ensure_repository(cwd)?;
+    let Some(base_commit) = resolve_commit_base(cwd, base)? else {
+        return Ok(Vec::new());
+    };
+    log_commits(cwd, &[base_commit], skip, limit)
+}
+
+fn resolve_commit_base(cwd: &Path, base: Option<&str>) -> anyhow::Result<Option<String>> {
     let base_ref = match base {
         Some(base) => base.to_owned(),
         None => match crate::worktree::default_base_ref(cwd) {
             Ok(base_ref) => base_ref,
-            Err(_error) if !ref_exists(cwd, "HEAD")? => return Ok(Vec::new()),
+            Err(_error) if !ref_exists(cwd, "HEAD")? => return Ok(None),
             Err(error) => return Err(error),
         },
     };
     let base_expression = format!("{base_ref}^{{commit}}");
-    let Some(base_commit) = git_optional_stdout(
+    git_optional_stdout(
         cwd,
         &[
             "rev-parse",
@@ -966,11 +975,7 @@ pub fn base_commits(
             "--end-of-options",
             &base_expression,
         ],
-    )?
-    else {
-        return Ok(Vec::new());
-    };
-    log_commits(cwd, &[base_commit], skip, limit)
+    )
 }
 
 /// `git log <upstream> --not HEAD`: the commits the tracking branch has that
@@ -995,48 +1000,139 @@ pub fn log_commits(
     skip: usize,
     limit: usize,
 ) -> anyhow::Result<Vec<CommitEntry>> {
-    // \x1f separates fields, \x1e records; both are illegal in commit
-    // subjects and all but impossible in bodies.
+    let mut entries = commit_metadata(cwd, revs, skip, limit)?;
+    let stats = commit_numstats(cwd, revs, skip, limit)?;
+    attach_commit_stats(&mut entries, &stats);
+    Ok(entries)
+}
+
+fn commit_metadata(
+    cwd: &Path,
+    revs: &[String],
+    skip: usize,
+    limit: usize,
+) -> anyhow::Result<Vec<CommitEntry>> {
     let mut args = vec![
         "log".to_owned(),
+        "-z".to_owned(),
         format!("--skip={skip}"),
         format!("-n{limit}"),
-        "--format=%H%x1f%h%x1f%an%x1f%ae%x1f%at%x1f%s%x1f%b%x1e".to_owned(),
+        "--format=%H%x00%h%x00%an%x00%ae%x00%at%x00%s%x00%b".to_owned(),
     ];
     args.extend(revs.iter().cloned());
     let output = git_stdout(cwd, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
-    let stats = commit_numstats(cwd, revs, skip, limit)?;
-    Ok(output
-        .split('\x1e')
-        .filter_map(|record| {
-            let mut fields = record.split('\x1f');
-            let sha = fields.next()?.trim().to_owned();
-            let short_sha = fields.next()?.to_owned();
-            let author = fields.next()?.to_owned();
-            let author_email = fields.next()?.to_owned();
-            let authored_at = fields
-                .next()
-                .and_then(|value| value.trim().parse::<u64>().ok())
-                .unwrap_or(0);
-            let subject = fields.next()?.to_owned();
-            let body = fields.next().unwrap_or_default().trim().to_owned();
-            if sha.is_empty() {
-                return None;
-            }
-            let (additions, deletions) = stats.get(&sha).copied().unwrap_or_default();
-            Some(CommitEntry {
-                sha,
-                short_sha,
-                subject,
-                body,
-                author,
-                author_email,
-                authored_at,
-                additions,
-                deletions,
-            })
+    let mut fields = output.split_terminator('\0');
+    Ok(std::iter::from_fn(|| {
+        Some(CommitEntry {
+            sha: fields.next()?.to_owned(),
+            short_sha: fields.next()?.to_owned(),
+            author: fields.next()?.to_owned(),
+            author_email: fields.next()?.to_owned(),
+            authored_at: fields.next()?.parse().unwrap_or(0),
+            subject: fields.next()?.to_owned(),
+            body: fields.next()?.trim().to_owned(),
+            additions: 0,
+            deletions: 0,
         })
-        .collect())
+    })
+    .collect())
+}
+
+fn attach_commit_stats(entries: &mut [CommitEntry], stats: &HashMap<String, (u64, u64)>) {
+    for entry in entries {
+        (entry.additions, entry.deletions) = stats.get(&entry.sha).copied().unwrap_or_default();
+    }
+}
+
+/// Search in Git log order with bounded metadata reads. The offset identifies
+/// the next unexamined position after the last returned match.
+pub fn search_commits(
+    cwd: &Path,
+    scope: &CommitSearchScope,
+    query: &str,
+    offset: usize,
+) -> anyhow::Result<(Vec<CommitEntry>, Option<usize>)> {
+    const PAGE_SIZE: usize = 50;
+    const SCAN_SIZE: usize = 512;
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return Ok((Vec::new(), None));
+    }
+    ensure_repository(cwd)?;
+    let head = git_optional_stdout(cwd, &["rev-parse", "--verify", "--quiet", "HEAD"])?;
+    let revs = match scope {
+        CommitSearchScope::Head => {
+            let Some(head) = head else {
+                return Ok((Vec::new(), None));
+            };
+            vec![head]
+        }
+        CommitSearchScope::Base { branch } => {
+            let Some(base) = resolve_commit_base(cwd, branch.as_deref())? else {
+                return Ok((Vec::new(), None));
+            };
+            vec![base]
+        }
+        CommitSearchScope::AllRefs => {
+            // Use branch and tag tips, excluding app-managed checkpoint refs
+            // and the stash. Include a detached HEAD when present.
+            let mut revs: Vec<String> = ["--branches", "--remotes", "--tags"]
+                .map(str::to_owned)
+                .into();
+            revs.extend(head);
+            let tips = git_stdout(
+                cwd,
+                &["rev-list", "--no-walk"]
+                    .into_iter()
+                    .chain(revs.iter().map(String::as_str))
+                    .collect::<Vec<_>>(),
+            )?;
+            if tips.is_empty() {
+                return Ok((Vec::new(), None));
+            }
+            tips.lines().map(str::to_owned).collect()
+        }
+    };
+
+    let mut entries = Vec::new();
+    let mut scan_offset = offset;
+    let mut next_offset = None;
+    let mut has_more = false;
+    while !has_more {
+        let batch = commit_metadata(cwd, &revs, scan_offset, SCAN_SIZE)?;
+        let count = batch.len();
+        for (index, entry) in batch.into_iter().enumerate() {
+            let matches = (query.len() >= 4 && entry.sha.starts_with(&query))
+                || [
+                    &entry.subject,
+                    &entry.body,
+                    &entry.author,
+                    &entry.author_email,
+                ]
+                .into_iter()
+                .any(|field| field.to_lowercase().contains(&query));
+            if matches {
+                if entries.len() == PAGE_SIZE {
+                    has_more = true;
+                    break;
+                }
+                entries.push(entry);
+                next_offset = Some(scan_offset + index + 1);
+            }
+        }
+        if count < SCAN_SIZE {
+            break;
+        }
+        scan_offset += count;
+    }
+    if !entries.is_empty() {
+        let stats_revs = std::iter::once("--no-walk=unsorted".to_owned())
+            .chain(entries.iter().map(|entry| entry.sha.clone()))
+            .collect::<Vec<_>>();
+        let stats = commit_numstats(cwd, &stats_revs, 0, entries.len())?;
+        attach_commit_stats(&mut entries, &stats);
+    }
+    Ok((entries, next_offset.filter(|_| has_more)))
 }
 
 /// One commit's `+/-` totals. `--numstat` reports `-\t-` for binary files,
@@ -1269,6 +1365,123 @@ mod tests {
         assert_eq!(page[0].author_email, "test@example.com");
         assert!(page[0].authored_at > 0);
         assert_eq!((page[0].additions, page[0].deletions), (0, 0));
+    }
+
+    #[test]
+    fn commit_search_finds_older_metadata_and_respects_scope() {
+        let cwd = repository();
+        run_git(&cwd, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+        assert!(
+            search_commits(&cwd, &CommitSearchScope::AllRefs, "any", 0)
+                .unwrap()
+                .0
+                .is_empty()
+        );
+
+        std::fs::write(cwd.join("file.txt"), "one\n").unwrap();
+        run_git(&cwd, &["add", "file.txt"]);
+        run_git(
+            &cwd,
+            &["commit", "-qm", "Add file", "-m", "Body with [literal]"],
+        );
+        let old = git_stdout(&cwd, &["rev-parse", "HEAD"]).unwrap();
+
+        // Import a deep history with a single Git process so the fixture is
+        // cheap and the match must cross an internal scan batch.
+        let mut history = String::new();
+        for index in 0..525 {
+            use std::fmt::Write as _;
+            let subject = if index % 10 == 0 {
+                "Periodic match"
+            } else {
+                "Filler"
+            };
+            write!(
+                history,
+                "commit refs/heads/main\ncommitter Test <test@example.com> {} +0000\ndata {}\n{subject}\n",
+                1_800_000_000 + index,
+                subject.len()
+            ).unwrap();
+            if index == 0 {
+                writeln!(history, "from {old}").unwrap();
+            }
+            history.push('\n');
+        }
+        let mut command = crate::command_env::search_path_command("git");
+        command.current_dir(&cwd).args(["fast-import", "--quiet"]);
+        let output = crate::process::output(
+            &mut command,
+            std::time::Instant::now() + crate::process::READ_TIMEOUT,
+            crate::process::OutputLimit::Exact(crate::process::MAX_METADATA_BYTES),
+            Some(history.as_bytes()),
+        )
+        .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let search_head = |query| {
+            search_commits(&cwd, &CommitSearchScope::Head, query, 0)
+                .unwrap()
+                .0
+        };
+        let matches = search_head("[LITERAL]");
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].sha, old);
+        assert_eq!(matches[0].additions, 1);
+        assert_eq!(search_head(&old[..8])[0].sha, old);
+        assert!(search_head("[missing]").is_empty());
+
+        let (first, next) =
+            search_commits(&cwd, &CommitSearchScope::Head, "periodic match", 0).unwrap();
+        let (last, end) = search_commits(
+            &cwd,
+            &CommitSearchScope::Head,
+            "periodic match",
+            next.unwrap(),
+        )
+        .unwrap();
+        assert_eq!((first.len(), last.len(), end), (50, 3, None));
+        assert!(
+            first
+                .iter()
+                .all(|entry| last.iter().all(|later| later.sha != entry.sha))
+        );
+
+        // A remote-tracking ref can contain commits outside the checked-out
+        // branch. The draft base can scope directly to that same history.
+        run_git(&cwd, &["checkout", "-q", "--detach", &old]);
+        run_git(
+            &cwd,
+            &[
+                "commit",
+                "-qm",
+                "Other side",
+                "--author",
+                "Search Author <elsewhere@example.com>",
+                "--allow-empty",
+            ],
+        );
+        let other = git_stdout(&cwd, &["rev-parse", "HEAD"]).unwrap();
+        run_git(&cwd, &["update-ref", "refs/remotes/origin/other", &other]);
+        run_git(&cwd, &["checkout", "-q", "main"]);
+        assert!(search_head("search author").is_empty());
+        let (all, _) =
+            search_commits(&cwd, &CommitSearchScope::AllRefs, "search author", 0).unwrap();
+        assert_eq!(all[0].sha, other);
+        let (base, _) = search_commits(
+            &cwd,
+            &CommitSearchScope::Base {
+                branch: Some("origin/other".into()),
+            },
+            "elsewhere@example.com",
+            0,
+        )
+        .unwrap();
+        assert_eq!(base[0].sha, other);
+        std::fs::remove_dir_all(cwd).unwrap();
     }
 
     #[test]

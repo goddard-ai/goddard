@@ -1,0 +1,1 @@
+- Search the Git panel by commit message, author, or SHA across the current branch or all locally available branches and tags.

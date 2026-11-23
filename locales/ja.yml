@@ -2030,6 +2030,14 @@ git_panel.staged: ステージ済み
 git_panel.stage: ステージ
 git_panel.unstage: ステージ解除
 git_panel.commits: コミット
+git_panel.search_commits: コミットを検索
+git_panel.clear_search: コミット検索をクリア
+git_panel.search_default_base: デフォルトのベース
+git_panel.search_all_refs: すべてのブランチとタグ
+git_panel.searching_commits: コミットを検索中…
+git_panel.search_failed: コミットの検索に失敗しました
+git_panel.no_matching_commits: 一致するコミットがありません
+git_panel.search_more: さらに表示
 git_panel.no_commits: コミットはまだありません
 git_panel.unpushed: 上流にプッシュされていません
 git_panel.no_commit_body: コミットの説明なし

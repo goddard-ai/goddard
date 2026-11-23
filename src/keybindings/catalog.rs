@@ -734,6 +734,15 @@ pub static COMMANDS: &[CommandDescriptor] = &[
         builtin_label: None,
     },
     CommandDescriptor {
+        id: "git.search_commits",
+        action: || Box::new(crate::app::FocusCommitSearch),
+        title_key: "git_panel.search_commits",
+        title_index: None,
+        category: C::Git,
+        editability: EDITABLE,
+        builtin_label: None,
+    },
+    CommandDescriptor {
         id: "dialog.git.primary",
         action: || Box::new(crate::app::GitPanelPrimaryAction),
         title_key: "shortcuts.git_primary",
@@ -2691,6 +2700,7 @@ pub static ENTRIES: &[CatalogEntry] = &[
     e("dialog.commit.generate", All, "secondary-g", CommitDialog),
     e("dialog.commit.dismiss", All, "escape", CommitDialog),
     // === app::init_git_panel_keys ===================================================
+    e("git.search_commits", All, "secondary-f", GitPanel),
     e("dialog.git.primary", All, "secondary-enter", GitPanelInput),
     e("dialog.git.primary", All, "secondary-enter", GitPanel),
     e("dialog.git.dismiss", All, "escape", GitPanel),

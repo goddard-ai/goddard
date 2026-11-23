@@ -4805,6 +4805,22 @@ git_panel.unstage:
   en: Unstage
 git_panel.commits:
   en: Commits
+git_panel.search_commits:
+  en: Search commits
+git_panel.clear_search:
+  en: Clear commit search
+git_panel.search_default_base:
+  en: Default base
+git_panel.search_all_refs:
+  en: All branches and tags
+git_panel.searching_commits:
+  en: Searching commits…
+git_panel.search_failed:
+  en: Commit search failed
+git_panel.no_matching_commits:
+  en: No matching commits
+git_panel.search_more:
+  en: Load more matches
 git_panel.no_commits:
   en: No commits yet
 git_panel.up_to_date:

@@ -4778,7 +4778,9 @@ pub use command_palette::{
     SelectPageUp, SelectPrevious,
 };
 pub use commit_dialog::{ConfirmCommitDialog, DismissCommitDialog, GenerateCommitDialog};
-pub use git_panel::{ConfirmGitPanelModal, DismissGitPanelModal, GitPanelPrimaryAction};
+pub use git_panel::{
+    ConfirmGitPanelModal, DismissGitPanelModal, FocusCommitSearch, GitPanelPrimaryAction,
+};
 pub use goal_dialog::{ConfirmGoalDialog, DismissGoalDialog};
 pub use image_preview::DismissImagePreview;
 pub use provider_switch_dialog::{ConfirmProviderSwitchDialog, DismissProviderSwitchDialog};

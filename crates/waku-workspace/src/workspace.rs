@@ -472,6 +472,21 @@ pub fn execute(operation: WorkspaceOperation, qa_branch: &str) -> anyhow::Result
         } => WorkspaceResult::Commits {
             entries: crate::git_panel::base_commits(&cwd, base.as_deref(), skip, limit)?,
         },
+        WorkspaceOperation::SearchCommits {
+            cwd,
+            scope,
+            query,
+            offset,
+        } => {
+            let (entries, next_offset) = waku_git::process::with_deadline(
+                std::time::Instant::now() + waku_git::process::READ_TIMEOUT,
+                || crate::git_panel::search_commits(&cwd, &scope, &query, offset),
+            )?;
+            WorkspaceResult::CommitSearch {
+                entries,
+                next_offset,
+            }
+        }
         WorkspaceOperation::ListUpstreamCommits { cwd, skip, limit } => WorkspaceResult::Commits {
             entries: crate::git_panel::upstream_commits(&cwd, skip, limit)?,
         },

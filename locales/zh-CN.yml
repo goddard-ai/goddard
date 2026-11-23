@@ -1983,6 +1983,14 @@ git_panel.staged: 已暂存
 git_panel.stage: 暂存
 git_panel.unstage: 取消暂存
 git_panel.commits: 提交记录
+git_panel.search_commits: 搜索提交
+git_panel.clear_search: 清除提交搜索
+git_panel.search_default_base: 默认基准分支
+git_panel.search_all_refs: 所有分支和标签
+git_panel.searching_commits: 正在搜索提交…
+git_panel.search_failed: 提交搜索失败
+git_panel.no_matching_commits: 没有匹配的提交
+git_panel.search_more: 加载更多匹配项
 git_panel.no_commits: 暂无提交
 git_panel.unpushed: 尚未推送到上游
 git_panel.no_commit_body: 无提交描述
