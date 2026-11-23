@@ -1847,7 +1847,7 @@ impl Waku {
                 self.render_card_checkpoint_pending_row(turn_id, &theme)
             }
             TranscriptRowKind::CounselRecommendation(id) => {
-                self.render_counsel_recommendation_row(session_id, id, &theme, window, cx)
+                self.render_counsel_recommendation_row(session_id, id, &theme, cx)
             }
             // Folded out of `card_kinds` entirely; the fallback renders nothing.
             TranscriptRowKind::ResponseFooter(..) | TranscriptRowKind::ChangedFiles(_) => {

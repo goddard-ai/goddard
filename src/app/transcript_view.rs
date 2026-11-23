@@ -2742,7 +2742,7 @@ impl Waku {
                 let session_id = self.transcript_display_session().map(|session| session.id);
                 session_id
                     .map(|session_id| {
-                        self.render_counsel_recommendation_row(session_id, id, &theme, window, cx)
+                        self.render_counsel_recommendation_row(session_id, id, &theme, cx)
                     })
                     .unwrap_or_else(|| div().into_any_element())
             }

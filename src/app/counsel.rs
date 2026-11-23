@@ -1,6 +1,7 @@
 use super::boss::BossReply;
 use super::*;
 use crate::ui::ActivationExt;
+use gpui::{ElementId, Role};
 use waku_client::DaemonKey;
 use waku_protocol::boss::BossOperation;
 use waku_protocol::counsel::{CounselDecision, CounselOperation, CounselStatus};
@@ -17,10 +18,9 @@ impl Waku {
         self.counsel_state_for_session(id)
             .map(|(key, _)| (key, true))
             .or_else(|| {
-                self.boss_ui
-                    .states
-                    .iter()
-                    .find_map(|(key, state)| (state.session_id == Some(id)).then_some((*key, false)))
+                self.boss_ui.states.iter().find_map(|(key, state)| {
+                    (state.session_id == Some(id)).then_some((*key, false))
+                })
             })
     }
 
@@ -138,7 +138,9 @@ impl Waku {
             .identity
             .as_ref()
             .map(|identity| self.boss_avatar_animated(identity, 24.0, cx))
-            .unwrap_or_else(|| icon("icons/compass.svg", 24.0, theme.text_secondary).into_any_element());
+            .unwrap_or_else(|| {
+                icon("icons/compass.svg", 24.0, theme.text_secondary).into_any_element()
+            });
         div()
             .id(format!("counsel-{key:?}"))
             .tab_index(0)
@@ -162,12 +164,7 @@ impl Waku {
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .child(
-                        div()
-                            .text_size(sp(13.0))
-                            .text_color(theme.text)
-                            .child(name),
-                    )
+                    .child(div().text_size(sp(13.0)).text_color(theme.text).child(name))
                     .child(
                         div()
                             .text_size(sp(13.0))
@@ -181,47 +178,29 @@ impl Waku {
             .into_any_element()
     }
 
-    /// One recommendation card at its seat in Counsel history. Summary,
-    /// reason, links, and the action row render immediately; the exact Boss
-    /// message sits behind the collapsed "Message to Boss" disclosure, whose
-    /// expanded state is exposed through `aria_expanded`. Approval binds the
-    /// displayed revision whether or not the disclosure is open.
+    /// A recommendation stays anchored to its originating turn. The approval
+    /// control only appears below the exact instruction for the open revision.
     pub(super) fn render_counsel_recommendation_row(
         &self,
         session_id: Uuid,
         id: Uuid,
         theme: &Theme,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let _ = window;
-        let Some((key, record)) = self.boss_ui.states.iter().find_map(|(key, state)| {
-            (state.counsel.session_id == Some(session_id)).then(|| {
-                (
-                    *key,
-                    state
-                        .counsel
-                        .recommendations
-                        .iter()
-                        .find(|record| record.id == id)
-                        .cloned(),
-                )
-            })
-        }) else {
+        let Some((key, state)) = self.counsel_state_for_session(session_id) else {
             return div().into_any_element();
         };
-        let Some(record) = record else {
+        let Some(record) = state.recommendations.iter().find(|record| record.id == id) else {
             return div().into_any_element();
         };
         let revision = record.revision;
-        let expanded = self.boss_ui.counsel_message_expanded.contains(&id);
-        // Only a live, unresolved revision may be approved — obsolete and
-        // resolved records render their status without action controls.
-        let actionable = matches!(
+        let expanded = self.boss_ui.counsel_review_expanded.get(&id) == Some(&revision);
+        let actionable = record.status.is_outstanding();
+        let historical = matches!(
             record.status,
-            CounselStatus::Proposed | CounselStatus::Later
+            CounselStatus::Dismissed | CounselStatus::Completed
         );
-        let label = match record.status {
+        let status = match record.status {
             CounselStatus::Proposed => tr!("counsel.recommendation"),
             CounselStatus::Later => tr!("counsel.saved_later"),
             CounselStatus::Dismissed => tr!("counsel.dismissed"),
@@ -231,223 +210,447 @@ impl Waku {
             CounselStatus::Sent => tr!("counsel.sent"),
             CounselStatus::Completed => tr!("counsel.completed"),
         };
-        let pending_request = self.boss_ui.pending;
-        let mut controls = div().flex().flex_wrap().gap(px(8.0));
-        if actionable {
-            for (name, label, decision) in [
-                ("approve", tr!("counsel.approve"), CounselDecision::Approve),
-                ("later", tr!("counsel.later"), CounselDecision::Later),
-                ("dismiss", tr!("counsel.dismiss"), CounselDecision::Dismiss),
-            ] {
-                controls = controls.child(
-                    div()
-                        .id(format!("counsel-{name}-{id}"))
-                        .tab_index(0)
-                        .px(px(9.0))
-                        .py(px(5.0))
-                        .rounded(px(6.0))
-                        .text_size(sp(12.0))
-                        .text_color(theme.text)
-                        .bg(theme.overlay)
-                        .aria_label(label.clone())
-                        .child(label)
-                        .when(pending_request, |button| button.opacity(0.5))
-                        .when(!pending_request, |button| {
-                            button
-                                .cursor_pointer()
-                                .hover(|style| style.bg(theme.overlay_strong))
-                                .focus_visible(|style| style.bg(theme.focus_highlight()))
-                                .on_activation(cx, move |this, _, cx| {
-                                    this.boss_request(
-                                        key,
-                                        BossOperation::Counsel {
-                                            action: CounselOperation::Decide {
-                                                id,
-                                                expected_revision: revision,
-                                                decision,
-                                            },
-                                        },
-                                        BossReply::CounselDecision,
-                                        cx,
-                                    )
-                                })
-                        }),
-                );
+
+        let disclosure_label = if historical {
+            format!("{} · {}", record.title, status)
+        } else if expanded {
+            tr!("counsel.collapse")
+        } else if actionable {
+            tr!("counsel.review")
+        } else {
+            tr!("counsel.show_details")
+        };
+        let disclosure = counsel_card_button(
+            format!("counsel-review-{id}"),
+            disclosure_label.clone(),
+            actionable && !expanded,
+            theme,
+        )
+        .aria_expanded(expanded)
+        .on_activation(cx, move |this, _, cx| {
+            if expanded {
+                this.boss_ui.counsel_review_expanded.remove(&id);
+            } else {
+                this.boss_ui.counsel_review_expanded.insert(id, revision);
             }
-            let title = record.title.clone();
-            controls = controls.child(
-                div()
-                    .id(format!("counsel-revise-{id}"))
-                    .tab_index(0)
-                    .px(px(9.0))
-                    .py(px(5.0))
-                    .rounded(px(6.0))
-                    .cursor_pointer()
-                    .text_size(sp(12.0))
-                    .text_color(theme.text)
-                    .bg(theme.overlay)
-                    .hover(|style| style.bg(theme.overlay_strong))
-                    .focus_visible(|style| style.bg(theme.focus_highlight()))
-                    .child(tr!("counsel.revise"))
-                    .on_activation(cx, move |this, window, cx| {
-                        let existing = this.composer.read(cx).content(cx).to_string();
-                        let text = format!(
-                            "{}\n\n{}",
-                            tr!(
-                                "counsel.revise_prompt",
-                                title = title.clone(),
-                                id = id.to_string()
-                            ),
-                            existing
-                        );
-                        this.composer
-                            .update(cx, |input, cx| input.set_content(text, cx));
-                        window.focus(&this.composer_focus(cx), cx);
-                    }),
-            );
-        }
+            let row = super::transcript::TranscriptRowKind::CounselRecommendation(id);
+            if this.transcript_session_id() == Some(session_id) {
+                this.remeasure_transcript_row(row);
+            }
+            this.remeasure_big_picture_row(session_id, row);
+            cx.notify();
+        });
+
         let mut card = div()
             .id(format!("counsel-card-{id}"))
             .w_full()
-            .p(px(12.0))
+            .min_w_0()
+            .px(px(12.0))
+            .py(px(if historical { 4.0 } else { 10.0 }))
             .rounded(px(8.0))
             .border(hairline())
-            .border_color(theme.border_subtle)
+            .border_color(
+                if actionable || record.status == CounselStatus::DeliveryFailed {
+                    theme.accent.opacity(0.5)
+                } else {
+                    theme.border_subtle
+                },
+            )
             .bg(theme.surface)
             .flex()
             .flex_col()
-            .gap(px(8.0))
-            .child(
+            .gap(px(8.0));
+        let mut footer = div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(6.0))
+            .pt(px(6.0))
+            .border_t(hairline())
+            .border_color(theme.border_subtle);
+
+        if historical {
+            card = card.child(
+                disclosure
+                    .w_full()
+                    .px_0()
+                    .child(icon(
+                        if expanded {
+                            "icons/chevron-down.svg"
+                        } else {
+                            "icons/chevron-right.svg"
+                        },
+                        12.0,
+                        theme.text_secondary,
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .when(!expanded, |title| title.truncate())
+                            .child(record.title.clone()),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_color(theme.text_secondary)
+                            .child(status),
+                    ),
+            );
+        } else {
+            let mut header = div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .text_size(sp(12.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text_secondary)
+                        .child(status),
+                );
+            if actionable {
+                let menu_id = format!("counsel-actions-{id}");
+                let weak = cx.entity().downgrade();
+                let pending = self.boss_ui.pending;
+                let can_save = record.status == CounselStatus::Proposed;
+                header = header.child(dropdown_menu(
+                    MenuChip::new(format!("counsel-more-{id}"))
+                        .label(tr!("counsel.more"))
+                        .height(px(28.0)),
+                    menu_id.clone(),
+                    &self.menu_handle(menu_id, cx),
+                    MenuAlign::BelowRight,
+                    move |_| {
+                        let item = |label, decision| {
+                            let weak = weak.clone();
+                            MenuItem::new(label, move |_, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.decide_counsel_recommendation(
+                                        key, id, revision, decision, cx,
+                                    );
+                                });
+                            })
+                            .disabled(pending)
+                        };
+                        let mut items = Vec::new();
+                        if can_save {
+                            items.push(item(tr!("counsel.later"), CounselDecision::Later));
+                        }
+                        items.push(item(tr!("counsel.dismiss"), CounselDecision::Dismiss));
+                        items
+                    },
+                ));
+            }
+            card = card.child(header).child(
                 div()
-                    .text_size(sp(11.0))
-                    .text_color(theme.text_secondary)
-                    .child(label),
-            )
-            .child(
-                div()
-                    .text_size(sp(13.0))
+                    .text_size(sp(15.0))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.text)
                     .child(record.title.clone()),
-            )
-            .child(
+            );
+            if expanded && actionable {
+                footer = footer
+                    .justify_between()
+                    .child(disclosure.child(disclosure_label));
+            } else {
+                footer = footer
+                    .justify_end()
+                    .child(disclosure.child(disclosure_label));
+            }
+        }
+
+        if actionable || expanded {
+            card = card.child(
                 div()
-                    .text_size(sp(12.0))
+                    .text_size(sp(13.0))
                     .text_color(theme.text_secondary)
                     .child(record.reason.clone()),
             );
-        // "Message to Boss" — collapsed by default, keyboard-operable, and
-        // the expanded state is exposed to assistive tech. Approval stays
-        // bound to the exact message whether or not it is shown.
-        let chevron = if expanded {
-            "icons/chevron-down.svg"
-        } else {
-            "icons/chevron-right.svg"
-        };
-        card = card.child(
-            div()
-                .id(format!("counsel-message-toggle-{id}"))
-                .tab_index(0)
-                .flex()
-                .items_center()
-                .gap(px(6.0))
-                .rounded(px(4.0))
-                .cursor_pointer()
-                .focus_visible(|style| style.bg(theme.focus_highlight()))
-                .aria_label(tr!("counsel.message_to_boss"))
-                .aria_expanded(expanded)
-                .on_activation(cx, move |this, _, cx| {
-                    if !this.boss_ui.counsel_message_expanded.remove(&id) {
-                        this.boss_ui.counsel_message_expanded.insert(id);
-                    }
-                    let row = super::transcript::TranscriptRowKind::CounselRecommendation(id);
-                    this.remeasure_transcript_row(row);
-                    this.remeasure_big_picture_row(session_id, row);
-                    cx.notify();
-                })
-                .child(icon(chevron, 12.0, theme.text_secondary))
-                .child(
+        }
+
+        if record.status == CounselStatus::Approved {
+            card = card.child(
+                div()
+                    .text_size(sp(13.0))
+                    .text_color(theme.text_secondary)
+                    .child(tr!("counsel.awaiting_delivery")),
+            );
+        }
+
+        if record.status == CounselStatus::DeliveryFailed {
+            if let Some(error) = &record.delivery_error {
+                card = card.child(
                     div()
-                        .text_size(sp(11.0))
+                        .text_size(sp(13.0))
+                        .text_color(theme.danger)
+                        .child(error.clone()),
+                );
+            }
+            if let Some(approved_revision) = record.approved_revision {
+                card = card.child(
+                    div()
+                        .text_size(sp(13.0))
                         .text_color(theme.text_secondary)
-                        .child(tr!("counsel.message_to_boss")),
-                ),
-        );
+                        .child(tr!("counsel.approval_saved")),
+                );
+                let label = tr!("counsel.retry");
+                footer = footer.child(
+                    counsel_card_button(format!("counsel-retry-{id}"), label.clone(), true, theme)
+                        .child(label)
+                        .on_activation(cx, move |this, window, cx| {
+                            let prompt = tr!(
+                                "counsel.retry_prompt",
+                                id = id.to_string(),
+                                revision = approved_revision
+                            );
+                            this.stage_counsel_reply(session_id, &prompt, window, cx);
+                        }),
+                );
+            }
+        }
+
         if expanded {
             card = card.child(
                 div()
-                    .id(format!("counsel-message-body-{id}"))
-                    .text_size(sp(12.0))
-                    .text_color(theme.text)
-                    .child(record.instruction.clone()),
+                    .flex()
+                    .flex_col()
+                    .gap(px(5.0))
+                    .p(px(10.0))
+                    .rounded(px(6.0))
+                    .bg(theme.inset)
+                    .child(
+                        div()
+                            .text_size(sp(12.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text_secondary)
+                            .child(tr!("counsel.message_to_boss")),
+                    )
+                    .child(
+                        div()
+                            .text_size(sp(13.0))
+                            .text_color(theme.text)
+                            .child(record.instruction.clone()),
+                    ),
             );
+            if !record.sources.is_empty() {
+                let mut sources = div().flex().flex_wrap().items_center().gap(px(5.0)).child(
+                    div()
+                        .text_size(sp(12.0))
+                        .text_color(theme.text_secondary)
+                        .child(tr!("counsel.sources")),
+                );
+                for source in &record.sources {
+                    let source_id = source.session_id;
+                    let title = self
+                        .state
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == source_id)
+                        .map(|session| session.display_title().to_owned())
+                        .unwrap_or_else(|| tr!("counsel.source"));
+                    sources = sources.child(
+                        counsel_card_button(
+                            format!("counsel-source-{id}-{source_id}"),
+                            title.clone(),
+                            false,
+                            theme,
+                        )
+                        .max_w_full()
+                        .text_color(theme.accent)
+                        .child(div().min_w_0().truncate().child(title))
+                        .on_activation(cx, move |this, _, cx| {
+                            this.request_session_activation(
+                                source_id,
+                                SessionActivationTransition::Inspect,
+                                cx,
+                            );
+                        }),
+                    );
+                }
+                card = card.child(sources);
+            }
+            if let Some(evidence) = &record.completion_evidence {
+                card = card.child(
+                    div()
+                        .text_size(sp(13.0))
+                        .text_color(theme.text_secondary)
+                        .child(evidence.clone()),
+                );
+            }
         }
-        let mut links = div().flex().flex_wrap().gap(px(8.0));
-        for source in &record.sources {
-            let source_id = source.session_id;
-            let title = self
-                .state
-                .sessions
-                .iter()
-                .find(|session| session.id == source_id)
-                .map(|session| session.display_title().to_owned())
-                .unwrap_or_else(|| tr!("counsel.source"));
-            links = links.child(
+
+        if expanded && actionable {
+            let revise = tr!("counsel.revise");
+            let title = record.title.clone();
+            let approve = tr!("counsel.approve");
+            let pending = self.boss_ui.pending;
+            footer = footer.child(
                 div()
-                    .id(format!("counsel-source-{id}-{source_id}"))
-                    .tab_index(0)
-                    .cursor_pointer()
-                    .text_size(sp(11.0))
-                    .text_color(theme.accent)
-                    .focus_visible(|style| style.bg(theme.focus_highlight()))
-                    .child(title)
-                    .on_activation(cx, move |this, _, cx| {
-                        this.request_session_activation(
-                            source_id,
-                            SessionActivationTransition::Inspect,
-                            cx,
-                        );
-                    }),
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(
+                        counsel_card_button(
+                            format!("counsel-revise-{id}"),
+                            revise.clone(),
+                            false,
+                            theme,
+                        )
+                        .child(revise)
+                        .on_activation(cx, move |this, window, cx| {
+                            let prompt = tr!(
+                                "counsel.revise_prompt",
+                                title = title.clone(),
+                                id = id.to_string()
+                            );
+                            this.stage_counsel_reply(session_id, &prompt, window, cx);
+                        }),
+                    )
+                    .child(
+                        counsel_card_button(
+                            format!("counsel-approve-{id}"),
+                            approve.clone(),
+                            true,
+                            theme,
+                        )
+                        .child(approve)
+                        .when(pending, |button| button.opacity(0.5))
+                        .on_activation(cx, move |this, _, cx| {
+                            if this.boss_ui.counsel_review_expanded.get(&id) == Some(&revision) {
+                                this.decide_counsel_recommendation(
+                                    key,
+                                    id,
+                                    revision,
+                                    CounselDecision::Approve,
+                                    cx,
+                                );
+                            }
+                        }),
+                    ),
             );
         }
-        card = card.child(links);
-        if let Some(error) = &record.delivery_error {
-            card = card.child(
-                div()
-                    .text_size(sp(11.0))
-                    .text_color(theme.danger)
-                    .child(format!("{}: {error}", tr!("counsel.delivery_failed"))),
+        let show_boss =
+            record.boss_session_id.is_some() && (record.status == CounselStatus::Sent || expanded);
+        if show_boss {
+            let label = tr!("counsel.open_boss");
+            footer = footer.child(
+                counsel_card_button(
+                    format!("counsel-open-boss-{id}"),
+                    label.clone(),
+                    false,
+                    theme,
+                )
+                .text_color(theme.accent)
+                .child(label)
+                .on_activation(cx, move |this, _, cx| this.chat_with_boss(key, cx)),
             );
         }
-        if record.boss_session_id.is_some() {
-            controls = controls.child(
-                div()
-                    .id(format!("counsel-open-boss-{id}"))
-                    .tab_index(0)
-                    .cursor_pointer()
-                    .px(px(9.0))
-                    .py(px(5.0))
-                    .text_size(sp(12.0))
-                    .text_color(theme.accent)
-                    .focus_visible(|style| style.bg(theme.focus_highlight()))
-                    .child(tr!("counsel.open_boss"))
-                    .on_activation(cx, move |this, _, cx| {
-                        this.chat_with_boss(key, cx);
-                    }),
-            );
-        }
-        if let Some(evidence) = &record.completion_evidence {
-            card = card.child(
-                div()
-                    .text_size(sp(12.0))
-                    .text_color(theme.text_secondary)
-                    .child(evidence.clone()),
-            );
-        }
+
         div()
             .px(px(20.0))
             .py(px(4.0))
-            .child(card.child(controls))
+            .child(card.when(!historical || show_boss, |card| card.child(footer)))
             .into_any_element()
     }
+
+    fn decide_counsel_recommendation(
+        &mut self,
+        key: DaemonKey,
+        id: Uuid,
+        expected_revision: u64,
+        decision: CounselDecision,
+        cx: &mut Context<Self>,
+    ) {
+        if self.boss_ui.pending {
+            return;
+        }
+        self.boss_request(
+            key,
+            BossOperation::Counsel {
+                action: CounselOperation::Decide {
+                    id,
+                    expected_revision,
+                    decision,
+                },
+            },
+            BossReply::CounselDecision,
+            cx,
+        );
+    }
+
+    fn stage_counsel_reply(
+        &mut self,
+        session_id: Uuid,
+        prompt: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.big_picture_open()
+            && self.big_picture_card_visible(session_id)
+            && self.composer_session_id() != Some(session_id)
+        {
+            self.arm_big_picture_card(session_id, cx);
+        }
+        let composer = if self.composer_session_id() == Some(session_id) {
+            &self.composer
+        } else if self.visible_side_chat_id() == Some(session_id)
+            && let Some(chat) = self.side_chat_composers.get(&session_id)
+        {
+            &chat.composer
+        } else {
+            return;
+        };
+        let focus = composer.update(cx, |input, cx| {
+            let existing = input.content(cx);
+            if !existing.starts_with(prompt) {
+                let prefix = format!("{prompt}\n\n");
+                input.replace_range(0..0, &prefix, cx);
+            }
+            input.focus()
+        });
+        window.focus(&focus, cx);
+    }
+}
+
+#[track_caller]
+fn counsel_card_button(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    primary: bool,
+    theme: &Theme,
+) -> Stateful<Div> {
+    let theme = *theme;
+    div()
+        .id(id)
+        .tab_index(0)
+        .role(Role::Button)
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .min_h(px(28.0))
+        .px(px(8.0))
+        .rounded(px(6.0))
+        .border(hairline())
+        .border_color(if primary {
+            theme.accent.opacity(0.55)
+        } else {
+            gpui::transparent_black()
+        })
+        .when(primary, |button| button.bg(theme.accent.opacity(0.14)))
+        .cursor_pointer()
+        .text_size(sp(12.0))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(theme.text)
+        .hover(move |style| {
+            style.bg(if primary {
+                theme.accent.opacity(0.22)
+            } else {
+                theme.overlay
+            })
+        })
+        .focus_visible(move |style| style.bg(theme.focus_highlight()))
+        .aria_label(label)
 }

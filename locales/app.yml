@@ -7781,7 +7781,19 @@ counsel.command_description:
   en: "Open Counsel to discuss what to do next"
 
 counsel.recommendation:
-  en: "Recommended next"
+  en: "Recommendation"
+
+counsel.review:
+  en: "Review"
+
+counsel.collapse:
+  en: "Collapse"
+
+counsel.show_details:
+  en: "Show details"
+
+counsel.more:
+  en: "More"
 
 counsel.saved_later:
   en: "Saved for later"
@@ -7790,31 +7802,43 @@ counsel.dismissed:
   en: "Dismissed"
 
 counsel.approved:
-  en: "Approved · Counsel is delivering"
+  en: "Approved · Awaiting delivery"
+
+counsel.awaiting_delivery:
+  en: "Counsel will send the approved message to Boss."
 
 counsel.delivery_pending:
   en: "Sending to Boss"
 
 counsel.delivery_failed:
-  en: "Send failed"
+  en: "Delivery failed"
+
+counsel.approval_saved:
+  en: "Your approval is saved for this message."
+
+counsel.retry:
+  en: "Ask Counsel to retry"
+
+counsel.retry_prompt:
+  en: "Retry delivery of the approved recommendation to Boss with `goddard-agent boss counsel send %{id} --revision %{revision}`. Use the saved approval for this exact instruction."
 
 counsel.sent:
-  en: "Sent to Boss · queued or in progress"
+  en: "Sent to Boss"
 
 counsel.completed:
-  en: "Completed · reported evidence"
+  en: "Completed"
 
 counsel.approve:
-  en: "Approve"
+  en: "Approve for Boss"
 
 counsel.later:
-  en: "Later"
+  en: "Save for later"
 
 counsel.dismiss:
   en: "Dismiss"
 
 counsel.revise:
-  en: "Revise"
+  en: "Request changes"
 
 counsel.revise_prompt:
   en: "Revise the recommendation “%{title}” (ID %{id}). Use its ID as replaces when proposing the revision. My changes:"
@@ -7824,6 +7848,9 @@ counsel.message_to_boss:
 
 counsel.source:
   en: "Source session"
+
+counsel.sources:
+  en: "Sources"
 
 counsel.open_boss:
   en: "Open Boss"

@@ -619,7 +619,7 @@ pub(super) struct BossUi {
     pub states: HashMap<DaemonKey, BossState>,
     /// Recommendation ids whose "Message to Boss" disclosure is expanded —
     /// view state only, the cards live inline in transcript rows.
-    pub(super) counsel_message_expanded: HashSet<Uuid>,
+    pub(super) counsel_review_expanded: HashMap<Uuid, u64>,
     pin_rows: HashMap<(DaemonKey, Uuid), waku_protocol::instruction_pins::InstructionPin>,
     pin_scope_labels: HashMap<(DaemonKey, Uuid), String>,
     pin_history: HashSet<DaemonKey>,
@@ -859,7 +859,7 @@ impl Default for BossUi {
     fn default() -> Self {
         Self {
             states: HashMap::new(),
-            counsel_message_expanded: HashSet::new(),
+            counsel_review_expanded: HashMap::new(),
             pin_rows: HashMap::new(),
             pin_scope_labels: HashMap::new(),
             pin_history: HashSet::new(),
