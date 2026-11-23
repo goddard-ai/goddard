@@ -1,0 +1,1 @@
+- Fixed Codex model discovery getting stuck when a Windows launcher leaves the App Server running.

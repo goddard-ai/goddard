@@ -2174,11 +2174,8 @@ fn pi_reasoning_options(dialect: PiDialect, model: &Value) -> Vec<ProviderModelO
 
 fn discover_codex_models(binary: &Path) -> Vec<ProviderModel> {
     let mut command = crate::command_env::command(binary);
-    let command = command
-        .args(["app-server", "--listen", "stdio://"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+    command.args(["app-server", "--listen", "stdio://"]);
+    // The provider launcher supplies the stdio pipes.
     let Ok(mut child) = crate::sandbox::spawn(command.command_ref(), None) else {
         return Vec::new();
     };
@@ -2190,12 +2187,10 @@ fn discover_codex_models(binary: &Path) -> Vec<ProviderModel> {
         let _ = child.kill();
         return Vec::new();
     };
-    let Some(stderr) = child.stderr.take() else {
-        let _ = child.kill();
-        return Vec::new();
-    };
-    let stderr_reader = std::thread::spawn(move || {
-        let _ = std::io::copy(&mut std::io::BufReader::new(stderr), &mut std::io::sink());
+    let stderr_reader = child.stderr.take().map(|mut stderr| {
+        std::thread::spawn(move || {
+            let _ = std::io::copy(&mut stderr, &mut std::io::sink());
+        })
     });
     let (tx, rx) = mpsc::channel();
     let reader = std::thread::spawn(move || {
@@ -2254,10 +2249,15 @@ fn discover_codex_models(binary: &Path) -> Vec<ProviderModel> {
             break;
         }
     }
+    // Close input before killing the launcher. On Windows an npm shim can
+    // exit while its Codex child still holds the output pipes open.
+    drop(stdin);
     let _ = child.kill();
     let _ = child.wait();
     let _ = reader.join();
-    let _ = stderr_reader.join();
+    if let Some(stderr_reader) = stderr_reader {
+        let _ = stderr_reader.join();
+    }
     models
 }
 
@@ -3579,6 +3579,33 @@ printf '%s\n' '{"type":"control_response","response":{"request_id":"waku-initial
             Some("kimi-code/k3")
         );
         assert!(parse_kimi_default_model("no default here").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codex_rpc_discovery_returns_models_from_the_app_server() {
+        let binary = write_fake_model_cli(
+            "codex",
+            r#"#!/bin/sh
+printf '%s\n' 'Codex App Server started' >&2
+while IFS= read -r request; do
+  case "$request" in
+    *'"method":"initialize"'*)
+      printf '%s\n' '{"id":0,"result":{}}'
+      ;;
+    *'"method":"model/list"'*)
+      printf '%s\n' '{"id":1,"result":{"data":[{"model":"test-codex-model","displayName":"Test Codex Model"}]}}'
+      ;;
+  esac
+done
+"#,
+        );
+
+        let models = discover_codex_models(&binary);
+        let _ = std::fs::remove_file(binary);
+
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "test-codex-model");
     }
 
     #[test]
