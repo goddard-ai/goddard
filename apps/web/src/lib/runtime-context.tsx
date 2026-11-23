@@ -469,6 +469,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           const latest = queryClient.getQueryData<AgentSession>(
             daemonKeys.session(config.address, saved.id),
           ) ?? saved
+          if (latest.status !== 'idle' || latest.turns.at(-1)?.status !== 'completed') return
           // Daemon-owned entries drain on the daemon's schedule — submitting
           // one here would double-deliver it once the daemon's drain fires.
           const nextQueued = latest.queued_messages?.find(

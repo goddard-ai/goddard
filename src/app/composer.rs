@@ -5788,6 +5788,7 @@ impl Waku {
         let boss_chat = self.is_boss_chat_session(session_id);
         let theme = Theme::current(cx);
         let steerable = self.session_can_steer(session)
+            || (!session.is_busy() && Self::latest_turn_was_user_stopped(session))
             || (session.is_busy()
                 && self
                     .runtimes
@@ -5893,10 +5894,15 @@ impl Waku {
                         theme.text_secondary,
                     ))
                     .child(tr!("composer.steer"))
-                    .tooltip(Tooltip::text_with_action(
-                        tr!("composer.steer_current"),
-                        &crate::input::SubmitSteer,
-                    ))
+                    .when(session.is_busy(), |element| {
+                        element.tooltip(Tooltip::text_with_action(
+                            tr!("composer.steer_current"),
+                            &crate::input::SubmitSteer,
+                        ))
+                    })
+                    .when(!session.is_busy(), |element| {
+                        element.tooltip(Tooltip::text(tr!("composer.send_queued")))
+                    })
                     .on_click(cx.listener(move |this, _, _, cx| {
                         cx.stop_propagation();
                         this.steer_queued_message(session_id, message_id, cx);

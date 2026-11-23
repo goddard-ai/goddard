@@ -1,0 +1,1 @@
+- Stopping a turn keeps follow-up prompts queued. Use Steer to send a queued prompt when you’re ready.

@@ -3470,6 +3470,8 @@ pub struct Waku {
     /// being collected; it then reuses the runtime after the event drain has
     /// re-inserted it.
     pending_queue_drains: Vec<Uuid>,
+    /// Queue entries explicitly selected to start a turn after Stop.
+    stopped_queue_sends: HashMap<Uuid, HashSet<Uuid>>,
     /// Sessions whose retained driver is still settling the cancelled turn on
     /// the wire — the worker is parked inside the in-flight prompt until the
     /// provider finishes killing its foreground work. Submissions during the
@@ -7906,6 +7908,7 @@ impl Waku {
                 escape_stop_confirmation: EscapeStopConfirmation::default(),
                 response_fork_preparations: HashMap::new(),
                 pending_queue_drains: Vec::new(),
+                stopped_queue_sends: HashMap::new(),
                 cancel_drains: HashMap::new(),
                 pending_workspace_cleanups: intent_workspace_cleanups,
                 clean_archive_workspaces: HashSet::new(),

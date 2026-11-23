@@ -3724,6 +3724,8 @@ composer.stop_confirm:
   en: Press Escape again to stop
 composer.steer_current:
   en: Steer current turn
+composer.send_queued:
+  en: Send queued prompt
 composer.continue:
   en: Continue
 composer.continue_queued:

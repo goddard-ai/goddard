@@ -3135,11 +3135,9 @@ impl Backend for WakuBackend {
                     // record below is visible, including any late settlement.
                     driver.clear_user_cancel();
                     self.agent.cancel_resources(session_id);
-                    // Hold parked Boss deliveries until the user's next
+                    // Hold parked deliveries until the user's next
                     // prompt, and publish Stop before the provider can settle.
-                    if self.boss.is_boss_principal(session_id) {
-                        self.agent.note_user_stop(session_id);
-                    }
+                    self.agent.note_user_stop(session_id);
                     // The lifecycle gate keeps provider events behind the
                     // Stop broadcast. Still cancel if transcript persistence
                     // fails: a storage error must not leave the agent running.

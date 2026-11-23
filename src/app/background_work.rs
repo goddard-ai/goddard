@@ -770,9 +770,8 @@ impl Waku {
             cx.notify();
         }
 
-        // A provider that never resolves the cancelled prompt leaves its
-        // drain entry to time out here; queued follow-ups then run against
-        // the driver — dead or alive — rather than waiting forever.
+        // If the provider never acknowledges cancellation, release the
+        // driver gate for any prompt the user explicitly chose to send.
         let expired_drains = self
             .cancel_drains
             .iter()
@@ -781,7 +780,9 @@ impl Waku {
             .collect::<Vec<_>>();
         for session_id in expired_drains {
             self.cancel_drains.remove(&session_id);
-            self.drain_queued_message(session_id, cx);
+            if self.stopped_queue_sends.contains_key(&session_id) {
+                self.drain_queued_message(session_id, cx);
+            }
         }
 
         // A parked turn waits for its provider to wake it, which Claude does

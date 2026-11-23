@@ -336,7 +336,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       await managedGoalSettleRef.current?.(latest);
       return;
     }
-    if (latest.status !== 'idle') return;
+    if (latest.status !== 'idle' || latest.turns.at(-1)?.status !== 'completed') return;
     // Daemon-owned entries drain on the daemon's schedule — submitting one
     // here would double-deliver it once the daemon's drain fires.
     const next = latest.queued_messages?.find((message) => !isAgentQueuedMessage(message));

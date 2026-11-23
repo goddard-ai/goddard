@@ -458,7 +458,7 @@ impl AgentState {
     }
 
     /// Mark the session's turn as stopped by the user — call before
-    /// `driver.cancel()` on a Boss-owned session. The hold keeps queued
+    /// `driver.cancel()`. The hold keeps queued
     /// agent deliveries parked until [`Self::clear_user_stop`], so the
     /// stop's settle cannot drain them into an immediate resume.
     pub fn note_user_stop(&self, session_id: Uuid) {

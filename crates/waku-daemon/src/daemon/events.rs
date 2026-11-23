@@ -821,9 +821,7 @@ pub(super) fn forward_driver_events(
         // same ownership gate as ordinary Stop. A retired driver's latch never
         // reaches this point, so it cannot stop a replacement's turn.
         if driver.take_user_cancel() {
-            if boss.is_boss_principal(session_id) {
-                agent.note_user_stop(session_id);
-            }
+            agent.note_user_stop(session_id);
             let cancelled = DriverEvent::TurnCancelled;
             if let Err(error) = record_boss_event(&task_state, &task_store, session_id, &cancelled)
             {

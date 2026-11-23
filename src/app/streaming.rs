@@ -1266,12 +1266,11 @@ impl Waku {
                 summary,
                 summary_i18n,
             } => {
-                // The cancelled turn's settle is what frees a driver parked
-                // inside its in-flight prompt: follow-ups queued behind the
-                // drain can finally reach it. This clears before the
-                // finished-turn early return — that turn was already closed
-                // by the cancel itself.
-                if allow_queue_drain && self.cancel_drains.remove(&session_id).is_some() {
+                // The acknowledgement frees the driver for an explicit send.
+                if self.cancel_drains.remove(&session_id).is_some()
+                    && allow_queue_drain
+                    && self.stopped_queue_sends.contains_key(&session_id)
+                {
                     self.pending_queue_drains.push(session_id);
                 }
                 self.settle_foreground_work(
@@ -1538,9 +1537,10 @@ impl Waku {
                 }
             }
             DriverEvent::RuntimeLost | DriverEvent::ProcessExited => {
-                // The parked driver died mid-drain: queued follow-ups go to
-                // the fresh runtime the next submission spawns.
-                if allow_queue_drain && self.cancel_drains.remove(&session_id).is_some() {
+                if self.cancel_drains.remove(&session_id).is_some()
+                    && allow_queue_drain
+                    && self.stopped_queue_sends.contains_key(&session_id)
+                {
                     self.pending_queue_drains.push(session_id);
                 }
                 // The runtime a pending project-switch reset would drop is

@@ -7613,7 +7613,6 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> bool {
         self.pending_runtime_operations.remove(&session_id);
-        self.pending_queue_drains.retain(|id| *id != session_id);
         let has_active_turn = self
             .state
             .sessions
@@ -7621,6 +7620,10 @@ impl Waku {
             .find(|session| session.id == session_id)
             .and_then(AgentSession::active_turn_id)
             .is_some();
+        if has_active_turn {
+            self.pending_queue_drains.retain(|id| *id != session_id);
+            self.stopped_queue_sends.remove(&session_id);
+        }
         let previous_kinds = has_active_turn
             .then(|| self.snapshot_selected_transcript_rows(session_id))
             .flatten();
@@ -7654,6 +7657,17 @@ impl Waku {
                 });
             if let Some(session) = self.state.session_mut(session_id) {
                 session.status = SessionStatus::Idle;
+                // Held steer previews return to the queue card, where the
+                // user can send them explicitly after Stop.
+                let queued_ids: HashSet<_> = session
+                    .queued_messages
+                    .iter()
+                    .filter(|message| !message.is_agent_owned())
+                    .map(|message| message.id)
+                    .collect();
+                session
+                    .messages
+                    .retain(|message| !queued_ids.contains(&message.id));
                 if needs_fallback {
                     session.push_notice_message(
                         MessageRole::Assistant,
@@ -7697,6 +7711,8 @@ impl Waku {
     pub(super) fn cancel_session_turn_inner(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         self.cancel_rush_resume(session_id);
         self.escape_stop_confirmation.clear();
+        self.pending_queue_drains.retain(|id| *id != session_id);
+        self.stopped_queue_sends.remove(&session_id);
         if !self.runtimes.contains_key(&session_id)
             && self.state.sessions.iter().any(|session| {
                 session.id == session_id

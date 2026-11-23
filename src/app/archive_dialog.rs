@@ -263,7 +263,14 @@ impl Waku {
         );
         // Queue first: sidebar targets may still need hydration, and a live
         // turn must finish before its cleanup follow-up starts.
-        self.enqueue_follow_up_submission(session_id, ComposerSubmission::plain(prompt), cx);
+        let mut submission = ComposerSubmission::plain(prompt);
+        let queued_id = Uuid::new_v4();
+        submission.queued_id = Some(queued_id);
+        self.stopped_queue_sends
+            .entry(session_id)
+            .or_default()
+            .insert(queued_id);
+        self.enqueue_follow_up_submission(session_id, submission, cx);
         self.drain_queued_message(session_id, cx);
     }
 

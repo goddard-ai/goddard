@@ -11680,6 +11680,80 @@ mod live_employee_approvals {
     }
 
     #[gpui::test]
+    fn stopped_turn_keeps_follow_ups_until_explicit_steer_finishes(cx: &mut gpui::TestAppContext) {
+        let (_env, daemon, _supervisor, view, vcx, session_id, runtime_id) =
+            model_selection_app(cx);
+        let parked = QueuedMessage::new("keep this queued");
+        let steer = QueuedMessage::new("send this first");
+        let steer_id = steer.id;
+        update_app(vcx, &view, |waku, _, cx| {
+            let session = waku.state.session_mut(session_id).unwrap();
+            session.begin_turn("active prompt");
+            session.mark_active_turn_provider_started();
+            session.status = SessionStatus::Working;
+            assert!(append_queued_steer_preview(session, &steer));
+            session.queued_messages = vec![parked, steer];
+            waku.cancel_session_turn(session_id, cx);
+            assert!(waku.session_is_draining_cancel(session_id));
+        });
+        let finish = || {
+            waku_client::event_to_wire(DriverEvent::TurnFinished {
+                success: true,
+                summary: None,
+                summary_i18n: None,
+            })
+            .unwrap()
+        };
+        daemon.send_event(session_id, runtime_id, 1, finish());
+        wait_for(vcx, &view, |waku| {
+            !waku.session_is_draining_cancel(session_id)
+        });
+        update_app(vcx, &view, |waku, _, cx| {
+            waku.drain_queued_message(session_id, cx);
+            let session = waku.state.session_mut(session_id).unwrap();
+            assert_eq!(
+                session.turns.last().unwrap().status,
+                TurnStatus::Interrupted
+            );
+            assert_eq!(session.queued_messages.len(), 2);
+            assert!(session.messages.iter().all(|message| message.id != steer_id));
+            assert_eq!(session.status, SessionStatus::Idle);
+            waku.steer_queued_message(session_id, steer_id, cx);
+        });
+        let sent_count = || {
+            daemon
+                .commands
+                .lock()
+                .iter()
+                .filter(|record| record.executed_prompt)
+                .count()
+        };
+        wait_for(vcx, &view, |waku| {
+            sent_count() == 1
+                && waku.state.sessions.iter().any(|session| {
+                    session.id == session_id
+                        && session
+                            .messages
+                            .iter()
+                            .any(|message| message.content == "send this first")
+                        && session.queued_messages.len() == 1
+                })
+        });
+        daemon.send_event(session_id, runtime_id, 2, finish());
+        wait_for(vcx, &view, |waku| {
+            sent_count() == 2
+                && waku.state.sessions.iter().any(|session| {
+                    session.id == session_id
+                        && session
+                            .messages
+                            .iter()
+                            .any(|message| message.content == "keep this queued")
+                        && session.queued_messages.is_empty()
+                })
+        });
+    }
+
+    #[gpui::test]
     fn queued_prompts_keep_the_configuration_selected_for_each(cx: &mut gpui::TestAppContext) {
         let (_env, daemon, _supervisor, view, vcx, session_id, runtime_id) =
             model_selection_app(cx);

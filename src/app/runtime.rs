@@ -7660,6 +7660,13 @@ impl Waku {
                 .is_some_and(|runtime| runtime.driver.supports_steer())
     }
 
+    pub(super) fn latest_turn_was_user_stopped(session: &AgentSession) -> bool {
+        session.turns.last().is_some_and(|turn| {
+            turn.status == TurnStatus::Interrupted
+                && turn.interruption == Some(waku_protocol::model::TurnInterruption::You)
+        })
+    }
+
     fn retry_deferred_steers(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         let Some(runtime) = self.runtimes.get_mut(&session_id) else {
             return;
@@ -8251,6 +8258,22 @@ impl Waku {
         message_id: Uuid,
         cx: &mut Context<Self>,
     ) {
+        if self.state.sessions.iter().any(|session| {
+            session.id == session_id
+                && !session.is_busy()
+                && Self::latest_turn_was_user_stopped(session)
+                && session
+                    .queued_messages
+                    .iter()
+                    .any(|message| message.id == message_id && !message.is_agent_owned())
+        }) {
+            self.stopped_queue_sends
+                .entry(session_id)
+                .or_default()
+                .insert(message_id);
+            self.drain_queued_message(session_id, cx);
+            return;
+        }
         let Some(message) = self.state.session_mut(session_id).and_then(|session| {
             let index = session
                 .queued_messages
@@ -8300,8 +8323,7 @@ impl Waku {
         self.steer_queued_message(session_id, message_id, cx);
     }
 
-    /// Start the next queued follow-up as a fresh turn. Only called once a
-    /// settled turn has been fully closed, so the session is Idle.
+    /// Start the next eligible follow-up once the session and runtime are ready.
     pub(super) fn drain_queued_message(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         if self.response_fork_preparations.contains_key(&session_id)
             || self.provider_switch_in_flight.contains(&session_id)
@@ -8349,6 +8371,7 @@ impl Waku {
             // Messages parked behind a control-initiated provider start stay
             // queued until that runtime installs.
             || self.control_runtime_starts.contains(&session_id)
+            || self.runtime_attach_pending.contains(&session_id)
             || self.runtimes.get(&session_id).is_some_and(|runtime| runtime.options_in_flight.is_some())
             // Messages submitted while the session moved into a worktree
             // wait for the rebind, then start in the new directory.
@@ -8357,16 +8380,30 @@ impl Waku {
             // the provider's settle to free the driver first.
             || self.session_is_draining_cancel(session_id)
         {
+            if self.runtime_attach_pending.contains(&session_id)
+                || (self.stopped_queue_sends.contains_key(&session_id)
+                    && self.ending_checkpoint_pending(session_id))
+            {
+                self.defer_queue_drain(session_id);
+            }
             return;
         }
         // Daemon-owned entries drain on the daemon's schedule, not this
         // client's — a mirrored agent prompt submitted here would double-
         // deliver once the daemon's own drain fires.
+        let stopped = Self::latest_turn_was_user_stopped(session);
+        let requested = self.stopped_queue_sends.remove(&session_id);
         let Some(message) = self.state.session_mut(session_id).and_then(|session| {
             session
                 .queued_messages
                 .iter()
-                .position(|queued| !queued.is_agent_owned())
+                .position(|queued| {
+                    !queued.is_agent_owned()
+                        && (!stopped
+                            || requested
+                                .as_ref()
+                                .is_some_and(|ids| ids.contains(&queued.id)))
+                })
                 .map(|index| session.queued_messages.remove(index))
         }) else {
             return;
@@ -8785,43 +8822,28 @@ impl Waku {
             .detach();
             return;
         }
-        if self.ending_checkpoint_pending(session_id) {
-            self.enqueue_follow_up_submission(session_id, submission, cx);
-            self.defer_queue_drain(session_id);
-            return;
-        }
-        // A thread control is already starting this session's provider.
-        // Queue the message so it lands on that thread — after the control —
-        // instead of racing a second provider process into existence.
-        if self.control_runtime_starts.contains(&session_id)
+        // Wait for the checkpoint, runtime, workspace, and settings to be
+        // ready before sending. An explicit send after Stop keeps its own
+        // queue entry eligible while the earlier follow-ups stay parked.
+        if self.ending_checkpoint_pending(session_id)
+            || self.control_runtime_starts.contains(&session_id)
             || self.runtime_attach_pending.contains(&session_id)
+            || self.worktree_move_pending.contains(&session_id)
+            || self.session_is_draining_cancel(session_id)
+            || self.runtimes.get(&session_id).is_some_and(|runtime| {
+                runtime.options_in_flight.is_some() || runtime.options_deferred
+            })
         {
-            self.enqueue_follow_up_submission(session_id, submission, cx);
-            self.defer_queue_drain(session_id);
-            return;
-        }
-        // A worktree move is swapping the session's working directory. Queue
-        // the message so the turn starts in the worktree rather than racing
-        // the rebind — the finish path drains once the workspace settles.
-        if self.worktree_move_pending.contains(&session_id) {
-            self.enqueue_follow_up_submission(session_id, submission, cx);
-            self.defer_queue_drain(session_id);
-            return;
-        }
-        // The retained driver is still settling the cancelled turn on the
-        // wire: a prompt sent now would sit unprocessed inside the driver's
-        // command channel. Queue it visibly instead; the settle's arrival
-        // starts the drain.
-        if self.session_is_draining_cancel(session_id) {
-            self.enqueue_follow_up_submission(session_id, submission, cx);
-            self.defer_queue_drain(session_id);
-            return;
-        }
-        if self
-            .runtimes
-            .get(&session_id)
-            .is_some_and(|runtime| runtime.options_in_flight.is_some() || runtime.options_deferred)
-        {
+            if (!submission.hidden || submission.prompt == CONTINUE_PROMPT)
+                && Self::latest_turn_was_user_stopped(session)
+                && !session.is_busy()
+            {
+                let id = *submission.queued_id.get_or_insert_with(Uuid::new_v4);
+                self.stopped_queue_sends
+                    .entry(session_id)
+                    .or_default()
+                    .insert(id);
+            }
             self.enqueue_follow_up_submission(session_id, submission, cx);
             self.defer_queue_drain(session_id);
             return;
