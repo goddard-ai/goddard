@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="goddard-wireframe-version" content="1">
+  <meta name="goddard-wireframe-id" content="counsel-recommendations">
+  <title>Counsel recommendations</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 14px/1.45 var(--wf-font-family, system-ui); }
+    .chat {
+      display: flex;
+      flex-direction: column;
+      padding: 0 16px 14px;
+      background: var(--wf-canvas, Canvas);
+      color: var(--wf-text, CanvasText);
+      --edge: var(--wf-border, #aaa);
+      --paper: var(--wf-surface, Canvas);
+      --well: var(--wf-inset, #eee);
+      --muted: var(--wf-secondary, GrayText);
+      --accent: var(--wf-accent, #315ca8);
+    }
+    .chat-header {
+      padding: 13px 16px 11px;
+      border-bottom: 1px solid var(--edge);
+      margin-inline: -16px;
+    }
+    .chat-header h1 { margin: 0; font-size: 15px; font-weight: 650; }
+    .transcript { display: grid; align-content: start; gap: 12px; padding-block: 16px; }
+    p, h2, h3 { margin: 0; }
+    h2 { font-size: 16px; line-height: 1.3; font-weight: 650; }
+    h3 { font-size: 12px; font-weight: 650; }
+    .you {
+      justify-self: end;
+      max-width: 90%;
+      padding: 8px 11px;
+      border-radius: 9px;
+      background: var(--well);
+    }
+    .recommendation {
+      display: grid;
+      gap: 10px;
+      min-width: 0;
+      padding: 12px;
+      border: 1px solid var(--edge);
+      border-radius: 9px;
+      background: var(--paper);
+    }
+    .active { border-color: color-mix(in srgb, var(--accent) 46%, var(--edge)); }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .spread { justify-content: space-between; }
+    .end { justify-content: flex-end; }
+    .eyebrow, .status { font-size: 12px; color: var(--muted); }
+    .eyebrow { font-weight: 600; }
+    .reason { color: var(--muted); }
+    .actions { padding-top: 9px; border-top: 1px solid var(--edge); }
+    button {
+      min-height: 30px;
+      padding: 4px 9px;
+      border: 1px solid var(--edge);
+      border-radius: 6px;
+      background: var(--paper);
+      color: inherit;
+      font: 600 12px/1.4 var(--wf-font-family, system-ui);
+    }
+    .subtle { border-color: transparent; background: transparent; }
+    .primary {
+      border-color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 18%, var(--paper));
+    }
+    button:focus-visible, textarea:focus-visible {
+      outline: 2px solid var(--wf-info, #315ca8);
+      outline-offset: 2px;
+    }
+    .message {
+      display: grid;
+      gap: 5px;
+      padding: 10px;
+      background: var(--well);
+      border-radius: 6px;
+    }
+    .sources { gap: 4px 8px; }
+    .sources button { padding-inline: 3px; text-decoration: underline; }
+    .receipt {
+      padding: 4px 8px;
+      border: 1px solid var(--edge);
+      text-align: left;
+      color: inherit;
+    }
+    .receipt-title { flex: 1; min-width: 0; }
+    .receipt .status { font-weight: 400; }
+    .composer {
+      width: 100%;
+      min-height: 42px;
+      margin-top: auto;
+      padding: 9px 11px;
+      resize: none;
+      border: 1px solid var(--edge);
+      border-radius: 8px;
+      background: var(--paper);
+      color: inherit;
+      font: inherit;
+    }
+    .composer::placeholder { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <section class="chat" data-wireframe-screen="transcript" aria-label="In the transcript"
+           data-wireframe-width="460" data-wireframe-height="430">
+    <header class="chat-header"><h1>Counsel</h1></header>
+    <div class="transcript" aria-label="Transcript excerpt">
+      <button type="button" class="row receipt" aria-expanded="false"
+              data-wireframe-id="history" aria-label="Completed recommendation, verify the release branch build">
+        <span aria-hidden="true">›</span>
+        <span class="receipt-title">Verify the release branch build</span>
+        <span class="status">Completed</span>
+      </button>
+      <p class="you">What should we sort out before the release?</p>
+      <article class="recommendation active" data-wireframe-id="recommendation"
+               aria-label="Counsel recommendation">
+        <div class="row spread">
+          <span class="eyebrow">Recommendation</span>
+          <!-- More opens a keyboard-operable menu with Save for later and Dismiss. -->
+          <button type="button" class="subtle" aria-haspopup="menu" aria-expanded="false"
+                  data-wireframe-id="more" aria-label="More recommendation actions">More <span aria-hidden="true">⌄</span></button>
+        </div>
+        <h2>Assign an owner for the release checklist</h2>
+        <p class="reason">The checklist has open items and nobody is tracking who will close them.</p>
+        <div class="row end actions">
+          <button type="button" class="primary" aria-expanded="false"
+                  data-wireframe-id="review">Review</button>
+        </div>
+      </article>
+    </div>
+    <textarea class="composer" rows="1" aria-label="Message Counsel" placeholder="Message Counsel"></textarea>
+  </section>
+
+  <section class="chat" data-wireframe-screen="review" aria-label="Review the message"
+           data-wireframe-width="460" data-wireframe-height="580">
+    <header class="chat-header"><h1>Counsel</h1></header>
+    <div class="transcript" aria-label="Transcript excerpt">
+      <button type="button" class="row receipt" aria-expanded="false"
+              data-wireframe-id="history" aria-label="Completed recommendation, verify the release branch build">
+        <span aria-hidden="true">›</span>
+        <span class="receipt-title">Verify the release branch build</span>
+        <span class="status">Completed</span>
+      </button>
+      <p class="you">What should we sort out before the release?</p>
+      <article class="recommendation active" data-wireframe-id="recommendation"
+               aria-label="Counsel recommendation">
+        <div class="row spread">
+          <span class="eyebrow">Recommendation</span>
+          <button type="button" class="subtle" aria-haspopup="menu" aria-expanded="false"
+                  data-wireframe-id="more" aria-label="More recommendation actions">More <span aria-hidden="true">⌄</span></button>
+        </div>
+        <h2>Assign an owner for the release checklist</h2>
+        <p class="reason">The checklist has open items and nobody is tracking who will close them.</p>
+        <div class="message" data-wireframe-id="boss-message" aria-label="Exact instruction to Boss">
+          <h3>Message to Boss</h3>
+          <p>Find an owner for the release checklist. Ask them to verify the remaining items and report any blockers before the release review.</p>
+        </div>
+        <div class="row sources" data-wireframe-id="sources" aria-label="Supporting sessions">
+          <span class="eyebrow">Sources</span>
+          <button type="button" class="subtle">Release prep ↗</button>
+          <button type="button" class="subtle">Checklist audit ↗</button>
+        </div>
+        <div class="row spread actions">
+          <button type="button" class="subtle" aria-expanded="true"
+                  data-wireframe-id="review">Collapse</button>
+          <div class="row end">
+            <!-- Stage a reply in the Counsel composer and retain any existing draft. -->
+            <button type="button" class="subtle" data-wireframe-id="request-changes">Request changes</button>
+            <button type="button" class="primary" data-wireframe-id="approve">Approve for Boss</button>
+          </div>
+        </div>
+      </article>
+    </div>
+    <textarea class="composer" rows="1" aria-label="Message Counsel" placeholder="Message Counsel"></textarea>
+  </section>
+
+  <section class="chat" data-wireframe-screen="approved" aria-label="Approved, awaiting delivery"
+           data-wireframe-width="460" data-wireframe-height="420">
+    <header class="chat-header"><h1>Counsel</h1></header>
+    <div class="transcript" aria-label="Transcript excerpt">
+      <button type="button" class="row receipt" aria-expanded="false"
+              data-wireframe-id="history" aria-label="Completed recommendation, verify the release branch build">
+        <span aria-hidden="true">›</span>
+        <span class="receipt-title">Verify the release branch build</span>
+        <span class="status">Completed</span>
+      </button>
+      <p class="you">What should we sort out before the release?</p>
+      <article class="recommendation" data-wireframe-id="recommendation"
+               aria-label="Approved Counsel recommendation">
+        <p class="eyebrow" role="status" data-wireframe-id="delivery-status">Approved · Awaiting delivery</p>
+        <h2>Assign an owner for the release checklist</h2>
+        <p class="reason">Counsel will send the approved message to Boss.</p>
+        <div class="row end actions">
+          <button type="button" class="subtle" aria-expanded="false"
+                  data-wireframe-id="review">Show details</button>
+        </div>
+      </article>
+    </div>
+    <textarea class="composer" rows="1" aria-label="Message Counsel" placeholder="Message Counsel"></textarea>
+  </section>
+
+  <section class="chat" data-wireframe-screen="failed" aria-label="Delivery failed"
+           data-wireframe-width="460" data-wireframe-height="440">
+    <header class="chat-header"><h1>Counsel</h1></header>
+    <div class="transcript" aria-label="Transcript excerpt">
+      <button type="button" class="row receipt" aria-expanded="false"
+              data-wireframe-id="history" aria-label="Completed recommendation, verify the release branch build">
+        <span aria-hidden="true">›</span>
+        <span class="receipt-title">Verify the release branch build</span>
+        <span class="status">Completed</span>
+      </button>
+      <p class="you">What should we sort out before the release?</p>
+      <article class="recommendation active" data-wireframe-id="recommendation"
+               aria-label="Counsel recommendation with delivery failure">
+        <p class="eyebrow" role="status" data-wireframe-id="delivery-status">Delivery failed</p>
+        <h2>Assign an owner for the release checklist</h2>
+        <p class="reason">Boss was unavailable. Your approval is saved for this message.</p>
+        <div class="row end actions">
+          <button type="button" class="subtle" aria-expanded="false"
+                  data-wireframe-id="review">Show details</button>
+          <!-- Stage a retry request in the Counsel composer for the same approved revision. -->
+          <button type="button" class="primary" data-wireframe-id="retry">Ask Counsel to retry</button>
+        </div>
+      </article>
+    </div>
+    <textarea class="composer" rows="1" aria-label="Message Counsel" placeholder="Message Counsel"></textarea>
+  </section>
+</body>
+</html>
