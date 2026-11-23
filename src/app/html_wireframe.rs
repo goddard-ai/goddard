@@ -7,6 +7,8 @@ use waku_protocol::wireframe_html::HtmlWireframe;
 
 pub(super) struct Preview {
     pub generation: Uuid,
+    pub stale: bool,
+    view_state: Option<(String, serde_json::Value)>,
     pub path: String,
     pub document: Option<HtmlWireframe>,
     pub view: Option<Entity<BrowserView>>,
@@ -33,6 +35,9 @@ struct Envelope {
 #[serde(tag = "type", rename_all = "camelCase")]
 enum Action {
     Ready,
+    ViewState {
+        state: serde_json::Value,
+    },
     Add {
         screen: String,
         anchor: Option<String>,
@@ -89,7 +94,12 @@ fn script_json(value: &serde_json::Value) -> String {
         .replace('\u{2029}', "\\u2029")
 }
 
-fn shell(document: &HtmlWireframe, instance: Uuid, theme: &serde_json::Value) -> String {
+fn shell(
+    document: &HtmlWireframe,
+    instance: Uuid,
+    theme: &serde_json::Value,
+    view_state: Option<&serde_json::Value>,
+) -> String {
     let nonce = Uuid::new_v4().simple().to_string();
     let config = script_json(&serde_json::json!({
         "instance": instance,
@@ -98,6 +108,7 @@ fn shell(document: &HtmlWireframe, instance: Uuid, theme: &serde_json::Value) ->
         "screens": document.screens(),
         "base": waku_protocol::wireframe_html::BASE_STYLES,
         "theme": theme,
+        "viewState": view_state,
     }));
     include_str!("html_wireframe/shell.html")
         .replace("{{css}}", include_str!("html_wireframe/shell.css"))
@@ -171,7 +182,7 @@ impl Waku {
     pub(super) fn html_preview_matches(&self, task: Uuid, path: &str) -> bool {
         self.html_wireframe_preview
             .as_ref()
-            .is_some_and(|p| p.task == task && p.path == path)
+            .is_some_and(|p| !p.stale && p.task == task && p.path == path)
     }
 
     pub(super) fn render_html_wireframe(
@@ -206,7 +217,14 @@ impl Waku {
         let variables = theme_variables(theme);
         if let Some(source) = source {
             let generation = Uuid::new_v4();
+            let view_state = self
+                .html_wireframe_preview
+                .take()
+                .filter(|p| p.task == task && p.path == path)
+                .and_then(|p| p.view_state);
             self.html_wireframe_preview = Some(Preview {
+                stale: false,
+                view_state,
                 path: path.to_owned(),
                 generation,
                 task,
@@ -261,6 +279,11 @@ impl Waku {
 
     fn prepare_html_wireframe(&mut self, source: String, generation: Uuid, cx: &mut Context<Self>) {
         let variables = theme_variables(Theme::current(cx));
+        let view_state = self
+            .html_wireframe_preview
+            .as_ref()
+            .filter(|p| p.generation == generation)
+            .and_then(|p| p.view_state.clone());
         let window_handle = self.window_handle;
         cx.spawn(async move |this, cx| {
             let result = cx
@@ -268,7 +291,11 @@ impl Waku {
                 .spawn(async move {
                     HtmlWireframe::parse(&source)
                         .map(|document| {
-                            let html = shell(&document, generation, &variables);
+                            let state = view_state
+                                .as_ref()
+                                .filter(|(id, _)| id == document.id())
+                                .map(|(_, state)| state);
+                            let html = shell(&document, generation, &variables, state);
                             (document, html)
                         })
                         .map_err(|e| e.to_string())
@@ -279,7 +306,7 @@ impl Waku {
                     let Some(preview) = this.html_wireframe_preview.as_mut() else {
                         return;
                     };
-                    if preview.generation != generation {
+                    if preview.stale || preview.generation != generation {
                         return;
                     }
                     match result {
@@ -322,6 +349,12 @@ impl Waku {
                 .as_ref()
                 .is_none_or(|d| d.id() != envelope.document)
         {
+            return;
+        }
+        if let Action::ViewState { state } = envelope.action {
+            if let Some(preview) = &mut self.html_wireframe_preview {
+                preview.view_state = Some((envelope.document, state));
+            }
             return;
         }
         if matches!(envelope.action, Action::Stage { .. }) {
@@ -379,7 +412,7 @@ impl Waku {
             Action::Read { thread, message } => (Op::Read { thread, message }, None),
             Action::Resolve { thread, resolved } => (Op::Resolve { thread, resolved }, None),
             Action::Ready => (Op::List { offset: 0 }, None),
-            Action::Stage { .. } => return,
+            Action::Stage { .. } | Action::ViewState { .. } => return,
         };
         self.request_wireframe_comments(path.to_owned(), generation, operation, request, cx);
     }
@@ -588,6 +621,7 @@ mod tests {
             &document,
             Uuid::new_v4(),
             &serde_json::json!({"--wf-text": "black"}),
+            None,
         );
         assert!(preview.contains("sandbox=\"allow-same-origin\""));
         assert!(!preview.contains("allow-scripts"));

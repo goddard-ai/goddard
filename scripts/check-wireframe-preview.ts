@@ -23,7 +23,8 @@ const config = {
   html: source.replace("</head>", `<style>aside { background-image: url('probe://blocked/css'); }</style><script>parent.authoredScriptRan=true</script></head>`)
     .replace("</body>", `<img src="probe://blocked/image"></body>`),
   screens: [{ id: "tasks", name: "Tasks populated", width: 960, height: 640,
-    anchors: [{ id: "task-sidebar", label: "Task navigation" }] }],
+    anchors: [{ id: "task-sidebar", label: "Task navigation" }] },
+    { id: "empty", name: "No tasks yet", width: 960, height: 640, anchors: [] }],
   base,
   theme: { "--wf-text": "rgb(11, 22, 33)", "--wf-canvas": "white", "--wf-info": "rgb(40, 100, 200)", "--wf-color-scheme": "light" },
 };

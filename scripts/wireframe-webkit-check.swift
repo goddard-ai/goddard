@@ -104,12 +104,32 @@ threads([saved], request: key)
 check("document.querySelector('#messages').textContent.includes('My reply <literal>') && document.querySelector('textarea').value === ''", "saved reply was not displayed as plain text")
 _ = evaluate("document.querySelector('#stage').click(); true")
 pump()
-guard probe.messages.last?["type"] as? String == "stage" else { fail("explicit feedback staging did not reach the host") }
+guard probe.messages.contains(where: { $0["type"] as? String == "stage" }) else { fail("explicit feedback staging did not reach the host") }
 var orphaned = saved; orphaned["anchor"] = "removed-element"
 threads([orphaned])
 _ = evaluate("document.querySelector('#comments').click(); true")
 check("document.querySelectorAll('.pin').length === 0 && document.querySelector('#threads').textContent.includes('Anchor removed')", "removed anchor lost its discussion or retained an incorrect marker")
 threads([saved])
 check("document.querySelectorAll('.pin').length === 1", "restoring an anchor did not restore its marker")
-print("PASS: WebKit isolation, resource blocking, live theme, persistent markers, reply retry/draft, feedback staging, removed/restored anchors")
+var emptyThread = saved
+emptyThread["screen"] = "empty"
+emptyThread.removeValue(forKey: "anchor")
+threads([emptyThread])
+_ = evaluate("document.querySelector('#threads button').click(); const draftField = document.querySelector('textarea'); draftField.value = 'Draft before reload'; draftField.dispatchEvent(new Event('input')); true")
+pump()
+guard let state = probe.messages.last(where: { $0["type"] as? String == "viewState" })?["state"] else {
+    fail("preview did not report its view state")
+}
+let stateData = try JSONSerialization.data(withJSONObject: state)
+let stateJSON = String(decoding: stateData, as: UTF8.self).replacingOccurrences(of: "<", with: "\\u003c")
+let reloaded = html.replacingOccurrences(of: "const config = {", with: "const config = {\"viewState\":\(stateJSON),")
+probe.messages.removeAll()
+web.loadHTMLString(reloaded, baseURL: nil)
+let reloadDeadline = Date().addingTimeInterval(20)
+while !probe.messages.contains(where: { $0["type"] as? String == "ready" }) && Date() < reloadDeadline { pump() }
+guard probe.messages.contains(where: { $0["type"] as? String == "ready" }) else { fail("reloaded preview did not become ready") }
+threads([emptyThread])
+check("document.querySelector('#screens').value === 'empty' && !document.querySelector('#threads').hidden && !document.querySelector('#anchors').hidden", "reload lost the selected screen or comment controls")
+check("document.querySelector('dialog').open && document.querySelector('textarea').value === 'Draft before reload'", "reload lost the open thread or reply draft")
+print("PASS: WebKit isolation, resource blocking, live theme, persistent markers, reply retry/draft, feedback staging, removed/restored anchors, preview reload state")
 configuration.userContentController.removeScriptMessageHandler(forName: "wireframe")

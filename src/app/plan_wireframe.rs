@@ -230,12 +230,12 @@ impl Waku {
                     return;
                 }
                 if changed
-                    && waku
+                    && let Some(preview) = waku
                         .html_wireframe_preview
-                        .as_ref()
-                        .is_some_and(|p| p.task == session_id)
+                        .as_mut()
+                        .filter(|p| p.task == session_id)
                 {
-                    waku.html_wireframe_preview = None;
+                    preview.stale = true;
                 }
                 if was_selected
                     && !preview.selected

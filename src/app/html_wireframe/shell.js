@@ -23,6 +23,32 @@ let pending = null;
 let retryCounter = 0;
 const drafts = new Map();
 const retries = new Map();
+const comments = document.querySelector('#comments');
+const modeButton = document.querySelector('#comment-mode');
+const newComment = document.querySelector('#new-comment');
+const saved = config.viewState;
+let restoreThread = saved?.dialog?.thread;
+
+function publishViewState() {
+  if (restoreThread) return;
+  const attempt = retries.get(selected || `new:${screen.id}:${newAnchor || ''}`);
+  send({ type: 'viewState', state: {
+    screen: screen.id,
+    commentsOpen: !list.hidden,
+    commentMode,
+    anchor: picker.value,
+    dialog: dialog.open ? {
+      thread: selected, anchor: newAnchor, draft: reply.value,
+      retryKey: attempt?.body === reply.value ? attempt.key : undefined,
+    } : null,
+  } });
+}
+
+function setCommentMode(active) {
+  commentMode = active;
+  modeButton.setAttribute('aria-pressed', String(active));
+  picker.hidden = newComment.hidden = !active;
+}
 
 function send(action) {
   const body = JSON.stringify({ instance: config.instance, document: config.id, ...action });
@@ -68,6 +94,7 @@ function openThread(thread, source) {
   if (!dialog.open) dialog.showModal();
   positionDialog(source);
   reply.focus();
+  publishViewState();
   send({ type: 'read', thread: thread.id, message: thread.messages.at(-1)?.id });
 }
 function openNew(anchor, source) {
@@ -81,9 +108,10 @@ function openNew(anchor, source) {
   if (!dialog.open) dialog.showModal();
   positionDialog(source);
   reply.focus();
+  publishViewState();
 }
 function close() {
-  saveDraft(); dialog.close();
+  saveDraft(); dialog.close(); publishViewState();
   if (opener?.isConnected) opener.focus(); else document.querySelector('#comments').focus();
 }
 function draw() {
@@ -110,7 +138,7 @@ function draw() {
   for (const group of groups.values()) {
     const dot = button('', () => {
       if (group.threads.length === 1) openThread(group.threads[0], dot);
-      else { list.hidden = false; const target = list.querySelector(`[data-thread-index="${threads.indexOf(group.threads[0])}"]`); target?.focus(); }
+      else { list.hidden = false; publishViewState(); const target = list.querySelector(`[data-thread-index="${threads.indexOf(group.threads[0])}"]`); target?.focus(); }
     });
     dot.className = 'pin' + (group.threads.some(t => t.unread) ? ' unread' : '');
     dot.dataset.threadIds = group.threads.map(t => t.id).join(' ');
@@ -153,6 +181,16 @@ function renderList() {
     });
     item.dataset.threadIndex = index; list.append(item);
   }
+  if (restoreThread) {
+    const thread = threads.find(item => item.id === restoreThread);
+    restoreThread = null;
+    if (thread) {
+      drafts.set(thread.id, saved.dialog.draft);
+      if (saved.dialog.retryKey) retries.set(thread.id, { key: saved.dialog.retryKey, body: saved.dialog.draft, draft: thread.id });
+      openThread(thread, list.hidden ? comments : list.children[threads.indexOf(thread)]);
+    }
+    publishViewState();
+  }
   if (!threads.length) list.textContent = 'No comments yet.';
 }
 window.goddardWireframe = {
@@ -174,13 +212,15 @@ window.goddardWireframe = {
   }
 };
 for (const item of config.screens) selector.add(new Option(item.name, item.id));
-selector.onchange = chooseScreen;
-document.querySelector('#comments').onclick = () => { list.hidden = !list.hidden; schedule(); };
-document.querySelector('#comment-mode').onclick = event => {
-  commentMode = !commentMode; event.currentTarget.setAttribute('aria-pressed', String(commentMode));
-  picker.hidden = !commentMode; document.querySelector('#new-comment').hidden = !commentMode;
-};
-document.querySelector('#new-comment').onclick = event => openNew(picker.value || null, event.currentTarget);
+if (config.screens.some(item => item.id === saved?.screen)) selector.value = saved.screen;
+list.hidden = !saved?.commentsOpen;
+setCommentMode(!!saved?.commentMode);
+selector.onchange = () => { restoreThread = null; chooseScreen(); publishViewState(); };
+comments.onclick = () => { list.hidden = !list.hidden; publishViewState(); schedule(); };
+modeButton.onclick = () => { setCommentMode(!commentMode); publishViewState(); };
+picker.onchange = publishViewState;
+reply.oninput = publishViewState;
+newComment.onclick = () => { restoreThread = null; openNew(picker.value || null, newComment); };
 document.querySelector('#close').onclick = close;
 dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
 dialog.addEventListener('click', event => { if (event.target === dialog) { const r = dialog.getBoundingClientRect(); if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) close(); } });
@@ -192,6 +232,7 @@ document.querySelector('#save').onclick = () => {
   retries.set(draft, pending);
   pending.failed = false;
   document.querySelector('#save').disabled = true; reply.disabled = true; status.textContent = 'Saving comment…';
+  publishViewState();
   send({ type: selected ? 'reply' : 'add', thread: selected, screen: screen.id, anchor: newAnchor, body, key: pending.key });
 };
 document.querySelector('#resolve').onclick = () => {
@@ -214,12 +255,26 @@ frame.addEventListener('load', () => {
     // Static controls must never navigate, submit, or replace this document.
     event.preventDefault();
     if (!commentMode) return;
+    restoreThread = null;
     const target = event.target.closest('[data-wireframe-id]');
     openNew(target?.dataset.wireframeId || null, document.querySelector('#comment-mode'));
   }, true);
   doc.addEventListener('scroll', schedule, true);
   new ResizeObserver(schedule).observe(doc.body);
-  chooseScreen(); send({ type: 'ready' });
+  chooseScreen();
+  if (saved?.screen === screen.id) {
+    if (screen.anchors.some(anchor => anchor.id === saved.anchor)) picker.value = saved.anchor;
+    const composer = saved.dialog;
+    if (composer && !composer.thread &&
+        (!composer.anchor || screen.anchors.some(anchor => anchor.id === composer.anchor))) {
+      const key = `new:${screen.id}:${composer.anchor || ''}`;
+      drafts.set(key, composer.draft);
+      if (composer.retryKey) retries.set(key, { key: composer.retryKey, body: composer.draft, draft: key });
+      openNew(composer.anchor, newComment);
+    }
+  }
+  publishViewState();
+  send({ type: 'ready' });
 });
 new ResizeObserver(schedule).observe(document.querySelector('.viewport'));
 window.goddardWireframe.setTheme(config.theme);

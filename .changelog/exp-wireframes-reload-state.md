@@ -1,0 +1,1 @@
+- Wireframe previews keep your selected screen and open comments when an agent updates the file.

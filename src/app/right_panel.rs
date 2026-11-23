@@ -10889,12 +10889,12 @@ impl Waku {
                 }
                 // Any content change — typing, a replace, a reload from disk —
                 // moves the text out from under an open find's match list.
-                if this
+                if let Some(preview) = this
                     .html_wireframe_preview
-                    .as_ref()
-                    .is_some_and(|p| p.path == subscribed_path)
+                    .as_mut()
+                    .filter(|p| p.path == subscribed_path)
                 {
-                    this.html_wireframe_preview = None;
+                    preview.stale = true;
                 }
                 this.refresh_file_search_for_edit(subscribed_path.as_str(), cx);
             },
